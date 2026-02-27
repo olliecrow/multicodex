@@ -1,0 +1,21 @@
+# Agent scratch
+plan/
+
+# Local auth and profile state
+.multicodex/
+multicodex/
+.codex/
+**/auth.json
+**/*.token
+**/*.secret
+**/*.backup
+
+# Local environment files
+.env
+.env.*
+
+# Logs and temp artifacts
+*.log
+tmp/
+multicodex
+.DS_Store
