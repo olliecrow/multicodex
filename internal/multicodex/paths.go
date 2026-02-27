@@ -36,7 +36,7 @@ func ResolvePaths() (Paths, error) {
 	multicodexHome := os.Getenv("MULTICODEX_HOME")
 	if multicodexHome == "" {
 		multicodexHome = defaultMulticodexHome
-		if err := migrateLegacyMulticodexHome(legacyMulticodexHome, multicodexHome, defaultAuthPath); err != nil {
+		if err := migrateLegacyMulticodexHome(legacyMulticodexHome, multicodexHome); err != nil {
 			return Paths{}, err
 		}
 		if err := rewriteMigratedConfigPaths(multicodexHome, legacyMulticodexHome); err != nil {
@@ -57,7 +57,7 @@ func ResolvePaths() (Paths, error) {
 	}, nil
 }
 
-func migrateLegacyMulticodexHome(legacyPath, newPath, defaultAuthPath string) error {
+func migrateLegacyMulticodexHome(legacyPath, newPath string) error {
 	if filepath.Clean(legacyPath) == filepath.Clean(newPath) {
 		return nil
 	}
