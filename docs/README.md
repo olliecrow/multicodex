@@ -1,6 +1,16 @@
 # Docs Directory
 
-This directory holds long-term, agent-focused documentation for this repo. It is not intended for human readers and is committed to git.
+This directory holds long-term contributor documentation for this repo and is committed to git.
+
+## Index
+- `docs/project-overview.md`: high-level project purpose, non-goals, and linked docs.
+- `docs/requirements.md`: product, UX, and technical requirements.
+- `docs/command-spec.md`: command behavior contract and error semantics.
+- `docs/security-and-privacy.md`: secret handling model and repository safety guardrails.
+- `docs/implementation-notes.md`: architecture, state layout, and verification approach.
+- `docs/decisions.md`: durable rationale and decision log.
+- `docs/public-repo-principles.md`: public-readiness and publication standards.
+- `docs/workflows.md`: repo workflow conventions for notes and promotion cycles.
 
 Principles:
 - Keep content evergreen and aligned with the codebase.

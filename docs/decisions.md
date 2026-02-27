@@ -132,3 +132,17 @@ Rationale: A single predictable directory improves safety and operational consis
 Trade-offs: Existing users on the old default path incur a one-time filesystem move when no explicit `MULTICODEX_HOME` is set.
 Enforcement: `ResolvePaths` defaults to `~/multicodex`, performs legacy migration when safe, and tests cover defaulting, migration, and explicit override behavior.
 References: `internal/multicodex/paths.go`, `internal/multicodex/paths_test.go`, `README.md`, `docs/implementation-notes.md`
+
+Decision: Use Go `cmd/` and `internal/` layout for public-facing maintainability while preserving behavior.
+Context: The initial implementation was flat in the repo root and had become harder to scan as command surface and checks expanded.
+Rationale: `cmd/multicodex` for entrypoint and `internal/multicodex` for implementation aligns with common Go conventions and improves contributor onboarding without changing user-visible behavior.
+Trade-offs: File moves add short-term churn in docs and references.
+Enforcement: Entrypoint lives in `cmd/multicodex/main.go`; implementation and tests live in `internal/multicodex`; battletest plus unit/race/vet checks validate parity after refactor.
+References: `cmd/multicodex/main.go`, `internal/multicodex/`, `README.md`, `docs/implementation-notes.md`
+
+Decision: Prefer targeted multicodex state ignore patterns over broad `multicodex/` path ignores.
+Context: After introducing `internal/multicodex`, a broad `multicodex/` ignore rule risked masking source directories and weakening review safety.
+Rationale: Explicit patterns for `config.json`, `profiles/`, and `backups/` retain secret-safety goals without accidentally hiding tracked source files.
+Trade-offs: Slightly longer ignore patterns and doctor guidance.
+Enforcement: `.gitignore` uses targeted patterns; doctor missing-pattern checks accept legacy `.multicodex/` or targeted `multicodex` state patterns; tests assert coverage.
+References: `.gitignore`, `internal/multicodex/doctor.go`, `internal/multicodex/doctor_test.go`, `docs/security-and-privacy.md`
