@@ -2,13 +2,14 @@
 
 ## Implemented architecture
 - Single Go binary with stdlib only.
-- Main command router in `main.go` and `app.go`.
-- Config and profile state in `config.go` and `paths.go`.
-- Command execution and env isolation in `process.go`.
-- Global auth switch backup and restore in `switch_global.go`.
-- Status inspection in `status.go`.
-- Keepalive heartbeat execution in `heartbeat.go`.
-- Non-mutating preflight and preview helpers in `doctor.go` and `dry_run.go`.
+- Entrypoint in `cmd/multicodex/main.go`.
+- Main command router in `internal/multicodex/app.go`.
+- Config and profile state in `internal/multicodex/config.go` and `internal/multicodex/paths.go`.
+- Command execution and env isolation in `internal/multicodex/process.go`.
+- Global auth switch backup and restore in `internal/multicodex/switch_global.go`.
+- Status inspection in `internal/multicodex/status.go`.
+- Keepalive heartbeat execution in `internal/multicodex/heartbeat.go`.
+- Non-mutating preflight and preview helpers in `internal/multicodex/doctor.go` and `internal/multicodex/dry_run.go`.
 
 ## Data layout
 - `~/multicodex/config.json` for profile metadata.

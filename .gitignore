@@ -3,7 +3,9 @@ plan/
 
 # Local auth and profile state
 .multicodex/
-multicodex/
+**/multicodex/config.json
+**/multicodex/profiles/
+**/multicodex/backups/
 .codex/
 **/auth.json
 **/*.token
@@ -17,5 +19,5 @@ multicodex/
 # Logs and temp artifacts
 *.log
 tmp/
-multicodex
+/multicodex
 .DS_Store

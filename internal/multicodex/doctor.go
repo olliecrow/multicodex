@@ -1,4 +1,4 @@
-package main
+package multicodex
 
 import (
 	"context"
@@ -302,8 +302,14 @@ func missingIgnorePatterns(content string) []string {
 		".env.*",
 	}
 	missing := make([]string, 0, len(required)+1)
-	if !containsAnyPattern(content, []string{".multicodex/", "multicodex/"}) {
-		missing = append(missing, ".multicodex/ or multicodex/")
+	hasLegacyMulticodexPattern := strings.Contains(content, ".multicodex/")
+	hasTargetedMulticodexPatterns := containsAnyPattern(content, []string{
+		"multicodex/config.json",
+		"multicodex/profiles/",
+		"multicodex/backups/",
+	})
+	if !hasLegacyMulticodexPattern && !hasTargetedMulticodexPatterns {
+		missing = append(missing, ".multicodex/ or **/multicodex/{config.json,profiles/,backups/}")
 	}
 	for _, pattern := range required {
 		if !strings.Contains(content, pattern) {

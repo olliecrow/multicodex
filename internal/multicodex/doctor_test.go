@@ -1,4 +1,4 @@
-package main
+package multicodex
 
 import (
 	"os"
@@ -125,7 +125,9 @@ func TestMissingIgnorePatterns(t *testing.T) {
 	t.Parallel()
 
 	full := strings.Join([]string{
-		"multicodex/",
+		"**/multicodex/config.json",
+		"**/multicodex/profiles/",
+		"**/multicodex/backups/",
 		".codex/",
 		"**/auth.json",
 		".env",
@@ -142,7 +144,7 @@ func TestMissingIgnorePatterns(t *testing.T) {
 		t.Fatalf("unexpected missing patterns. got=%v want=%v", got, want)
 	}
 
-	minimalNew := "multicodex/\n"
+	minimalNew := "**/multicodex/profiles/\n**/multicodex/backups/\n**/multicodex/config.json\n"
 	got = missingIgnorePatterns(minimalNew)
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected missing patterns for new dir marker. got=%v want=%v", got, want)
