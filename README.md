@@ -25,7 +25,7 @@ If you have more than one Codex subscription account, switching accounts can be 
 Build from source.
 
 ```bash
-go build -o multicodex .
+go build -o multicodex ./cmd/multicodex
 ```
 
 Optional for shell usage.

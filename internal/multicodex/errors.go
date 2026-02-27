@@ -1,4 +1,4 @@
-package main
+package multicodex
 
 // ExitError represents a controlled command exit code.
 type ExitError struct {

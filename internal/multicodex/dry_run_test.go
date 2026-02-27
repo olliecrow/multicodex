@@ -1,4 +1,4 @@
-package main
+package multicodex
 
 import (
 	"path/filepath"
