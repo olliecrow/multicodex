@@ -22,4 +22,6 @@
 - Unit tests for environment and command wrapper behavior.
 - Unit tests for heartbeat success, failure, and timeout behavior.
 - Unit tests for global switch backup and restore behavior.
+- Routine static and race checks with `go vet ./...` and `go test -race ./...`.
+- End-to-end battletest harness in isolated temporary homes using a controlled fake `codex` binary for workflow and failure-mode replay.
 - Manual smoke tests for local and global workflows with temporary homes.

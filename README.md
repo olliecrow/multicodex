@@ -166,6 +166,15 @@ multicodex help heartbeat
 multicodex help completion
 ```
 
+## Development checks
+
+```bash
+go test ./...
+go test -race ./...
+go vet ./...
+go build -o multicodex ./cmd/multicodex
+```
+
 ## Safety model
 
 - Uses official `codex login` flows.
