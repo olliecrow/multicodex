@@ -15,14 +15,16 @@
 - `~/multicodex/config.json` for profile metadata.
 - `~/multicodex/profiles/<name>/` for profile-scoped state.
 - `~/multicodex/backups/default-auth.backup` for original global auth restore when needed.
+- `~/multicodex/heartbeat.lock` for non-overlapping heartbeat runs by default.
 - Legacy `~/.multicodex` is auto-migrated to `~/multicodex` when no explicit `MULTICODEX_HOME` is set.
 
 ## Verification strategy
 - Unit tests for config parsing and profile validation.
 - Unit tests for environment and command wrapper behavior.
-- Unit tests for heartbeat success, failure, and timeout behavior.
+- Unit tests for heartbeat success, failure, timeout, locking, retries, and read-only exec behavior.
 - Unit tests for global switch backup and restore behavior.
 - Routine static and race checks with `go vet ./...` and `go test -race ./...`.
 - End-to-end battletest harness in isolated temporary homes using a controlled fake `codex` binary for workflow and failure-mode replay.
 - Manual smoke tests for local and global workflows with temporary homes.
 - Manual verification of newly added real profiles should use a read-only `codex exec` task inside the target profile and then re-check `multicodex status` to confirm the global default did not change.
+- Manual verification of heartbeat changes should compare the default/global profile before and after `multicodex heartbeat` to confirm refreshes remain profile-local.

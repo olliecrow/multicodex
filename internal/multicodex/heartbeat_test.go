@@ -75,8 +75,47 @@ func TestCmdHeartbeatFailsWhenNoLoggedInProfiles(t *testing.T) {
 	}
 }
 
+func TestCmdHeartbeatSkipsWhenRunAlreadyInProgress(t *testing.T) {
+	app := newHeartbeatTestApp(t, fakeCodexScript{
+		loginStatusByProfile: map[string]fakeStatus{
+			"alpha": {exitCode: 0, output: "Logged in using ChatGPT"},
+		},
+		execByProfile: map[string]fakeStatus{
+			"alpha": {exitCode: 0, output: "ok"},
+		},
+	})
+	createHeartbeatProfiles(t, app, "alpha")
+
+	settings, err := loadHeartbeatSettings(app.store.paths)
+	if err != nil {
+		t.Fatalf("load heartbeat settings: %v", err)
+	}
+	lockFile, acquired, err := acquireHeartbeatLock(settings.LockPath)
+	if err != nil {
+		t.Fatalf("acquire heartbeat lock: %v", err)
+	}
+	if !acquired {
+		t.Fatalf("expected first lock acquisition to succeed")
+	}
+	defer releaseHeartbeatLock(lockFile)
+
+	out, err := captureStdout(t, func() error {
+		return app.cmdHeartbeat(nil)
+	})
+	if err != nil {
+		t.Fatalf("expected skip without error, got %v", err)
+	}
+	if !strings.Contains(out, "already in progress") {
+		t.Fatalf("expected lock skip output, got %q", out)
+	}
+}
+
 func TestRunCodexHeartbeatTimeout(t *testing.T) {
 	root := t.TempDir()
+	profileHome := filepath.Join(root, "profile")
+	if err := os.MkdirAll(profileHome, 0o700); err != nil {
+		t.Fatalf("mkdir profile home: %v", err)
+	}
 	fakeBin := filepath.Join(root, "bin")
 	if err := os.MkdirAll(fakeBin, 0o755); err != nil {
 		t.Fatalf("mkdir fake bin: %v", err)
@@ -108,7 +147,13 @@ exit 1
 	codexHeartbeatTimeout = 150 * time.Millisecond
 	defer func() { codexHeartbeatTimeout = prev }()
 
-	detail, err := runCodexHeartbeat(filepath.Join(root, "profile"))
+	detail, err := runCodexHeartbeat(profileHome, heartbeatSettings{
+		Prompt:   heartbeatPrompt,
+		Timeout:  codexHeartbeatTimeout,
+		Retries:  heartbeatRetryCount,
+		Backoff:  heartbeatBackoff,
+		LockPath: filepath.Join(root, "heartbeat.lock"),
+	})
 	if err == nil {
 		t.Fatalf("expected timeout error")
 	}
@@ -119,6 +164,10 @@ exit 1
 
 func TestRunCodexHeartbeatRedactsCLIOutputOnFailure(t *testing.T) {
 	root := t.TempDir()
+	profileHome := filepath.Join(root, "profile")
+	if err := os.MkdirAll(profileHome, 0o700); err != nil {
+		t.Fatalf("mkdir profile home: %v", err)
+	}
 	fakeBin := filepath.Join(root, "bin")
 	if err := os.MkdirAll(fakeBin, 0o755); err != nil {
 		t.Fatalf("mkdir fake bin: %v", err)
@@ -141,7 +190,13 @@ exit 1
 	}
 	t.Setenv("PATH", fakeBin+":"+os.Getenv("PATH"))
 
-	detail, err := runCodexHeartbeat(filepath.Join(root, "profile"))
+	detail, err := runCodexHeartbeat(profileHome, heartbeatSettings{
+		Prompt:   heartbeatPrompt,
+		Timeout:  codexHeartbeatTimeout,
+		Retries:  heartbeatRetryCount,
+		Backoff:  heartbeatBackoff,
+		LockPath: filepath.Join(root, "heartbeat.lock"),
+	})
 	if err == nil {
 		t.Fatalf("expected failure")
 	}
@@ -150,6 +205,97 @@ exit 1
 	}
 	if !strings.Contains(detail, "exit code 1") {
 		t.Fatalf("expected exit code detail, got %q", detail)
+	}
+}
+
+func TestRunCodexHeartbeatRetriesWithReadOnlyExec(t *testing.T) {
+	root := t.TempDir()
+	fakeBin := filepath.Join(root, "bin")
+	if err := os.MkdirAll(fakeBin, 0o755); err != nil {
+		t.Fatalf("mkdir fake bin: %v", err)
+	}
+
+	attemptsPath := filepath.Join(root, "attempts.txt")
+	argsPath := filepath.Join(root, "args.txt")
+	cwdPath := filepath.Join(root, "cwd.txt")
+	codexPath := filepath.Join(fakeBin, "codex")
+	script := `#!/usr/bin/env bash
+set -euo pipefail
+if [ "${1:-}" = "exec" ]; then
+  printf '%s\n' "$*" > ` + shellQuote(argsPath) + `
+  printf '%s\n' "$PWD" > ` + shellQuote(cwdPath) + `
+  count=0
+  if [ -f ` + shellQuote(attemptsPath) + ` ]; then
+    count="$(cat ` + shellQuote(attemptsPath) + `)"
+  fi
+  count=$((count + 1))
+  printf '%s\n' "$count" > ` + shellQuote(attemptsPath) + `
+  if [ "$count" -eq 1 ]; then
+    exit 1
+  fi
+  echo ok
+  exit 0
+fi
+if [ "${1:-}" = "--version" ]; then
+  echo "codex-cli fake"
+  exit 0
+fi
+exit 1
+`
+	if err := os.WriteFile(codexPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake codex: %v", err)
+	}
+	t.Setenv("PATH", fakeBin+":"+os.Getenv("PATH"))
+
+	profileHome := filepath.Join(root, "profile")
+	if err := os.MkdirAll(profileHome, 0o700); err != nil {
+		t.Fatalf("mkdir profile home: %v", err)
+	}
+
+	detail, err := runCodexHeartbeatWithRetries(profileHome, heartbeatSettings{
+		Prompt:   heartbeatPrompt,
+		Timeout:  codexHeartbeatTimeout,
+		Retries:  1,
+		Backoff:  0,
+		LockPath: filepath.Join(root, "heartbeat.lock"),
+	})
+	if err != nil {
+		t.Fatalf("expected retry success, got %v", err)
+	}
+	if !strings.Contains(detail, "after 2 attempts") {
+		t.Fatalf("expected retry detail, got %q", detail)
+	}
+
+	argsBytes, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatalf("read args: %v", err)
+	}
+	argsText := string(argsBytes)
+	if !strings.Contains(argsText, "--sandbox read-only") {
+		t.Fatalf("expected read-only sandbox args, got %q", argsText)
+	}
+	if !strings.Contains(argsText, "--color never") {
+		t.Fatalf("expected color suppression args, got %q", argsText)
+	}
+	if !strings.Contains(argsText, "exec --skip-git-repo-check --sandbox read-only --color never hello") {
+		t.Fatalf("expected heartbeat prompt args, got %q", argsText)
+	}
+
+	cwdBytes, err := os.ReadFile(cwdPath)
+	if err != nil {
+		t.Fatalf("read cwd: %v", err)
+	}
+	gotCWD := strings.TrimSpace(string(cwdBytes))
+	wantCanonical, err := filepath.EvalSymlinks(profileHome)
+	if err != nil {
+		t.Fatalf("eval want cwd: %v", err)
+	}
+	gotCanonical, err := filepath.EvalSymlinks(gotCWD)
+	if err != nil {
+		t.Fatalf("eval got cwd: %v", err)
+	}
+	if gotCanonical != wantCanonical {
+		t.Fatalf("expected heartbeat cwd %q, got %q", wantCanonical, gotCanonical)
 	}
 }
 
@@ -177,6 +323,7 @@ func newHeartbeatTestApp(t *testing.T, cfg fakeCodexScript) *App {
 	root := t.TempDir()
 	t.Setenv("MULTICODEX_HOME", filepath.Join(root, "multi"))
 	t.Setenv("MULTICODEX_DEFAULT_CODEX_HOME", filepath.Join(root, "codex-default"))
+	t.Setenv("MULTICODEX_HEARTBEAT_BACKOFF_SECONDS", "0")
 
 	fakeBin := filepath.Join(root, "bin")
 	if err := os.MkdirAll(fakeBin, 0o755); err != nil {

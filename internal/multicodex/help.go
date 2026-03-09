@@ -96,7 +96,7 @@ var commandHelpByName = map[string]commandHelp{
 	},
 	"heartbeat": {
 		Usage:       "multicodex heartbeat",
-		Description: "Fire-and-forget keepalive across logged-in profiles with per-profile summary output.",
+		Description: "Fire-and-forget keepalive across logged-in profiles with cron-safe locking, retry/backoff, and per-profile summary output.",
 		Examples: []string{
 			"multicodex heartbeat",
 		},
