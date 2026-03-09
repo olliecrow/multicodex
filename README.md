@@ -137,6 +137,18 @@ multicodex dry-run use personal
 multicodex dry-run run work -- codex login status
 ```
 
+Verify a newly added profile with a real read-only Codex task.
+
+```bash
+multicodex status
+multicodex run work -- codex login status
+multicodex run work -- codex exec -s read-only -C /path/to/repo \
+  "Summarize the README in 3 bullets."
+multicodex status
+```
+
+This confirms the profile can complete an actual request while keeping the global default unchanged.
+
 Send a fire-and-forget keepalive hello to every logged-in profile.
 
 ```bash
