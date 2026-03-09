@@ -7,13 +7,26 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
 var codexHeartbeatTimeout = 60 * time.Second
 
 const heartbeatPrompt = "hello"
+const heartbeatRetryCount = 1
+const heartbeatBackoff = 20 * time.Second
+
+type heartbeatSettings struct {
+	Prompt   string
+	Timeout  time.Duration
+	Retries  int
+	Backoff  time.Duration
+	LockPath string
+}
 
 type heartbeatRow struct {
 	Profile  string
@@ -35,6 +48,21 @@ func (a *App) cmdHeartbeat(args []string) error {
 	if len(cfg.Profiles) == 0 {
 		return &ExitError{Code: 2, Message: "no profiles configured. add one with: multicodex add <name>"}
 	}
+	settings, err := loadHeartbeatSettings(a.store.paths)
+	if err != nil {
+		return &ExitError{Code: 2, Message: err.Error()}
+	}
+
+	lockFile, acquired, err := acquireHeartbeatLock(settings.LockPath)
+	if err != nil {
+		return err
+	}
+	if !acquired {
+		fmt.Println("multicodex heartbeat")
+		fmt.Println("skip: another heartbeat run is already in progress")
+		return nil
+	}
+	defer releaseHeartbeatLock(lockFile)
 
 	names := sortedProfileNames(cfg)
 	rows := make([]heartbeatRow, 0, len(names))
@@ -55,7 +83,7 @@ func (a *App) cmdHeartbeat(args []string) error {
 		}
 		loggedIn++
 		start := time.Now()
-		helloDetail, err := runCodexHeartbeat(profile.CodexHome)
+		helloDetail, err := runCodexHeartbeatWithRetries(profile.CodexHome, settings)
 		elapsed := time.Since(start)
 		if err != nil {
 			failed++
@@ -99,11 +127,49 @@ func (a *App) cmdHeartbeat(args []string) error {
 	return nil
 }
 
-func runCodexHeartbeat(codexHome string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), codexHeartbeatTimeout)
+func runCodexHeartbeatWithRetries(codexHome string, settings heartbeatSettings) (string, error) {
+	maxAttempts := settings.Retries + 1
+	if maxAttempts < 1 {
+		maxAttempts = 1
+	}
+
+	var lastErr error
+	var lastDetail string
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		detail, err := runCodexHeartbeat(codexHome, settings)
+		if err == nil {
+			if attempt > 1 {
+				return fmt.Sprintf("heartbeat sent after %d attempts", attempt), nil
+			}
+			return detail, nil
+		}
+		lastErr = err
+		lastDetail = detail
+
+		if attempt == maxAttempts {
+			return fmt.Sprintf("%s after %d attempts", lastDetail, attempt), lastErr
+		}
+		time.Sleep(settings.Backoff * time.Duration(attempt))
+	}
+	return lastDetail, lastErr
+}
+
+func runCodexHeartbeat(codexHome string, settings heartbeatSettings) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), settings.Timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "codex", "exec", "--skip-git-repo-check", heartbeatPrompt)
+	cmd := exec.CommandContext(
+		ctx,
+		"codex",
+		"exec",
+		"--skip-git-repo-check",
+		"--sandbox",
+		"read-only",
+		"--color",
+		"never",
+		settings.Prompt,
+	)
+	cmd.Dir = codexHome
 	cmd.WaitDelay = 500 * time.Millisecond
 	cmd.Env = withProfileEnv(os.Environ(), codexHome, "")
 
@@ -116,13 +182,109 @@ func runCodexHeartbeat(codexHome string) (string, error) {
 		return "heartbeat sent", nil
 	}
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return fmt.Sprintf("timed out after %s", codexHeartbeatTimeout), err
+		return fmt.Sprintf("timed out after %s", settings.Timeout), err
 	}
 	var ee *exec.ExitError
 	if errors.As(err, &ee) {
 		return fmt.Sprintf("codex exec failed with exit code %d", ee.ExitCode()), err
 	}
 	return "codex exec failed", err
+}
+
+func loadHeartbeatSettings(paths Paths) (heartbeatSettings, error) {
+	settings := heartbeatSettings{
+		Prompt:   heartbeatPrompt,
+		Timeout:  codexHeartbeatTimeout,
+		Retries:  heartbeatRetryCount,
+		Backoff:  heartbeatBackoff,
+		LockPath: filepath.Join(paths.MulticodexHome, "heartbeat.lock"),
+	}
+
+	if value := strings.TrimSpace(os.Getenv("MULTICODEX_HEARTBEAT_PROMPT")); value != "" {
+		settings.Prompt = value
+	}
+
+	timeoutSeconds, err := parsePositiveEnvInt("MULTICODEX_HEARTBEAT_TIMEOUT_SECONDS", int(settings.Timeout/time.Second))
+	if err != nil {
+		return heartbeatSettings{}, err
+	}
+	settings.Timeout = time.Duration(timeoutSeconds) * time.Second
+
+	retries, err := parseNonNegativeEnvInt("MULTICODEX_HEARTBEAT_RETRIES", settings.Retries)
+	if err != nil {
+		return heartbeatSettings{}, err
+	}
+	settings.Retries = retries
+
+	backoffSeconds, err := parseNonNegativeEnvInt("MULTICODEX_HEARTBEAT_BACKOFF_SECONDS", int(settings.Backoff/time.Second))
+	if err != nil {
+		return heartbeatSettings{}, err
+	}
+	settings.Backoff = time.Duration(backoffSeconds) * time.Second
+
+	if value := strings.TrimSpace(os.Getenv("MULTICODEX_HEARTBEAT_LOCK_PATH")); value != "" {
+		settings.LockPath = value
+	}
+
+	return settings, nil
+}
+
+func parsePositiveEnvInt(name string, fallback int) (int, error) {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return fallback, nil
+	}
+	parsed, err := parseNonNegativeEnvInt(name, fallback)
+	if err != nil {
+		return 0, err
+	}
+	if parsed == 0 {
+		return 0, fmt.Errorf("%s must be a positive integer", name)
+	}
+	return parsed, nil
+}
+
+func parseNonNegativeEnvInt(name string, fallback int) (int, error) {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return fallback, nil
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed < 0 {
+		return 0, fmt.Errorf("%s must be a non-negative integer", name)
+	}
+	return parsed, nil
+}
+
+func acquireHeartbeatLock(path string) (*os.File, bool, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, false, fmt.Errorf("create heartbeat lock dir: %w", err)
+	}
+
+	lockFile, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, false, fmt.Errorf("open heartbeat lock: %w", err)
+	}
+	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		_ = lockFile.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("acquire heartbeat lock: %w", err)
+	}
+
+	if err := lockFile.Truncate(0); err == nil {
+		_, _ = lockFile.WriteString(fmt.Sprintf("%d\n", os.Getpid()))
+	}
+	return lockFile, true, nil
+}
+
+func releaseHeartbeatLock(lockFile *os.File) {
+	if lockFile == nil {
+		return
+	}
+	_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+	_ = lockFile.Close()
 }
 
 func heartbeatSkipDetail(state, detail string) string {

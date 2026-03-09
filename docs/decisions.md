@@ -153,3 +153,10 @@ Rationale: A small read-only `codex exec` smoke test catches broken profile wiri
 Trade-offs: Uses a small amount of real model usage during verification.
 Enforcement: For manual profile verification, run `multicodex run <name> -- codex exec -s read-only -C <repo> ...` and confirm `multicodex status` reports the same global default before and after the test.
 References: `README.md`, `docs/implementation-notes.md`, `docs/command-spec.md`
+
+Decision: Make heartbeat cron-safe with local locking, bounded retries, and read-only execution.
+Context: Scheduled keepalive runs should not overlap, should tolerate transient failures, and should never need to mutate the current workspace or the global default Codex account.
+Rationale: A local OS lock avoids duplicate overlapping work, one retry with linear backoff handles short-lived provider hiccups, and forcing `codex exec` into read-only mode reduces accidental side effects during automated refresh runs.
+Trade-offs: Slightly more heartbeat code and a small delay before final failure when retries are used.
+Enforcement: `multicodex heartbeat` acquires a non-blocking lock under multicodex home, retries failed profile heartbeats, runs `codex exec` with `--sandbox read-only`, and keeps all auth routing profile-scoped via `CODEX_HOME`.
+References: `internal/multicodex/heartbeat.go`, `internal/multicodex/heartbeat_test.go`, `README.md`, `docs/command-spec.md`

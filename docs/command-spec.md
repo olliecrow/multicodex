@@ -56,10 +56,14 @@
 - Includes which profile is current global default when known.
 
 `multicodex heartbeat`
-- Runs a minimal `codex exec --skip-git-repo-check hello` keepalive for each logged-in profile.
+- Runs a minimal read-only `codex exec --skip-git-repo-check hello` keepalive for each logged-in profile.
 - Skips profiles that are currently logged out.
+- Uses a non-blocking local lock so overlapping heartbeat runs are skipped instead of overlapping.
+- Retries failed logged-in profile heartbeats with linear backoff by default.
 - Prints per-profile result rows and a final summary.
 - Returns non-zero when no logged-in profiles are found or when any logged-in profile heartbeat fails.
+- Leaves the global default auth pointer untouched.
+- Supports environment overrides for timeout, retries, backoff, prompt, and lock path.
 
 `multicodex doctor`
 - Runs non-mutating setup and auth checks.

@@ -10,6 +10,7 @@
 - User can explicitly switch global default Codex account.
 - Status view shows status for all configured profiles.
 - User can run a fire-and-forget keepalive heartbeat across logged-in profiles.
+- Heartbeat must remain profile-local and must not switch the system default Codex account.
 - User can run a non-mutating doctor check.
 - User can run dry-run previews for key operations.
 - User can install shell tab-completion for command names and profile names.
@@ -27,6 +28,7 @@
 - File permissions locked down for local auth data.
 - Robust handling across terminal widths for command output.
 - Default persistent multicodex state should live in a single home-level directory (`~/multicodex`) for cross-checkout consistency.
+- Heartbeat should be safe for cron use with overlap protection and bounded retry behavior.
 
 ## Compatibility requirements
 - Compatible with official Codex CLI login flows.

@@ -155,7 +155,25 @@ Send a fire-and-forget keepalive hello to every logged-in profile.
 multicodex heartbeat
 ```
 
-For periodic refresh, add this command to your cron schedule.
+Heartbeat runs stay profile-local: they use each profile's `CODEX_HOME`, run `codex exec` in read-only mode, and do not switch the global default account.
+
+For cron use, heartbeat also:
+- skips overlapping runs via a lock file under `~/multicodex`
+- retries failed profile heartbeats once with linear backoff by default
+- keeps failure output redacted to avoid leaking raw CLI details
+
+Optional environment overrides:
+- `MULTICODEX_HEARTBEAT_TIMEOUT_SECONDS`
+- `MULTICODEX_HEARTBEAT_RETRIES`
+- `MULTICODEX_HEARTBEAT_BACKOFF_SECONDS`
+- `MULTICODEX_HEARTBEAT_PROMPT`
+- `MULTICODEX_HEARTBEAT_LOCK_PATH`
+
+For periodic refresh, add this command to your cron schedule, for example:
+
+```bash
+0 */6 * * * PATH=/path/to/bin:$PATH; multicodex heartbeat >> /path/to/logs/heartbeat-cron.log 2>&1
+```
 
 Enable tab autocomplete.
 
