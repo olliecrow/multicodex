@@ -146,3 +146,10 @@ Rationale: Explicit patterns for `config.json`, `profiles/`, and `backups/` reta
 Trade-offs: Slightly longer ignore patterns and doctor guidance.
 Enforcement: `.gitignore` uses targeted patterns; doctor missing-pattern checks accept legacy `.multicodex/` or targeted `multicodex` state patterns; tests assert coverage.
 References: `.gitignore`, `internal/multicodex/doctor.go`, `internal/multicodex/doctor_test.go`, `docs/security-and-privacy.md`
+
+Decision: Verify newly added profiles with a real read-only Codex request and a follow-up default-profile check.
+Context: `codex login status` proves auth is present, but it does not prove the profile can complete an actual request or that profile-scoped execution left the default/global profile untouched.
+Rationale: A small read-only `codex exec` smoke test catches broken profile wiring and accidental global-switch regressions with minimal risk.
+Trade-offs: Uses a small amount of real model usage during verification.
+Enforcement: For manual profile verification, run `multicodex run <name> -- codex exec -s read-only -C <repo> ...` and confirm `multicodex status` reports the same global default before and after the test.
+References: `README.md`, `docs/implementation-notes.md`, `docs/command-spec.md`

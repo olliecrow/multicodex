@@ -25,3 +25,4 @@
 - Routine static and race checks with `go vet ./...` and `go test -race ./...`.
 - End-to-end battletest harness in isolated temporary homes using a controlled fake `codex` binary for workflow and failure-mode replay.
 - Manual smoke tests for local and global workflows with temporary homes.
+- Manual verification of newly added real profiles should use a read-only `codex exec` task inside the target profile and then re-check `multicodex status` to confirm the global default did not change.
