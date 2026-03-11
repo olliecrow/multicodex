@@ -101,7 +101,7 @@ _multicodex_complete() {
             return 0
             ;;
           help)
-            COMPREPLY=( $(compgen -W "doctor tui" -- "$cur") )
+            COMPREPLY=( $(compgen -W "doctor completion tui" -- "$cur") )
             return 0
             ;;
           tui)
@@ -133,7 +133,7 @@ _multicodex_complete() {
       ;;
     help)
       if (( COMP_CWORD == 2 )); then
-        COMPREPLY=( $(compgen -W "init add login login-all use run switch-global status heartbeat monitor doctor dry-run completion version help monitor\ doctor" -- "$cur") )
+        COMPREPLY=( $(compgen -W "init add login login-all use run switch-global status heartbeat monitor doctor dry-run completion version help monitor\ doctor monitor\ completion" -- "$cur") )
         return 0
       fi
       ;;
@@ -212,7 +212,7 @@ _multicodex_complete() {
           return
           ;;
         help)
-          compadd -- doctor tui
+          compadd -- doctor completion tui
           return
           ;;
         tui)
@@ -243,7 +243,7 @@ _multicodex_complete() {
       ;;
     help)
       if (( CURRENT == 3 )); then
-        compadd -- init add login login-all use run switch-global status heartbeat monitor doctor dry-run completion version help
+        compadd -- init add login login-all use run switch-global status heartbeat monitor doctor dry-run completion version help "monitor doctor" "monitor completion"
         return
       fi
       ;;

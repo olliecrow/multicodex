@@ -33,7 +33,7 @@ var commandSummaries = []struct {
 	{Name: "dry-run [operation]", Summary: "print planned operations without mutating state"},
 	{Name: "completion <shell>", Summary: "print shell completion script for bash, zsh, or fish"},
 	{Name: "version", Summary: "print multicodex version"},
-	{Name: "help [command]", Summary: "show global or command-specific help"},
+	{Name: "help [command [subcommand]]", Summary: "show global or command-specific help"},
 }
 
 var commandHelpByName = map[string]commandHelp{
@@ -194,7 +194,7 @@ func printHelp() {
 	fmt.Println(`  eval "$(multicodex completion zsh)"`)
 	fmt.Println()
 	fmt.Println("Help:")
-	fmt.Println("  multicodex help <command>")
+	fmt.Println("  multicodex help <command> [subcommand]")
 	fmt.Println()
 	fmt.Println("Notes:")
 	fmt.Println("  - default behavior is local-first and does not change your system default session")
@@ -250,6 +250,8 @@ func normalizeHelpTopic(s string) string {
 		return "version"
 	case "monitor-doctor", "monitor/doctor":
 		return "monitor doctor"
+	case "monitor-completion", "monitor/completion":
+		return "monitor completion"
 	default:
 		return s
 	}

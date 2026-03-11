@@ -167,3 +167,10 @@ Rationale: One product with a dedicated `monitor` namespace matches the real use
 Trade-offs: The repo and CLI gain more code and dependencies, so the monitor must stay modular and avoid bloating the root command surface.
 Enforcement: The integrated monitor lives under `internal/monitor/`; the primary user entrypoint is `multicodex monitor`; monitor account discovery prefers multicodex profiles and `~/multicodex/monitor/accounts.json`, with legacy monitor account-file paths retained as compatibility fallbacks.
 References: `internal/multicodex/monitor.go`, `internal/monitor/usage/accounts.go`, `internal/monitor/tui/model.go`, `README.md`, `docs/command-spec.md`, `docs/implementation-notes.md`
+
+Decision: Preserve standalone monitor command habits where they materially reduce migration friction.
+Context: After merging the standalone usage monitor into multicodex, users may still reach for familiar monitor-specific commands such as `completion` and nested help topics.
+Rationale: Keeping a small compatibility layer under `multicodex monitor` avoids avoidable dead ends during migration while still steering users toward one unified product.
+Trade-offs: Slightly more command-surface and completion/help maintenance.
+Enforcement: `multicodex monitor completion [shell]` remains available as a compatibility alias with bash default; help topics and shell completion include nested monitor topics such as `monitor doctor` and `monitor completion`.
+References: `internal/multicodex/monitor.go`, `internal/multicodex/help.go`, `internal/multicodex/completion.go`, `internal/multicodex/monitor_test.go`, `README.md`, `docs/command-spec.md`
