@@ -74,6 +74,8 @@
 - Runs a live terminal UI for Codex subscription usage across compatible local accounts.
 - Defaults to the integrated monitor UI when no monitor subcommand is provided.
 - Prefers account definitions from multicodex profile config and monitor-owned account overrides.
+- Shows account labels instead of raw email addresses in the TUI when labels are available.
+- Keeps tracked timestamps in UTC internally while rendering user-facing TUI timestamps in local time without seconds.
 - Continues to support legacy monitor account-file locations as a compatibility fallback.
 - Remains read-only with respect to Codex account state.
 

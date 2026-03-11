@@ -174,3 +174,10 @@ Rationale: Keeping a small compatibility layer under `multicodex monitor` avoids
 Trade-offs: Slightly more command-surface and completion/help maintenance.
 Enforcement: `multicodex monitor completion [shell]` remains available as a compatibility alias with bash default; explicit UI alias `multicodex monitor tui` remains help-addressable; help topics and shell completion include nested monitor topics such as `monitor doctor`, `monitor completion`, and `monitor tui`.
 References: `internal/multicodex/monitor.go`, `internal/multicodex/help.go`, `internal/multicodex/completion.go`, `internal/multicodex/monitor_test.go`, `README.md`, `docs/command-spec.md`
+
+Decision: Present monitor identities and timestamps for operator readability while keeping internal timekeeping canonical.
+Context: The monitor aggregates account usage across multiple Codex homes, but raw email addresses and UTC timestamps with seconds make the TUI harder to scan during live account selection.
+Rationale: Showing configured account labels instead of emails keeps the UI aligned with the names users chose in multicodex, and rendering user-facing timestamps in local time at minute precision improves readability without changing internal UTC tracking.
+Trade-offs: Duplicate or missing account labels can still make the display ambiguous, so the UI falls back to stable account or user IDs when labels are unavailable; local rendering means screenshots differ across operator time zones.
+Enforcement: `internal/monitor/tui/model.go` renders window titles and account summaries from labels first, keeps active-account matching keyed off stable identity fields, and formats user-facing timestamps in local time without seconds; `internal/monitor/tui/model_test.go` asserts label-first titles and local-time header/reset formatting.
+References: `internal/monitor/tui/model.go`, `internal/monitor/tui/model_test.go`, `README.md`, `docs/command-spec.md`

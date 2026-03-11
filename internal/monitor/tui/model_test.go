@@ -131,16 +131,16 @@ func TestViewRendersAggregatedTokenSection(t *testing.T) {
 	}
 }
 
-func TestWindowTitlesShowAccountEmailAndMetaOmitsCurrentAccountLine(t *testing.T) {
+func TestWindowTitlesShowAccountNameAndMetaOmitsCurrentAccountLine(t *testing.T) {
 	m := seededModel()
 	m.width = 120
 	m.height = 30
 	out := m.View()
-	if !strings.Contains(out, "five-hour window [me@example.com]") {
-		t.Fatalf("expected five-hour title to include account email")
+	if !strings.Contains(out, "five-hour window [me]") {
+		t.Fatalf("expected five-hour title to include account name")
 	}
-	if !strings.Contains(out, "weekly window [me@example.com]") {
-		t.Fatalf("expected weekly title to include account email")
+	if !strings.Contains(out, "weekly window [me]") {
+		t.Fatalf("expected weekly title to include account name")
 	}
 	if strings.Contains(out, "current account:") {
 		t.Fatalf("did not expect current account line in bottom metadata panel")
@@ -154,8 +154,8 @@ func TestWindowPanelsShowUnavailableWhenActiveWindowDataMissing(t *testing.T) {
 	m.summary.WindowDataAvailable = false
 	m.summary.AccountEmail = ""
 	out := m.View()
-	if !strings.Contains(out, "five-hour window [unavailable]") {
-		t.Fatalf("expected unavailable marker in five-hour title")
+	if !strings.Contains(out, "five-hour window [me]") {
+		t.Fatalf("expected active account name in five-hour title")
 	}
 	if !strings.Contains(out, "used: unavailable") {
 		t.Fatalf("expected unavailable used value")
@@ -197,7 +197,7 @@ func TestMultiAccountViewRendersOneWindowRowPerAccount(t *testing.T) {
 	if strings.Count(out, "weekly window [") != 3 {
 		t.Fatalf("expected one weekly row per account, got:\n%s", out)
 	}
-	if strings.Index(out, "five-hour window [me@example.com]") >= strings.Index(out, "five-hour window [alpha@example.com]") {
+	if strings.Index(out, "five-hour window [me]") >= strings.Index(out, "five-hour window [alpha]") {
 		t.Fatalf("expected active account row to stay above additional account rows")
 	}
 }
@@ -214,8 +214,8 @@ func TestMultiAccountViewDoesNotDuplicateFailedActiveAccountRow(t *testing.T) {
 	if strings.Count(out, "five-hour window [") != 3 {
 		t.Fatalf("expected unavailable active row plus two non-active rows, got:\n%s", out)
 	}
-	if strings.Contains(out, "five-hour window [me@example.com]") {
-		t.Fatalf("did not expect failed active account to also render as an extra per-account row")
+	if strings.Count(out, "five-hour window [me]") != 1 {
+		t.Fatalf("expected failed active account to appear exactly once, got:\n%s", out)
 	}
 }
 
@@ -231,25 +231,25 @@ func TestMultiAccountShortViewportKeepsAggregatePanelVisible(t *testing.T) {
 	if !strings.Contains(out, "weekly tokens [") {
 		t.Fatalf("expected weekly aggregate section to remain visible, got:\n%s", out)
 	}
-	if strings.Contains(out, "five-hour window [bravo@example.com]") {
+	if strings.Contains(out, "five-hour window [bravo]") {
 		t.Fatalf("expected extra account rows to yield before the aggregate panel in a short viewport")
 	}
 }
 
-func TestAccountsLineShowsDetectedAndIdentifiers(t *testing.T) {
+func TestAccountsLineShowsDetectedAndNames(t *testing.T) {
 	m := seededModel()
 	m.width = 140
 	m.height = 28
 	m.summary.TotalAccounts = 3
 	m.summary.Accounts = []usage.AccountSummary{
-		{AccountEmail: "a@example.com"},
-		{AccountID: "acc-123"},
+		{Label: "alpha", AccountEmail: "a@example.com"},
+		{Label: "bravo", AccountID: "acc-123"},
 		{},
 	}
 
 	out := m.View()
-	if !strings.Contains(out, "accounts: 3 detected [a@example.com, account_id:acc-123, unidentified]") {
-		t.Fatalf("expected detected-account identity list in accounts line, got:\n%s", out)
+	if !strings.Contains(out, "accounts: 3 detected [alpha, bravo, unidentified]") {
+		t.Fatalf("expected detected-account name list in accounts line, got:\n%s", out)
 	}
 }
 
@@ -257,8 +257,8 @@ func TestAccountsLineTruncatesWithDots(t *testing.T) {
 	m := seededModel()
 	m.summary.TotalAccounts = 2
 	m.summary.Accounts = []usage.AccountSummary{
-		{AccountEmail: "very.long.first.account@example.com"},
-		{AccountEmail: "very.long.second.account@example.com"},
+		{Label: "very-long-first-account-name"},
+		{Label: "very-long-second-account-name"},
 	}
 
 	line := m.renderAccountsLine(40)
@@ -378,7 +378,7 @@ func TestWindowPanelCompactsResetLineIntoBracketedCountdown(t *testing.T) {
 	m.width = 100
 	m.height = 20
 	out := m.renderBody()
-	if !strings.Contains(out, "resets at: 2026-02-26 16:30:00 UTC [1h30m]") {
+	if !strings.Contains(out, "resets at: 2026-02-26 11:30 [1h30m]") {
 		t.Fatalf("expected compact reset line in window panel")
 	}
 	if strings.Contains(out, "resets in:") {
@@ -454,7 +454,7 @@ func TestHeaderIncludesRefreshBracketOnTopLine(t *testing.T) {
 	}
 }
 
-func TestHeaderRetainsUTCTimestampAtNarrowWidth(t *testing.T) {
+func TestHeaderShowsLocalTimestampWithoutSecondsAtNarrowWidth(t *testing.T) {
 	m := seededModel()
 	m.width = 58
 	header := m.renderHeader()
@@ -462,8 +462,11 @@ func TestHeaderRetainsUTCTimestampAtNarrowWidth(t *testing.T) {
 	if len(lines) != 1 {
 		t.Fatalf("expected single-line header")
 	}
-	if !strings.Contains(lines[0], "utc 2026-02-26 15:00:00") {
-		t.Fatalf("expected narrow header to retain utc timestamp, got: %q", lines[0])
+	if !strings.Contains(lines[0], "local 2026-02-26 10:00") {
+		t.Fatalf("expected narrow header to show local timestamp, got: %q", lines[0])
+	}
+	if strings.Contains(lines[0], ":00:") {
+		t.Fatalf("did not expect seconds in header timestamp, got: %q", lines[0])
 	}
 	if lipgloss.Width(lines[0]) > m.width {
 		t.Fatalf("header line exceeded width")
@@ -533,9 +536,10 @@ func seededModel() Model {
 	sec1 := int64(90 * 60)
 	sec2 := int64(7 * 24 * 60 * 60)
 	m := NewModel(Options{
-		Interval: 15 * time.Second,
-		Timeout:  8 * time.Second,
-		NoColor:  true,
+		Interval:        15 * time.Second,
+		Timeout:         8 * time.Second,
+		NoColor:         true,
+		DisplayLocation: time.FixedZone("test-local", -5*60*60),
 		Fetch: func(_ context.Context) (*usage.Summary, error) {
 			return nil, nil
 		},
@@ -550,6 +554,7 @@ func seededModel() Model {
 		Source:              "app-server",
 		PlanType:            "pro",
 		AccountEmail:        "me@example.com",
+		WindowAccountLabel:  "me",
 		WindowDataAvailable: true,
 		PrimaryWindow: usage.WindowSummary{
 			UsedPercent:       41,
