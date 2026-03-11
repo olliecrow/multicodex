@@ -238,6 +238,7 @@ multicodex help
 multicodex help heartbeat
 multicodex help monitor
 multicodex help monitor doctor
+multicodex help monitor completion
 multicodex help completion
 ```
 
