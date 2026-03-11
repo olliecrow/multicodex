@@ -10,6 +10,7 @@ This directory holds long-term contributor documentation for this repo and is co
 - `docs/implementation-notes.md`: architecture, state layout, and verification approach.
 - `docs/decisions.md`: durable rationale and decision log.
 - `docs/public-repo-principles.md`: public-readiness and publication standards.
+- `docs/untrusted-third-party-repos.md`: static-analysis-only policy for external repository snapshots.
 - `docs/workflows.md`: repo workflow conventions for notes and promotion cycles.
 
 Principles:
