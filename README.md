@@ -103,6 +103,7 @@ multicodex status
 multicodex heartbeat
 multicodex monitor [flags]
 multicodex monitor doctor [--json] [--timeout 20s]
+multicodex monitor completion [shell]
 multicodex doctor [--json] [--timeout 8s]
 multicodex dry-run [operation]
 multicodex completion <bash|zsh|fish>
@@ -190,6 +191,7 @@ Monitor live subscription usage across your configured and discovered accounts.
 multicodex monitor
 multicodex monitor --interval 30s
 multicodex monitor doctor
+multicodex monitor completion
 ```
 
 Monitor account resolution order:
@@ -201,6 +203,8 @@ Monitor account resolution order:
 Legacy account-file paths are still read when the new multicodex monitor file is absent:
 - `~/codex-usage-monitor/accounts.json`
 - `~/.codex-usage-monitor/accounts.json`
+
+For migration convenience, `multicodex monitor completion [shell]` is also supported and defaults to bash, matching the old standalone monitor habit.
 
 Example manual monitor account file:
 

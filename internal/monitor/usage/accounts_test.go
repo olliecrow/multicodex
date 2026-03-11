@@ -183,6 +183,30 @@ func TestResolveAccountsFilePathUsesLegacyWhenDefaultMissing(t *testing.T) {
 	}
 }
 
+func TestResolveAccountsFilePathUsesHiddenLegacyWhenVisibleLegacyMissing(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv(multicodexHomeEnvVar, filepath.Join(tmp, defaultMulticodexHomeDirName))
+	t.Setenv(accountsFileEnvVar, "")
+
+	legacyDir := filepath.Join(tmp, legacyHiddenMonitorDirName)
+	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
+		t.Fatalf("mkdir hidden legacy dir: %v", err)
+	}
+	legacyFile := filepath.Join(legacyDir, defaultAccountsFileName)
+	if err := os.WriteFile(legacyFile, []byte(`{"version":1,"accounts":[]}`), 0o600); err != nil {
+		t.Fatalf("write hidden legacy accounts file: %v", err)
+	}
+
+	path, err := resolveAccountsFilePath()
+	if err != nil {
+		t.Fatalf("resolve accounts file path: %v", err)
+	}
+	if path != legacyFile {
+		t.Fatalf("expected hidden legacy path %q, got %q", legacyFile, path)
+	}
+}
+
 func TestResolveAccountsFilePathPrefersDefaultDir(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)

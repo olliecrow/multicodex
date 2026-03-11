@@ -28,6 +28,7 @@ var commandSummaries = []struct {
 	{Name: "heartbeat", Summary: "send a minimal keepalive hello for logged-in profiles"},
 	{Name: "monitor [flags]", Summary: "show live subscription usage across accounts"},
 	{Name: "monitor doctor [flags]", Summary: "check usage-monitor data sources"},
+	{Name: "monitor completion [shell]", Summary: "print shell completion script"},
 	{Name: "doctor [--json] [--timeout 8s]", Summary: "run non-mutating setup and auth checks"},
 	{Name: "dry-run [operation]", Summary: "print planned operations without mutating state"},
 	{Name: "completion <shell>", Summary: "print shell completion script for bash, zsh, or fish"},
@@ -118,6 +119,14 @@ var commandHelpByName = map[string]commandHelp{
 		Examples: []string{
 			"multicodex monitor doctor",
 			"multicodex monitor doctor --json",
+		},
+	},
+	"monitor completion": {
+		Usage:       "multicodex monitor completion [bash|zsh|fish]",
+		Description: "Compatibility alias for shell completion setup. This prints the full multicodex completion script and defaults to bash when no shell is provided.",
+		Examples: []string{
+			"multicodex monitor completion",
+			"multicodex monitor completion zsh",
 		},
 	},
 	"doctor": {

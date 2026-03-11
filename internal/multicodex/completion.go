@@ -87,11 +87,15 @@ _multicodex_complete() {
       ;;
     monitor)
       if (( COMP_CWORD == 2 )); then
-        COMPREPLY=( $(compgen -W "doctor help tui --interval --timeout --no-color --no-alt-screen" -- "$cur") )
+        COMPREPLY=( $(compgen -W "doctor completion help tui --interval --timeout --no-color --no-alt-screen" -- "$cur") )
         return 0
       fi
       if (( COMP_CWORD >= 3 )); then
         case "${COMP_WORDS[2]}" in
+          completion)
+            COMPREPLY=( $(compgen -W "bash zsh fish" -- "$cur") )
+            return 0
+            ;;
           doctor)
             COMPREPLY=( $(compgen -W "--json --timeout" -- "$cur") )
             return 0
@@ -105,7 +109,7 @@ _multicodex_complete() {
             return 0
             ;;
           *)
-            COMPREPLY=( $(compgen -W "--interval --timeout --no-color --no-alt-screen doctor help tui" -- "$cur") )
+            COMPREPLY=( $(compgen -W "--interval --timeout --no-color --no-alt-screen doctor completion help tui" -- "$cur") )
             return 0
             ;;
         esac
@@ -195,10 +199,14 @@ _multicodex_complete() {
       ;;
     monitor)
       if (( CURRENT == 3 )); then
-        compadd -- doctor help tui --interval --timeout --no-color --no-alt-screen
+        compadd -- doctor completion help tui --interval --timeout --no-color --no-alt-screen
         return
       fi
       case "${words[3]:-}" in
+        completion)
+          compadd -- bash zsh fish
+          return
+          ;;
         doctor)
           compadd -- --json --timeout
           return
@@ -212,7 +220,7 @@ _multicodex_complete() {
           return
           ;;
         *)
-          compadd -- doctor help tui --interval --timeout --no-color --no-alt-screen
+          compadd -- doctor completion help tui --interval --timeout --no-color --no-alt-screen
           return
           ;;
       esac
@@ -256,11 +264,12 @@ complete -c multicodex -f -n '__fish_use_subcommand' -a 'init add login login-al
 complete -c multicodex -f -n '__fish_seen_subcommand_from add login use' -a '(__multicodex_profiles)'
 complete -c multicodex -f -n '__fish_seen_subcommand_from run' -a '(__multicodex_profiles)'
 complete -c multicodex -f -n '__fish_seen_subcommand_from switch-global' -a '(__multicodex_profiles) --restore-default'
-complete -c multicodex -f -n '__fish_seen_subcommand_from monitor' -a 'doctor help tui'
+complete -c multicodex -f -n '__fish_seen_subcommand_from monitor' -a 'doctor completion help tui'
 complete -c multicodex -f -n '__fish_seen_subcommand_from monitor' -l interval
 complete -c multicodex -f -n '__fish_seen_subcommand_from monitor' -l timeout
 complete -c multicodex -f -n '__fish_seen_subcommand_from monitor' -l no-color
 complete -c multicodex -f -n '__fish_seen_subcommand_from monitor' -l no-alt-screen
+complete -c multicodex -f -n '__fish_seen_subcommand_from completion; and __fish_seen_subcommand_from monitor' -a 'bash zsh fish'
 complete -c multicodex -f -n '__fish_seen_subcommand_from dry-run' -a 'use login run switch-global'
 complete -c multicodex -f -n '__fish_seen_subcommand_from completion' -a 'bash zsh fish'
 complete -c multicodex -f -n '__fish_seen_subcommand_from help' -a 'init add login login-all use run switch-global status heartbeat monitor doctor dry-run completion version help'
