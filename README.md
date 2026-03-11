@@ -2,7 +2,7 @@
 
 `multicodex` helps you use multiple Codex subscription accounts on one machine.
 
-It keeps accounts isolated in named local profiles. You log in once per profile, then switch fast without repeated sign out and sign in.
+It keeps accounts isolated in named local profiles. You log in once per profile, then switch fast without repeated sign out and sign in, and watch subscription usage across accounts from one integrated terminal workflow.
 
 By default it only changes the current terminal context. It does not change your system default Codex session unless you run an explicit global switch command.
 
@@ -18,7 +18,7 @@ By default it only changes the current terminal context. It does not change your
 
 ## Why this exists
 
-If you have more than one Codex subscription account, switching accounts can be annoying. This tool gives you a simple local workflow that stays compatible with normal `codex login`.
+If you have more than one Codex subscription account, switching accounts can be annoying, and it is even harder when you do not know which account has headroom left. This tool gives you one local workflow for profile isolation, fast switching, and live subscription usage visibility while staying compatible with normal `codex login`.
 
 ## Install
 
@@ -68,10 +68,17 @@ eval "$(multicodex use personal)"
 multicodex status
 ```
 
-6. Run setup checks before using it daily.
+6. Open the live usage monitor.
+
+```bash
+multicodex monitor
+```
+
+7. Run setup checks before using it daily.
 
 ```bash
 multicodex doctor
+multicodex monitor doctor
 multicodex dry-run
 ```
 
@@ -94,10 +101,12 @@ multicodex switch-global <name>
 multicodex switch-global --restore-default
 multicodex status
 multicodex heartbeat
+multicodex monitor [flags]
+multicodex monitor doctor [--json] [--timeout 20s]
 multicodex doctor [--json] [--timeout 8s]
 multicodex dry-run [operation]
 multicodex completion <bash|zsh|fish>
-multicodex help [command]
+multicodex help [command [subcommand]]
 multicodex --version
 ```
 
@@ -175,6 +184,36 @@ For periodic refresh, add this command to your cron schedule, for example:
 0 */6 * * * PATH=/path/to/bin:$PATH; multicodex heartbeat >> /path/to/logs/heartbeat-cron.log 2>&1
 ```
 
+Monitor live subscription usage across your configured and discovered accounts.
+
+```bash
+multicodex monitor
+multicodex monitor --interval 30s
+multicodex monitor doctor
+```
+
+Monitor account resolution order:
+- explicit account file under `~/multicodex/monitor/accounts.json`
+- configured multicodex profiles from `~/multicodex/config.json`
+- active `CODEX_HOME`
+- compatible Codex homes discovered from the local filesystem
+
+Legacy account-file paths are still read when the new multicodex monitor file is absent:
+- `~/codex-usage-monitor/accounts.json`
+- `~/.codex-usage-monitor/accounts.json`
+
+Example manual monitor account file:
+
+```json
+{
+  "version": 1,
+  "accounts": [
+    {"label": "personal", "codex_home": "/path/to/personal/codex-home"},
+    {"label": "work", "codex_home": "/path/to/work/codex-home"}
+  ]
+}
+```
+
 Enable tab autocomplete.
 
 ```bash
@@ -193,6 +232,8 @@ Get detailed help for any command.
 ```bash
 multicodex help
 multicodex help heartbeat
+multicodex help monitor
+multicodex help monitor doctor
 multicodex help completion
 ```
 
@@ -212,6 +253,7 @@ go build -o multicodex ./cmd/multicodex
 - Does not send secrets to third-party services.
 - Does not store raw secrets in multicodex config.
 - Global switch touches only the default auth pointer path.
+- `monitor` is read-only and does not mutate Codex account data.
 - `doctor` and `dry-run` are non-mutating helpers.
 - `doctor` includes repo leak guards for tracked sensitive files and ignore-pattern coverage.
 - After successful login, auth file permissions are normalized to `0600`.

@@ -11,10 +11,12 @@
 - `multicodex switch-global --restore-default`
 - `multicodex status`
 - `multicodex heartbeat`
+- `multicodex monitor [flags]`
+- `multicodex monitor doctor [--json] [--timeout 20s]`
 - `multicodex doctor [--json] [--timeout 8s]`
 - `multicodex dry-run [operation]`
 - `multicodex completion <bash|zsh|fish>`
-- `multicodex help [command]`
+- `multicodex help [command [subcommand]]`
 - `multicodex version` and `multicodex --version`
 
 ## Behavior contract
@@ -65,6 +67,18 @@
 - Leaves the global default auth pointer untouched.
 - Supports environment overrides for timeout, retries, backoff, prompt, and lock path.
 
+`multicodex monitor`
+- Runs a live terminal UI for Codex subscription usage across compatible local accounts.
+- Defaults to the integrated monitor UI when no monitor subcommand is provided.
+- Prefers account definitions from multicodex profile config and monitor-owned account overrides.
+- Continues to support legacy monitor account-file locations as a compatibility fallback.
+- Remains read-only with respect to Codex account state.
+
+`multicodex monitor doctor`
+- Runs read-only monitor setup and source checks.
+- Supports JSON output for automation.
+- Checks codex binary access, auth-file readability, app-server usage fetch, and oauth usage fetch.
+
 `multicodex doctor`
 - Runs non-mutating setup and auth checks.
 - Reports `ok`, `warn`, and `fail` checks with a final pass or fail summary.
@@ -88,9 +102,9 @@
 - Supports command name completion.
 - Supports dynamic profile-name completion from local multicodex config.
 
-`multicodex help [command]`
+`multicodex help [command [subcommand]]`
 - Prints global help when no command topic is provided.
-- Prints command-specific usage, description, and examples for one topic.
+- Prints command-specific usage, description, and examples for one topic, including nested monitor topics.
 
 ## Error handling
 - Fail fast with actionable messages.

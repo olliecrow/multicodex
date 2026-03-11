@@ -20,6 +20,9 @@ func TestHelpCommandGlobal(t *testing.T) {
 	if !strings.Contains(out, "completion <shell>") {
 		t.Fatalf("expected completion command in help output")
 	}
+	if !strings.Contains(out, "monitor [flags]") {
+		t.Fatalf("expected monitor command in help output")
+	}
 	if !strings.Contains(out, "multicodex help <command>") {
 		t.Fatalf("expected help topic usage in help output")
 	}
@@ -65,6 +68,9 @@ func TestCompletionCommandBash(t *testing.T) {
 	}
 	if !strings.Contains(out, "complete -F _multicodex_complete multicodex") {
 		t.Fatalf("expected bash completion registration")
+	}
+	if !strings.Contains(out, "monitor") {
+		t.Fatalf("expected monitor command in completion output")
 	}
 	if !strings.Contains(out, "__complete-profiles") {
 		t.Fatalf("expected dynamic profile completion helper")

@@ -8,6 +8,7 @@ Core idea:
 - Default to local terminal switching only.
 - Support an explicit global switch command when the user wants system-wide default behavior changed.
 - Touch the minimum files needed to switch auth context.
+- Show live subscription usage across compatible local accounts from the same product.
 - Provide non-mutating `doctor` and `dry-run` helpers for safe setup and operation preview.
 - Provide an optional `heartbeat` command for simple periodic keepalive checks across logged-in profiles.
 - Provide built-in help topics and shell completion scripts for user-friendly day-to-day usage.

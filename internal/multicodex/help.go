@@ -26,6 +26,8 @@ var commandSummaries = []struct {
 	{Name: "switch-global --restore-default", Summary: "restore original global default auth"},
 	{Name: "status", Summary: "show all profile auth states"},
 	{Name: "heartbeat", Summary: "send a minimal keepalive hello for logged-in profiles"},
+	{Name: "monitor [flags]", Summary: "show live subscription usage across accounts"},
+	{Name: "monitor doctor [flags]", Summary: "check usage-monitor data sources"},
 	{Name: "doctor [--json] [--timeout 8s]", Summary: "run non-mutating setup and auth checks"},
 	{Name: "dry-run [operation]", Summary: "print planned operations without mutating state"},
 	{Name: "completion <shell>", Summary: "print shell completion script for bash, zsh, or fish"},
@@ -101,6 +103,23 @@ var commandHelpByName = map[string]commandHelp{
 			"multicodex heartbeat",
 		},
 	},
+	"monitor": {
+		Usage:       "multicodex monitor [--interval 60s] [--timeout 10s] [--no-color] [--no-alt-screen]",
+		Description: "Run the live subscription-usage terminal UI. The monitor prefers configured multicodex profiles, then falls back to compatible local Codex homes and legacy monitor account files.",
+		Examples: []string{
+			"multicodex monitor",
+			"multicodex monitor --interval 30s",
+			"multicodex monitor doctor",
+		},
+	},
+	"monitor doctor": {
+		Usage:       "multicodex monitor doctor [--json] [--timeout 20s]",
+		Description: "Run read-only monitor checks against the active/default Codex account data sources.",
+		Examples: []string{
+			"multicodex monitor doctor",
+			"multicodex monitor doctor --json",
+		},
+	},
 	"doctor": {
 		Usage:       "multicodex doctor [--json] [--timeout 8s]",
 		Description: "Run non-mutating setup, auth, and leak-guard checks.",
@@ -136,11 +155,12 @@ var commandHelpByName = map[string]commandHelp{
 		},
 	},
 	"help": {
-		Usage:       "multicodex help [command]",
+		Usage:       "multicodex help [command [subcommand]]",
 		Description: "Show global help or detailed help for one command.",
 		Examples: []string{
 			"multicodex help",
 			"multicodex help heartbeat",
+			"multicodex help monitor doctor",
 		},
 	},
 }
@@ -160,6 +180,7 @@ func printHelp() {
 	fmt.Println("  multicodex init")
 	fmt.Println("  multicodex add personal")
 	fmt.Println(`  eval "$(multicodex use personal)"`)
+	fmt.Println("  multicodex monitor")
 	fmt.Println("  multicodex heartbeat")
 	fmt.Println(`  eval "$(multicodex completion zsh)"`)
 	fmt.Println()
@@ -176,11 +197,11 @@ func (a *App) cmdHelp(args []string) error {
 		printHelp()
 		return nil
 	}
-	if len(args) != 1 {
-		return &ExitError{Code: 2, Message: "usage: multicodex help [command]"}
+	if len(args) > 2 {
+		return &ExitError{Code: 2, Message: "usage: multicodex help [command [subcommand]]"}
 	}
 
-	name := normalizeHelpTopic(args[0])
+	name := normalizeHelpTopic(strings.Join(args, " "))
 	topic, ok := commandHelpByName[name]
 	if !ok {
 		known := make([]string, 0, len(commandHelpByName))
@@ -218,6 +239,8 @@ func normalizeHelpTopic(s string) string {
 		return "help"
 	case "--version", "-v":
 		return "version"
+	case "monitor-doctor", "monitor/doctor":
+		return "monitor doctor"
 	default:
 		return s
 	}
