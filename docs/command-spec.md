@@ -12,6 +12,7 @@
 - `multicodex status`
 - `multicodex heartbeat`
 - `multicodex monitor [flags]`
+- `multicodex monitor tui [flags]`
 - `multicodex monitor doctor [--json] [--timeout 20s]`
 - `multicodex monitor completion [shell]`
 - `multicodex doctor [--json] [--timeout 8s]`
@@ -75,6 +76,10 @@
 - Continues to support legacy monitor account-file locations as a compatibility fallback.
 - Remains read-only with respect to Codex account state.
 
+`multicodex monitor tui`
+- Explicit alias for the integrated monitor terminal UI.
+- Accepts the same flags and behavior contract as `multicodex monitor`.
+
 `multicodex monitor doctor`
 - Runs read-only monitor setup and source checks.
 - Supports JSON output for automation.
@@ -110,7 +115,7 @@
 
 `multicodex help [command [subcommand]]`
 - Prints global help when no command topic is provided.
-- Prints command-specific usage, description, and examples for one topic, including nested monitor topics.
+- Prints command-specific usage, description, and examples for one topic, including nested monitor topics such as `monitor doctor`, `monitor completion`, and `monitor tui`.
 
 ## Error handling
 - Fail fast with actionable messages.

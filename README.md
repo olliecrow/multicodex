@@ -189,6 +189,7 @@ Monitor live subscription usage across your configured and discovered accounts.
 
 ```bash
 multicodex monitor
+multicodex monitor tui
 multicodex monitor --interval 30s
 multicodex monitor doctor
 multicodex monitor completion
@@ -239,6 +240,7 @@ multicodex help heartbeat
 multicodex help monitor
 multicodex help monitor doctor
 multicodex help monitor completion
+multicodex help monitor tui
 multicodex help completion
 ```
 

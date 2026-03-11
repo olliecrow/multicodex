@@ -75,6 +75,9 @@ func TestCompletionCommandBash(t *testing.T) {
 	if !strings.Contains(out, "__complete-profiles") {
 		t.Fatalf("expected dynamic profile completion helper")
 	}
+	if !strings.Contains(out, "monitor\\ tui") {
+		t.Fatalf("expected nested monitor tui help topic in bash completion output")
+	}
 }
 
 func TestCompletionCommandUnsupportedShell(t *testing.T) {
