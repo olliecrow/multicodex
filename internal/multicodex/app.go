@@ -54,6 +54,8 @@ func (a *App) Run(args []string) error {
 		return a.cmdStatus()
 	case "heartbeat":
 		return a.cmdHeartbeat(args[1:])
+	case "monitor":
+		return a.cmdMonitor(args[1:])
 	case "completion":
 		return a.cmdCompletion(args[1:])
 	case "__complete-profiles":

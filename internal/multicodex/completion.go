@@ -51,7 +51,7 @@ _multicodex_complete() {
   fi
   cmd="${COMP_WORDS[1]:-}"
 
-  local commands="init add login login-all use run switch-global status heartbeat doctor dry-run completion version help"
+  local commands="init add login login-all use run switch-global status heartbeat monitor doctor dry-run completion version help"
 
   if (( COMP_CWORD == 1 )); then
     COMPREPLY=( $(compgen -W "$commands" -- "$cur") )
@@ -85,6 +85,32 @@ _multicodex_complete() {
         return 0
       fi
       ;;
+    monitor)
+      if (( COMP_CWORD == 2 )); then
+        COMPREPLY=( $(compgen -W "doctor help tui --interval --timeout --no-color --no-alt-screen" -- "$cur") )
+        return 0
+      fi
+      if (( COMP_CWORD >= 3 )); then
+        case "${COMP_WORDS[2]}" in
+          doctor)
+            COMPREPLY=( $(compgen -W "--json --timeout" -- "$cur") )
+            return 0
+            ;;
+          help)
+            COMPREPLY=( $(compgen -W "doctor tui" -- "$cur") )
+            return 0
+            ;;
+          tui)
+            COMPREPLY=( $(compgen -W "--interval --timeout --no-color --no-alt-screen" -- "$cur") )
+            return 0
+            ;;
+          *)
+            COMPREPLY=( $(compgen -W "--interval --timeout --no-color --no-alt-screen doctor help tui" -- "$cur") )
+            return 0
+            ;;
+        esac
+      fi
+      ;;
     doctor)
       COMPREPLY=( $(compgen -W "--json --timeout" -- "$cur") )
       return 0
@@ -103,7 +129,7 @@ _multicodex_complete() {
       ;;
     help)
       if (( COMP_CWORD == 2 )); then
-        COMPREPLY=( $(compgen -W "init add login login-all use run switch-global status heartbeat doctor dry-run completion version help" -- "$cur") )
+        COMPREPLY=( $(compgen -W "init add login login-all use run switch-global status heartbeat monitor doctor dry-run completion version help monitor\ doctor" -- "$cur") )
         return 0
       fi
       ;;
@@ -133,7 +159,7 @@ _multicodex_complete() {
   fi
   cmd="${words[2]:-}"
 
-  local commands="init add login login-all use run switch-global status heartbeat doctor dry-run completion version help"
+  local commands="init add login login-all use run switch-global status heartbeat monitor doctor dry-run completion version help"
 
   if (( CURRENT == 2 )); then
     compadd -- ${=commands}
@@ -167,6 +193,30 @@ _multicodex_complete() {
         return
       fi
       ;;
+    monitor)
+      if (( CURRENT == 3 )); then
+        compadd -- doctor help tui --interval --timeout --no-color --no-alt-screen
+        return
+      fi
+      case "${words[3]:-}" in
+        doctor)
+          compadd -- --json --timeout
+          return
+          ;;
+        help)
+          compadd -- doctor tui
+          return
+          ;;
+        tui)
+          compadd -- --interval --timeout --no-color --no-alt-screen
+          return
+          ;;
+        *)
+          compadd -- doctor help tui --interval --timeout --no-color --no-alt-screen
+          return
+          ;;
+      esac
+      ;;
     doctor)
       compadd -- --json --timeout
       return
@@ -185,7 +235,7 @@ _multicodex_complete() {
       ;;
     help)
       if (( CURRENT == 3 )); then
-        compadd -- init add login login-all use run switch-global status heartbeat doctor dry-run completion version help
+        compadd -- init add login login-all use run switch-global status heartbeat monitor doctor dry-run completion version help
         return
       fi
       ;;
@@ -202,15 +252,22 @@ function __multicodex_profiles
     multicodex __complete-profiles 2>/dev/null
 end
 
-complete -c multicodex -f -n '__fish_use_subcommand' -a 'init add login login-all use run switch-global status heartbeat doctor dry-run completion version help'
+complete -c multicodex -f -n '__fish_use_subcommand' -a 'init add login login-all use run switch-global status heartbeat monitor doctor dry-run completion version help'
 complete -c multicodex -f -n '__fish_seen_subcommand_from add login use' -a '(__multicodex_profiles)'
 complete -c multicodex -f -n '__fish_seen_subcommand_from run' -a '(__multicodex_profiles)'
 complete -c multicodex -f -n '__fish_seen_subcommand_from switch-global' -a '(__multicodex_profiles) --restore-default'
+complete -c multicodex -f -n '__fish_seen_subcommand_from monitor' -a 'doctor help tui'
+complete -c multicodex -f -n '__fish_seen_subcommand_from monitor' -l interval
+complete -c multicodex -f -n '__fish_seen_subcommand_from monitor' -l timeout
+complete -c multicodex -f -n '__fish_seen_subcommand_from monitor' -l no-color
+complete -c multicodex -f -n '__fish_seen_subcommand_from monitor' -l no-alt-screen
 complete -c multicodex -f -n '__fish_seen_subcommand_from dry-run' -a 'use login run switch-global'
 complete -c multicodex -f -n '__fish_seen_subcommand_from completion' -a 'bash zsh fish'
-complete -c multicodex -f -n '__fish_seen_subcommand_from help' -a 'init add login login-all use run switch-global status heartbeat doctor dry-run completion version help'
+complete -c multicodex -f -n '__fish_seen_subcommand_from help' -a 'init add login login-all use run switch-global status heartbeat monitor doctor dry-run completion version help'
 complete -c multicodex -f -n '__fish_seen_subcommand_from use' -l shell
 complete -c multicodex -f -n '__fish_seen_subcommand_from doctor' -l json
 complete -c multicodex -f -n '__fish_seen_subcommand_from doctor' -l timeout
+complete -c multicodex -f -n '__fish_seen_subcommand_from doctor; and __fish_seen_subcommand_from monitor' -l json
+complete -c multicodex -f -n '__fish_seen_subcommand_from doctor; and __fish_seen_subcommand_from monitor' -l timeout
 `) + "\n"
 }

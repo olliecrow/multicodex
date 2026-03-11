@@ -9,9 +9,11 @@
 - User can switch account for current terminal only.
 - User can explicitly switch global default Codex account.
 - Status view shows status for all configured profiles.
+- User can view live subscription usage across compatible local accounts from the same CLI.
 - User can run a fire-and-forget keepalive heartbeat across logged-in profiles.
 - Heartbeat must remain profile-local and must not switch the system default Codex account.
 - User can run a non-mutating doctor check.
+- User can run a monitor-specific read-only doctor check.
 - User can run dry-run previews for key operations.
 - User can install shell tab-completion for command names and profile names.
 
