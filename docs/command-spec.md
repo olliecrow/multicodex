@@ -12,6 +12,7 @@
 - `multicodex status`
 - `multicodex heartbeat`
 - `multicodex monitor [flags]`
+- `multicodex monitor help`
 - `multicodex monitor tui [flags]`
 - `multicodex monitor doctor [--json] [--timeout 20s]`
 - `multicodex monitor completion [shell]`
@@ -60,7 +61,7 @@
 - Includes which profile is current global default when known.
 
 `multicodex heartbeat`
-- Runs a minimal read-only `codex exec --skip-git-repo-check hello` keepalive for each logged-in profile.
+- Runs a minimal read-only `codex exec --skip-git-repo-check --sandbox read-only --color never hello` keepalive for each logged-in profile.
 - Skips profiles that are currently logged out.
 - Uses a non-blocking local lock so overlapping heartbeat runs are skipped instead of overlapping.
 - Retries failed logged-in profile heartbeats with linear backoff by default.
@@ -75,6 +76,9 @@
 - Prefers account definitions from multicodex profile config and monitor-owned account overrides.
 - Continues to support legacy monitor account-file locations as a compatibility fallback.
 - Remains read-only with respect to Codex account state.
+
+`multicodex monitor help`
+- Prints monitor-specific usage, flags, and completion examples.
 
 `multicodex monitor tui`
 - Explicit alias for the integrated monitor terminal UI.
