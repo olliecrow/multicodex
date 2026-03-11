@@ -133,7 +133,7 @@ _multicodex_complete() {
       ;;
     help)
       if (( COMP_CWORD == 2 )); then
-        COMPREPLY=( $(compgen -W "init add login login-all use run switch-global status heartbeat monitor doctor dry-run completion version help monitor\ doctor monitor\ completion" -- "$cur") )
+        COMPREPLY=( $(compgen -W "init add login login-all use run switch-global status heartbeat monitor doctor dry-run completion version help monitor\ doctor monitor\ completion monitor\ tui" -- "$cur") )
         return 0
       fi
       ;;
@@ -243,7 +243,7 @@ _multicodex_complete() {
       ;;
     help)
       if (( CURRENT == 3 )); then
-        compadd -- init add login login-all use run switch-global status heartbeat monitor doctor dry-run completion version help "monitor doctor" "monitor completion"
+        compadd -- init add login login-all use run switch-global status heartbeat monitor doctor dry-run completion version help "monitor doctor" "monitor completion" "monitor tui"
         return
       fi
       ;;
@@ -272,7 +272,7 @@ complete -c multicodex -f -n '__fish_seen_subcommand_from monitor' -l no-alt-scr
 complete -c multicodex -f -n '__fish_seen_subcommand_from completion; and __fish_seen_subcommand_from monitor' -a 'bash zsh fish'
 complete -c multicodex -f -n '__fish_seen_subcommand_from dry-run' -a 'use login run switch-global'
 complete -c multicodex -f -n '__fish_seen_subcommand_from completion' -a 'bash zsh fish'
-complete -c multicodex -f -n '__fish_seen_subcommand_from help' -a 'init add login login-all use run switch-global status heartbeat monitor doctor dry-run completion version help'
+complete -c multicodex -f -n '__fish_seen_subcommand_from help' -a 'init add login login-all use run switch-global status heartbeat monitor doctor dry-run completion version help "monitor doctor" "monitor completion" "monitor tui"'
 complete -c multicodex -f -n '__fish_seen_subcommand_from use' -l shell
 complete -c multicodex -f -n '__fish_seen_subcommand_from doctor' -l json
 complete -c multicodex -f -n '__fish_seen_subcommand_from doctor' -l timeout

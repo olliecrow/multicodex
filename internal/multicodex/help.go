@@ -27,6 +27,7 @@ var commandSummaries = []struct {
 	{Name: "status", Summary: "show all profile auth states"},
 	{Name: "heartbeat", Summary: "send a minimal keepalive hello for logged-in profiles"},
 	{Name: "monitor [flags]", Summary: "show live subscription usage across accounts"},
+	{Name: "monitor tui [flags]", Summary: "run the monitor terminal UI explicitly"},
 	{Name: "monitor doctor [flags]", Summary: "check usage-monitor data sources"},
 	{Name: "monitor completion [shell]", Summary: "print shell completion script"},
 	{Name: "doctor [--json] [--timeout 8s]", Summary: "run non-mutating setup and auth checks"},
@@ -121,6 +122,14 @@ var commandHelpByName = map[string]commandHelp{
 			"multicodex monitor doctor --json",
 		},
 	},
+	"monitor tui": {
+		Usage:       "multicodex monitor tui [--interval 60s] [--timeout 10s] [--no-color] [--no-alt-screen]",
+		Description: "Explicit alias for the live subscription-usage terminal UI. This behaves the same as `multicodex monitor` with no monitor subcommand.",
+		Examples: []string{
+			"multicodex monitor tui",
+			"multicodex monitor tui --interval 30s",
+		},
+	},
 	"monitor completion": {
 		Usage:       "multicodex monitor completion [bash|zsh|fish]",
 		Description: "Compatibility alias for shell completion setup. This prints the full multicodex completion script and defaults to bash when no shell is provided.",
@@ -170,6 +179,7 @@ var commandHelpByName = map[string]commandHelp{
 			"multicodex help",
 			"multicodex help heartbeat",
 			"multicodex help monitor doctor",
+			"multicodex help monitor tui",
 		},
 	},
 }
@@ -250,6 +260,8 @@ func normalizeHelpTopic(s string) string {
 		return "version"
 	case "monitor-doctor", "monitor/doctor":
 		return "monitor doctor"
+	case "monitor-tui", "monitor/tui":
+		return "monitor tui"
 	case "monitor-completion", "monitor/completion":
 		return "monitor completion"
 	default:

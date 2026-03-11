@@ -94,3 +94,16 @@ func TestHelpMonitorCompletionTopic(t *testing.T) {
 		t.Fatalf("expected monitor completion help topic output, got:\n%s", out)
 	}
 }
+
+func TestHelpMonitorTUITopic(t *testing.T) {
+	app := newTestAppForCLI(t)
+	out, err := captureStdout(t, func() error {
+		return app.Run([]string{"help", "monitor", "tui"})
+	})
+	if err != nil {
+		t.Fatalf("help monitor tui failed: %v", err)
+	}
+	if !strings.Contains(out, "multicodex monitor tui") {
+		t.Fatalf("expected monitor tui help topic output, got:\n%s", out)
+	}
+}
