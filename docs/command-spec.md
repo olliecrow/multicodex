@@ -13,6 +13,7 @@
 - `multicodex heartbeat`
 - `multicodex monitor [flags]`
 - `multicodex monitor doctor [--json] [--timeout 20s]`
+- `multicodex monitor completion [shell]`
 - `multicodex doctor [--json] [--timeout 8s]`
 - `multicodex dry-run [operation]`
 - `multicodex completion <bash|zsh|fish>`
@@ -78,6 +79,11 @@
 - Runs read-only monitor setup and source checks.
 - Supports JSON output for automation.
 - Checks codex binary access, auth-file readability, app-server usage fetch, and oauth usage fetch.
+
+`multicodex monitor completion`
+- Compatibility alias for shell completion setup after migration from the standalone monitor.
+- Defaults to bash when no shell is provided.
+- Prints the full `multicodex` completion script.
 
 `multicodex doctor`
 - Runs non-mutating setup and auth checks.

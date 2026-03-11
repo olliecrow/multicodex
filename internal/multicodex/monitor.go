@@ -24,6 +24,8 @@ func (a *App) cmdMonitor(args []string) error {
 		return a.runMonitorTUI(args[1:])
 	case "doctor":
 		return a.runMonitorDoctor(args[1:])
+	case "completion":
+		return a.runMonitorCompletion(args[1:])
 	case "help", "-h", "--help":
 		printMonitorUsage()
 		return nil
@@ -67,6 +69,22 @@ func (a *App) runMonitorDoctor(args []string) error {
 		return &ExitError{Code: 1, Message: "monitor doctor checks failed"}
 	}
 	return nil
+}
+
+func (a *App) runMonitorCompletion(args []string) error {
+	if len(args) > 1 {
+		return &ExitError{Code: 2, Message: "usage: multicodex monitor completion [bash|zsh|fish]"}
+	}
+
+	shell := "bash"
+	if len(args) == 1 {
+		shell = strings.TrimSpace(args[0])
+		if shell == "" {
+			shell = "bash"
+		}
+	}
+
+	return a.cmdCompletion([]string{shell})
 }
 
 func (a *App) runMonitorTUI(args []string) error {
@@ -132,11 +150,13 @@ func printMonitorUsage() {
 	fmt.Println("  multicodex monitor                       Run terminal user interface (default)")
 	fmt.Println("  multicodex monitor tui [flags]           Run terminal user interface explicitly")
 	fmt.Println("  multicodex monitor doctor [flags]        Run setup and source checks")
+	fmt.Println("  multicodex monitor completion [shell]    Print shell completion script")
 	fmt.Println()
 	fmt.Println("Shell completion:")
 	fmt.Println("  multicodex completion bash")
 	fmt.Println("  multicodex completion zsh")
 	fmt.Println("  multicodex completion fish")
+	fmt.Println("  multicodex monitor completion bash")
 	fmt.Println()
 	fmt.Println("Monitor doctor flags:")
 	fmt.Println("  --json            Output report as JSON")

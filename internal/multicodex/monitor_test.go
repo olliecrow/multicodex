@@ -68,3 +68,29 @@ func TestMonitorRequiresTTY(t *testing.T) {
 		t.Fatalf("unexpected message: %s", exitErr.Message)
 	}
 }
+
+func TestMonitorCompletionDefaultsToBash(t *testing.T) {
+	app := newTestAppForCLI(t)
+	out, err := captureStdout(t, func() error {
+		return app.Run([]string{"monitor", "completion"})
+	})
+	if err != nil {
+		t.Fatalf("monitor completion failed: %v", err)
+	}
+	if !strings.Contains(out, "complete -F _multicodex_complete multicodex") {
+		t.Fatalf("expected bash completion registration, got:\n%s", out)
+	}
+}
+
+func TestHelpMonitorCompletionTopic(t *testing.T) {
+	app := newTestAppForCLI(t)
+	out, err := captureStdout(t, func() error {
+		return app.Run([]string{"help", "monitor", "completion"})
+	})
+	if err != nil {
+		t.Fatalf("help monitor completion failed: %v", err)
+	}
+	if !strings.Contains(out, "multicodex monitor completion") {
+		t.Fatalf("expected monitor completion help topic output, got:\n%s", out)
+	}
+}
