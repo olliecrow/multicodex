@@ -17,17 +17,19 @@ import (
 type FetchFunc func(context.Context) (*usage.Summary, error)
 
 type Options struct {
-	Interval  time.Duration
-	Timeout   time.Duration
-	NoColor   bool
-	AltScreen bool
-	Fetch     FetchFunc
+	Interval        time.Duration
+	Timeout         time.Duration
+	NoColor         bool
+	AltScreen       bool
+	DisplayLocation *time.Location
+	Fetch           FetchFunc
 }
 
 type Model struct {
-	interval time.Duration
-	timeout  time.Duration
-	fetch    FetchFunc
+	interval        time.Duration
+	timeout         time.Duration
+	fetch           FetchFunc
+	displayLocation *time.Location
 
 	width  int
 	height int
@@ -96,16 +98,21 @@ func NewModel(opts Options) Model {
 			return nil, errors.New("missing fetch function")
 		}
 	}
+	displayLocation := opts.DisplayLocation
+	if displayLocation == nil {
+		displayLocation = time.Local
+	}
 	now := time.Now().UTC()
 
 	return Model{
-		interval:    interval,
-		timeout:     timeout,
-		fetch:       fetch,
-		now:         now,
-		fetching:    true,
-		nextFetchAt: now.Add(interval),
-		styles:      defaultStyles(opts.NoColor),
+		interval:        interval,
+		timeout:         timeout,
+		fetch:           fetch,
+		displayLocation: displayLocation,
+		now:             now,
+		fetching:        true,
+		nextFetchAt:     now.Add(interval),
+		styles:          defaultStyles(opts.NoColor),
 	}
 }
 
@@ -221,7 +228,7 @@ func (m Model) renderHeader() string {
 		refreshText := "[next refresh in " + humanDuration(m.nextFetchAt.Sub(m.now)) + "]"
 		left += " " + m.styles.dim.Render(refreshText)
 	}
-	right := m.styles.dim.Render("utc " + m.now.Format("2006-01-02 15:04:05"))
+	right := m.styles.dim.Render("local " + m.formatDisplayTimestamp(m.now))
 	line1 := joinWithPaddingKeepRight(left, right, m.width)
 	return line1
 }
@@ -238,9 +245,9 @@ func (m Model) renderBody() string {
 	contentWidth := max(20, m.width-4)
 	fiveHourTitle := "five-hour window"
 	weeklyTitle := "weekly window"
-	if m.summary.AccountEmail != "" {
-		fiveHourTitle += " [" + m.summary.AccountEmail + "]"
-		weeklyTitle += " [" + m.summary.AccountEmail + "]"
+	if accountName := summaryAccountDisplayName(m.summary); accountName != "" {
+		fiveHourTitle += " [" + accountName + "]"
+		weeklyTitle += " [" + accountName + "]"
 	} else if !m.summary.WindowDataAvailable {
 		fiveHourTitle += " [unavailable]"
 		weeklyTitle += " [unavailable]"
@@ -323,7 +330,7 @@ func (m Model) renderWindowPanel(title string, win usage.WindowSummary, maxWidth
 
 	reset := "unknown"
 	if win.ResetsAt != nil {
-		reset = win.ResetsAt.Format("2006-01-02 15:04:05 UTC")
+		reset = m.formatDisplayTimestamp(*win.ResetsAt)
 	}
 	remaining := "unknown"
 	if win.SecondsUntilReset != nil {
@@ -403,24 +410,59 @@ func summarizeAccountIdentities(accounts []usage.AccountSummary) []string {
 	out := make([]string, 0, len(accounts))
 	seen := map[string]struct{}{}
 	for _, account := range accounts {
-		identity := "unidentified"
-		if email := strings.TrimSpace(account.AccountEmail); email != "" {
-			identity = email
-		} else if accountID := strings.TrimSpace(account.AccountID); accountID != "" {
-			identity = "account_id:" + accountID
-		} else if userID := strings.TrimSpace(account.UserID); userID != "" {
-			identity = "user_id:" + userID
+		identityKey := accountIdentityKey(account.AccountEmail, account.AccountID, account.UserID)
+		if identityKey == "" {
+			identityKey = "unidentified"
 		}
-		if _, ok := seen[identity]; ok {
+		if _, ok := seen[identityKey]; ok {
 			continue
 		}
-		seen[identity] = struct{}{}
+		seen[identityKey] = struct{}{}
+
+		identity := strings.TrimSpace(account.Label)
+		if identity == "" {
+			if accountID := strings.TrimSpace(account.AccountID); accountID != "" {
+				identity = "account_id:" + accountID
+			} else if userID := strings.TrimSpace(account.UserID); userID != "" {
+				identity = "user_id:" + userID
+			} else {
+				identity = "unidentified"
+			}
+		}
 		out = append(out, identity)
 	}
 	if len(out) == 0 {
 		return []string{"none"}
 	}
 	return out
+}
+
+func summaryAccountDisplayName(summary *usage.Summary) string {
+	if summary == nil {
+		return ""
+	}
+	return displayNameFromParts(summary.WindowAccountLabel, summary.AccountID, summary.UserID)
+}
+
+func (m Model) formatDisplayTimestamp(ts time.Time) string {
+	return ts.In(m.displayLocation).Format("2006-01-02 15:04")
+}
+
+func accountDisplayName(account usage.AccountSummary) string {
+	return displayNameFromParts(account.Label, account.AccountID, account.UserID)
+}
+
+func displayNameFromParts(label, accountID, userID string) string {
+	if label := strings.TrimSpace(label); label != "" {
+		return label
+	}
+	if accountID := strings.TrimSpace(accountID); accountID != "" {
+		return "account_id:" + accountID
+	}
+	if userID := strings.TrimSpace(userID); userID != "" {
+		return "user_id:" + userID
+	}
+	return ""
 }
 
 func (m Model) additionalAccountWindowRows() []usage.AccountSummary {
@@ -473,17 +515,8 @@ func accountWindowAvailable(account usage.AccountSummary) bool {
 }
 
 func windowPanelTitle(base string, account usage.AccountSummary) string {
-	if email := strings.TrimSpace(account.AccountEmail); email != "" {
-		return base + " [" + email + "]"
-	}
-	if label := strings.TrimSpace(account.Label); label != "" {
-		return base + " [" + label + "]"
-	}
-	if accountID := strings.TrimSpace(account.AccountID); accountID != "" {
-		return base + " [account_id:" + accountID + "]"
-	}
-	if userID := strings.TrimSpace(account.UserID); userID != "" {
-		return base + " [user_id:" + userID + "]"
+	if name := accountDisplayName(account); name != "" {
+		return base + " [" + name + "]"
 	}
 	return base
 }

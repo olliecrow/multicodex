@@ -186,6 +186,7 @@ For periodic refresh, add this command to your cron schedule, for example:
 ```
 
 Monitor live subscription usage across your configured and discovered accounts.
+The TUI identifies accounts by configured account label and renders user-facing timestamps in local time without seconds.
 
 ```bash
 multicodex monitor
