@@ -37,8 +37,8 @@ References:
 ## Current decisions for this repo
 Decision: Use Go for multicodex implementation.
 Context: Tool needs a secure, fast, low-dependency local CLI with strong filesystem control.
-Rationale: Go provides a static binary, mature stdlib, and simple cross-platform packaging.
-Trade-offs: Slightly more verbose than shell scripts, but safer and easier to test.
+Rationale: Go provides a static binary, mature stdlib, and simple packaging for macOS and Linux.
+Trade-offs: Slightly more verbose than shell scripts, but safer and easier to test. Windows is intentionally unsupported.
 Enforcement: Build and test pipeline will run Go tooling only.
 References: `docs/requirements.md`, `docs/security-and-privacy.md`
 

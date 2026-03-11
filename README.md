@@ -15,6 +15,7 @@ By default it only changes the current terminal context. It does not change your
 
 - Go (for building from source).
 - Official `codex` CLI installed and available in `PATH`.
+- supported host platforms: macOS and Linux only
 
 ## Why this exists
 
