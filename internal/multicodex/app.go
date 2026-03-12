@@ -244,6 +244,9 @@ func (a *App) cmdUse(args []string) error {
 	if !ok {
 		return &ExitError{Code: 2, Message: fmt.Sprintf("unknown profile: %s", name)}
 	}
+	if err := a.store.EnsureProfileDir(profile); err != nil {
+		return err
+	}
 
 	if openShell {
 		fmt.Printf("starting shell with profile %q\n", name)
@@ -277,6 +280,9 @@ func (a *App) cmdRun(args []string) error {
 	profile, ok := cfg.Profiles[name]
 	if !ok {
 		return &ExitError{Code: 2, Message: fmt.Sprintf("unknown profile: %s", name)}
+	}
+	if err := a.store.EnsureProfileDir(profile); err != nil {
+		return err
 	}
 
 	cmd := args[sep+1]
