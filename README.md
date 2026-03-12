@@ -6,6 +6,8 @@ It keeps accounts isolated in named local profiles. You log in once per profile,
 
 By default, each profile reuses your global Codex `config.toml`, so normal Codex settings changes continue to apply across all multicodex profiles. A profile can still opt into its own config by replacing its profile-local `config.toml`.
 
+Profile login still requires file-backed auth. If your shared global Codex config does not set `cli_auth_credentials_store = "file"`, `multicodex login` will fail with a setup error until you either enable file-backed auth globally or create a per-profile override.
+
 By default it only changes the current terminal context. It does not change your system default Codex session unless you run an explicit global switch command.
 
 ## Current status

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const configVersion = 1
@@ -137,6 +138,18 @@ func HasAuthFile(codexHome string) (bool, error) {
 		return false, nil
 	}
 	return false, fmt.Errorf("check auth file: %w", err)
+}
+
+func profileConfigUsesFileStore(configPath string) (bool, error) {
+	b, err := os.ReadFile(configPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("read profile config: %w", err)
+	}
+	content := string(b)
+	return strings.Contains(content, "cli_auth_credentials_store") && strings.Contains(content, "file"), nil
 }
 
 func (s *Store) ensureProfileConfig(codexHome string) error {

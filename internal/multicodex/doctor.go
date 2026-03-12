@@ -440,8 +440,7 @@ func checkFileStoreConfig(name, path string, required bool) DoctorCheck {
 		linkTarget = target
 	}
 
-	b, err := os.ReadFile(path)
-	if err != nil {
+	if _, err := os.ReadFile(path); err != nil {
 		if os.IsNotExist(err) {
 			if required {
 				if linkTarget != "" {
@@ -453,8 +452,11 @@ func checkFileStoreConfig(name, path string, required bool) DoctorCheck {
 		}
 		return DoctorCheck{Name: name, Status: "fail", Details: err.Error()}
 	}
-	content := string(b)
-	if !strings.Contains(content, "cli_auth_credentials_store") || !strings.Contains(content, "file") {
+	ok, err := profileConfigUsesFileStore(path)
+	if err != nil {
+		return DoctorCheck{Name: name, Status: "fail", Details: err.Error()}
+	}
+	if !ok {
 		status := "warn"
 		if required {
 			status = "fail"

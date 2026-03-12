@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -175,6 +176,9 @@ func (a *App) cmdLogin(args []string) error {
 	if err := a.store.EnsureProfileDir(profile); err != nil {
 		return err
 	}
+	if err := ensureLoginConfigReady(a.store.paths, profile); err != nil {
+		return err
+	}
 
 	fmt.Printf("logging in profile %q\n", name)
 	if err := RunCodexLogin(profile.CodexHome, args[1:]); err != nil {
@@ -194,6 +198,26 @@ func (a *App) cmdLogin(args []string) error {
 		fmt.Println("login command completed. auth file not detected. this may indicate keychain mode or an incomplete login")
 	}
 	return nil
+}
+
+func ensureLoginConfigReady(paths Paths, profile Profile) error {
+	configPath := filepath.Join(profile.CodexHome, "config.toml")
+	ok, err := profileConfigUsesFileStore(configPath)
+	if err != nil {
+		return err
+	}
+	if ok {
+		return nil
+	}
+	return &ExitError{
+		Code: 2,
+		Message: fmt.Sprintf(
+			"profile %q requires file-backed auth. set cli_auth_credentials_store = \"file\" in %s or create a per-profile override at %s",
+			profile.Name,
+			filepath.Join(paths.DefaultCodexHome, "config.toml"),
+			configPath,
+		),
+	}
 }
 
 func (a *App) cmdLoginAll() error {
