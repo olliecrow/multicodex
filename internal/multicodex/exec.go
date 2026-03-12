@@ -21,6 +21,10 @@ var defaultExecAccountSelector execAccountSelector = func(ctx context.Context, a
 }
 
 func (a *App) cmdExec(args []string) error {
+	if execArgsAreHelpRequest(args) {
+		return RunCommand("codex", append([]string{"exec"}, args...))
+	}
+
 	cfg, err := a.loadOrInitConfig()
 	if err != nil {
 		return err
@@ -35,6 +39,19 @@ func (a *App) cmdExec(args []string) error {
 	}
 
 	return RunWithProfile(profile.CodexHome, name, "codex", append([]string{"exec"}, args...))
+}
+
+func execArgsAreHelpRequest(args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+	for _, arg := range args {
+		switch arg {
+		case "-h", "--help":
+			return true
+		}
+	}
+	return args[0] == "help"
 }
 
 func (a *App) selectExecProfile(cfg *Config, selector execAccountSelector) (string, Profile, error) {
