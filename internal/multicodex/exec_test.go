@@ -43,6 +43,53 @@ func TestCmdExecRunsCodexExecWithSelectedProfile(t *testing.T) {
 	}
 }
 
+func TestCmdExecHelpWorksWithoutProfiles(t *testing.T) {
+	app, logPath := newExecTestApp(t)
+
+	if err := app.Run([]string{"exec", "--help"}); err != nil {
+		t.Fatalf("exec --help failed: %v", err)
+	}
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	log := string(data)
+	if !strings.Contains(log, "profile=") {
+		t.Fatalf("expected fake codex invocation to be recorded, got %q", log)
+	}
+	if !strings.Contains(log, "args=exec --help") {
+		t.Fatalf("expected exec --help passthrough, got %q", log)
+	}
+}
+
+func TestExecArgsAreHelpRequest(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{name: "empty", args: nil, want: false},
+		{name: "help flag", args: []string{"--help"}, want: true},
+		{name: "short help flag", args: []string{"-h"}, want: true},
+		{name: "help subcommand", args: []string{"help"}, want: true},
+		{name: "help after other args", args: []string{"--model", "gpt-5", "--help"}, want: true},
+		{name: "normal exec", args: []string{"prompt"}, want: false},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := execArgsAreHelpRequest(tc.args); got != tc.want {
+				t.Fatalf("execArgsAreHelpRequest(%v) = %v, want %v", tc.args, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestCmdExecSelectsBestProfileUsingDefaultSelector(t *testing.T) {
 	app, logPath, root := newExecSelectionTestApp(t)
 	createExecProfiles(t, app, "alpha", "beta", "gamma")

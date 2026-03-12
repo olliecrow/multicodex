@@ -24,6 +24,20 @@ func RunCodexLogin(codexHome string, extraArgs []string) error {
 	return nil
 }
 
+func RunCommand(bin string, args []string) error {
+	cmd := exec.Command(bin, args...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			return &ExitError{Code: ee.ExitCode(), Message: fmt.Sprintf("command failed: %s", strings.Join(append([]string{bin}, args...), " "))}
+		}
+		return fmt.Errorf("run command: %w", err)
+	}
+	return nil
+}
+
 func RunShellWithProfile(codexHome, profile string) error {
 	shell := os.Getenv("SHELL")
 	if shell == "" {
