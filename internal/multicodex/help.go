@@ -22,6 +22,7 @@ var commandSummaries = []struct {
 	{Name: "login-all", Summary: "run login for every known profile"},
 	{Name: "use <name> [--shell]", Summary: "switch profile in current terminal context"},
 	{Name: "run <name> -- <command...>", Summary: "run one command in profile context"},
+	{Name: "exec [codex exec args]", Summary: "run codex exec on the best available profile"},
 	{Name: "switch-global <name>", Summary: "switch default global codex auth to profile"},
 	{Name: "switch-global --restore-default", Summary: "restore original global default auth"},
 	{Name: "status", Summary: "show all profile auth states"},
@@ -81,6 +82,14 @@ var commandHelpByName = map[string]commandHelp{
 		Description: "Run one command in a selected profile context without changing your current shell.",
 		Examples: []string{
 			"multicodex run personal -- codex login status",
+		},
+	},
+	"exec": {
+		Usage:       "multicodex exec [codex exec args]",
+		Description: "Run `codex exec` after automatically selecting the best available configured profile. Profiles under 60% five-hour usage are preferred; selection then picks the lowest weekly usage and falls back to the lowest weekly usage overall when none are under the five-hour threshold.",
+		Examples: []string{
+			`multicodex exec -s read-only "Summarize the README in 3 bullets."`,
+			"multicodex exec --skip-git-repo-check -C /path/to/repo \"Review the latest diff.\"",
 		},
 	},
 	"switch-global": {

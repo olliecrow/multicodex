@@ -49,6 +49,8 @@ func (a *App) Run(args []string) error {
 		return a.cmdUse(args[1:])
 	case "run":
 		return a.cmdRun(args[1:])
+	case "exec":
+		return a.cmdExec(args[1:])
 	case "switch-global":
 		return a.cmdSwitchGlobal(args[1:])
 	case "status":
