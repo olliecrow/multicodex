@@ -4,6 +4,8 @@
 
 It keeps accounts isolated in named local profiles. You log in once per profile, then switch fast without repeated sign out and sign in, and watch subscription usage across accounts from one integrated terminal workflow.
 
+By default, each profile reuses your global Codex `config.toml`, so normal Codex settings changes continue to apply across all multicodex profiles. A profile can still opt into its own config by replacing its profile-local `config.toml`.
+
 By default it only changes the current terminal context. It does not change your system default Codex session unless you run an explicit global switch command.
 
 ## Current status
@@ -88,6 +90,9 @@ multicodex dry-run
 - Default multicodex state home is `~/multicodex`.
 - If `~/.multicodex` exists and `~/multicodex` does not, multicodex automatically migrates existing state on first run.
 - You can override the state location with `MULTICODEX_HOME`.
+- Profile auth stays isolated under `~/multicodex/profiles/<name>/codex-home/auth.json`.
+- Profile config defaults to a symlink from `~/multicodex/profiles/<name>/codex-home/config.toml` to your default Codex config at `~/.codex/config.toml`.
+- If you want a per-profile Codex config, replace that symlink with a regular `config.toml` file in the profile's `codex-home`.
 
 ## Command reference
 

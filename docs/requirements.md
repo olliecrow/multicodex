@@ -36,6 +36,7 @@
 - Compatible with official Codex CLI login flows.
 - No dependence on API-key-only mode for core workflow.
 - Preserve compatibility with Codex app and regular CLI behavior.
+- Profile-scoped multicodex runs should inherit current global Codex config by default unless the user explicitly creates a per-profile override.
 
 ## Constraints
 - No third-party credential services.

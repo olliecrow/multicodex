@@ -172,7 +172,7 @@ func (a *App) cmdLogin(args []string) error {
 	if !ok {
 		return &ExitError{Code: 2, Message: fmt.Sprintf("unknown profile: %s", name)}
 	}
-	if err := EnsureProfileDir(profile); err != nil {
+	if err := a.store.EnsureProfileDir(profile); err != nil {
 		return err
 	}
 
@@ -315,7 +315,7 @@ func (a *App) cmdSwitchGlobal(args []string) error {
 	if !ok {
 		return &ExitError{Code: 2, Message: fmt.Sprintf("unknown profile: %s", name)}
 	}
-	if err := EnsureProfileDir(profile); err != nil {
+	if err := a.store.EnsureProfileDir(profile); err != nil {
 		return err
 	}
 	if err := a.store.SwitchGlobalAuthToProfile(cfg, profile); err != nil {

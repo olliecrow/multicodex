@@ -59,7 +59,7 @@ func renderDryRunOverview(store *Store, cfg *Config) string {
 	b.WriteString("\n\n")
 	b.WriteString("planned sequence:\n")
 	b.WriteString("1. init creates local multicodex directories and config only.\n")
-	b.WriteString("2. add <name> creates an isolated profile CODEX_HOME and file-store config.\n")
+	b.WriteString("2. add <name> creates an isolated profile CODEX_HOME and links profile config to the default Codex config by default.\n")
 	b.WriteString("3. login <name> runs official codex login within that profile context.\n")
 	b.WriteString("4. use <name> outputs shell exports for current-terminal switching only.\n")
 	b.WriteString("5. run <name> executes one command with that profile context only.\n")
