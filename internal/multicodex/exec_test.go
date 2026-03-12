@@ -3,6 +3,7 @@ package multicodex
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,6 +40,30 @@ func TestCmdExecRunsCodexExecWithSelectedProfile(t *testing.T) {
 	}
 	if !strings.Contains(log, "args=exec --skip-git-repo-check hello") {
 		t.Fatalf("expected exec args in log, got %q", log)
+	}
+}
+
+func TestCmdExecSelectsBestProfileUsingDefaultSelector(t *testing.T) {
+	app, logPath, root := newExecSelectionTestApp(t)
+	createExecProfiles(t, app, "alpha", "beta", "gamma")
+	writeExecSelectionProfileData(t, root, "alpha", 10, 40)
+	writeExecSelectionProfileData(t, root, "beta", 55, 20)
+	writeExecSelectionProfileData(t, root, "gamma", 80, 1)
+
+	if err := app.Run([]string{"exec", "--skip-git-repo-check", "prompt with spaces"}); err != nil {
+		t.Fatalf("exec failed: %v", err)
+	}
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	log := string(data)
+	if !strings.Contains(log, "profile=beta") {
+		t.Fatalf("expected beta profile from default selector, got %q", log)
+	}
+	if !strings.Contains(log, "arg[2]=prompt with spaces") {
+		t.Fatalf("expected prompt arg to pass through unchanged, got %q", log)
 	}
 }
 
@@ -110,6 +135,95 @@ func newExecTestApp(t *testing.T) (*App, string) {
 	return app, logPath
 }
 
+func newExecSelectionTestApp(t *testing.T) (*App, string, string) {
+	t.Helper()
+
+	root := t.TempDir()
+	t.Setenv("MULTICODEX_HOME", filepath.Join(root, "multi"))
+	t.Setenv("MULTICODEX_DEFAULT_CODEX_HOME", filepath.Join(root, "default-codex"))
+
+	fakeBin := filepath.Join(root, "bin")
+	if err := os.MkdirAll(fakeBin, 0o755); err != nil {
+		t.Fatalf("mkdir fake bin: %v", err)
+	}
+	logPath := filepath.Join(root, "codex.log")
+	script := `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == "--version" ]]; then
+  echo "codex-cli fake"
+  exit 0
+fi
+if [[ "${1:-}" == "-s" && "${2:-}" == "read-only" && "${3:-}" == "-a" && "${4:-}" == "untrusted" && "${5:-}" == "app-server" ]]; then
+  python3 -c '
+import json
+import os
+import sys
+
+home = sys.argv[1]
+usage_path = os.path.join(home, "usage.json")
+with open(usage_path, "r", encoding="utf-8") as fh:
+    usage = json.load(fh)
+
+primary = int(usage["primary_used_percent"])
+secondary = int(usage["weekly_used_percent"])
+email = usage.get("email", "")
+rate_limits = {
+    "limitId": "codex",
+    "planType": "pro",
+    "primary": {"usedPercent": primary, "windowDurationMins": 300},
+    "secondary": {"usedPercent": secondary, "windowDurationMins": 10080},
+}
+
+for raw_line in sys.stdin:
+    raw_line = raw_line.strip()
+    if not raw_line:
+        continue
+    req = json.loads(raw_line)
+    method = req.get("method")
+    req_id = req.get("id")
+    if method == "initialized":
+        continue
+    if method == "initialize":
+        result = {}
+    elif method == "account/rateLimits/read":
+        result = {"rateLimits": rate_limits, "rateLimitsByLimitId": {"codex": rate_limits}}
+    elif method == "account/read":
+        result = {"account": {"email": email}, "requiresOpenAIAuth": False}
+    else:
+        result = {}
+    if req_id is not None:
+        print(json.dumps({"jsonrpc": "2.0", "id": req_id, "result": result}), flush=True)
+' "$CODEX_HOME"
+  exit $?
+fi
+if [[ "${1:-}" == "exec" ]]; then
+  : "${MULTICODEX_FAKE_CODEX_LOG:?MULTICODEX_FAKE_CODEX_LOG must be set}"
+  {
+    printf 'profile=%s\n' "${MULTICODEX_ACTIVE_PROFILE:-}"
+    i=0
+    for arg in "$@"; do
+      printf 'arg[%d]=%s\n' "$i" "$arg"
+      i=$((i+1))
+    done
+  } >> "${MULTICODEX_FAKE_CODEX_LOG}"
+  exit 0
+fi
+echo "unexpected fake codex invocation: $*" >&2
+exit 1
+`
+	if err := os.WriteFile(filepath.Join(fakeBin, "codex"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake codex: %v", err)
+	}
+	t.Setenv("PATH", fakeBin+":"+os.Getenv("PATH"))
+	t.Setenv("MULTICODEX_FAKE_CODEX_LOG", logPath)
+
+	app, err := NewApp()
+	if err != nil {
+		t.Fatalf("NewApp: %v", err)
+	}
+	return app, logPath, root
+}
+
 func createExecProfiles(t *testing.T, app *App, names ...string) {
 	t.Helper()
 
@@ -126,5 +240,18 @@ func createExecProfiles(t *testing.T, app *App, names ...string) {
 	}
 	if err := app.store.Save(cfg); err != nil {
 		t.Fatalf("Save: %v", err)
+	}
+}
+
+func writeExecSelectionProfileData(t *testing.T, root, name string, primaryUsed, weeklyUsed int) {
+	t.Helper()
+
+	home := filepath.Join(root, "multi", "profiles", name, "codex-home")
+	if err := os.WriteFile(filepath.Join(home, "auth.json"), []byte(fmt.Sprintf(`{"tokens":{"access_token":"token-%s"}}`, name)), 0o600); err != nil {
+		t.Fatalf("write auth: %v", err)
+	}
+	usageJSON := fmt.Sprintf(`{"primary_used_percent": %d, "weekly_used_percent": %d, "email": "%s@example.com"}`, primaryUsed, weeklyUsed, name)
+	if err := os.WriteFile(filepath.Join(home, "usage.json"), []byte(usageJSON), 0o600); err != nil {
+		t.Fatalf("write usage: %v", err)
 	}
 }
