@@ -57,6 +57,7 @@
 
 `multicodex exec [codex exec args]`
 - Executes `codex exec` with all remaining arguments passed through unchanged.
+- For help requests (`--help`, `-h`, or `help`), delegates directly to `codex exec` and does not require profiles to be configured.
 - Automatically selects among configured multicodex profiles.
 - Prefers profiles whose five-hour usage window is strictly below 60%.
 - Among eligible profiles, chooses the lowest weekly usage.
