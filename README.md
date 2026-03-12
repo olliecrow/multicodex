@@ -111,6 +111,8 @@ multicodex switch-global --restore-default
 multicodex status
 multicodex heartbeat
 multicodex monitor [flags]
+multicodex monitor help
+multicodex monitor tui [flags]
 multicodex monitor doctor [--json] [--timeout 20s]
 multicodex monitor completion [shell]
 multicodex doctor [--json] [--timeout 8s]
