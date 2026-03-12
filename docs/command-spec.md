@@ -39,6 +39,7 @@
 `multicodex login <name>`
 - Runs official `codex login` in the profile context.
 - Avoids printing sensitive output.
+- Requires the effective profile config to enable `cli_auth_credentials_store = "file"` so profile auth remains isolated.
 
 `multicodex login-all`
 - Iterates through known profiles and invokes profile-scoped login.

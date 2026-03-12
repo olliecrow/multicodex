@@ -1,20 +1,24 @@
 package multicodex
 
 import (
-	"io"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
 func TestCmdUseMigratesGeneratedProfileConfig(t *testing.T) {
 	app, profile, defaultConfigPath := newTestAppWithGeneratedProfileConfig(t)
 
-	restoreStdout := captureAppTestStdout(t)
-	defer restoreStdout()
-
-	if err := app.cmdUse([]string{profile.Name}); err != nil {
+	out, err := captureStdout(t, func() error {
+		return app.cmdUse([]string{profile.Name})
+	})
+	if err != nil {
 		t.Fatalf("cmdUse: %v", err)
+	}
+	if !strings.Contains(out, "MULTICODEX_ACTIVE_PROFILE=\"work\"") {
+		t.Fatalf("expected profile exports, got %q", out)
 	}
 
 	assertProfileConfigSymlink(t, filepath.Join(profile.CodexHome, "config.toml"), defaultConfigPath)
@@ -28,6 +32,42 @@ func TestCmdRunMigratesGeneratedProfileConfig(t *testing.T) {
 	}
 
 	assertProfileConfigSymlink(t, filepath.Join(profile.CodexHome, "config.toml"), defaultConfigPath)
+}
+
+func TestCmdLoginFailsWhenSharedConfigDoesNotUseFileStore(t *testing.T) {
+	app := newTestAppForCLI(t)
+	if err := app.store.EnsureBaseDirs(); err != nil {
+		t.Fatalf("EnsureBaseDirs: %v", err)
+	}
+
+	profile := Profile{Name: "work", CodexHome: filepath.Join(app.store.paths.ProfilesDir, "work", "codex-home")}
+	if err := os.MkdirAll(profile.CodexHome, 0o700); err != nil {
+		t.Fatalf("mkdir profile codex home: %v", err)
+	}
+	if err := os.MkdirAll(app.store.paths.DefaultCodexHome, 0o700); err != nil {
+		t.Fatalf("mkdir default codex home: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(app.store.paths.DefaultCodexHome, "config.toml"), []byte("model = \"global\"\n"), 0o600); err != nil {
+		t.Fatalf("write default config: %v", err)
+	}
+
+	cfg := DefaultConfig()
+	cfg.Profiles[profile.Name] = profile
+	if err := app.store.Save(cfg); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	err := app.cmdLogin([]string{profile.Name})
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("expected ExitError, got %T (%v)", err, err)
+	}
+	if exitErr.Code != 2 {
+		t.Fatalf("expected exit code 2, got %d", exitErr.Code)
+	}
+	if !strings.Contains(exitErr.Message, "requires file-backed auth") {
+		t.Fatalf("unexpected error message: %s", exitErr.Message)
+	}
 }
 
 func newTestAppWithGeneratedProfileConfig(t *testing.T) (*App, Profile, string) {
@@ -87,23 +127,5 @@ func assertProfileConfigSymlink(t *testing.T, path, wantTarget string) {
 	}
 	if target != wantTarget {
 		t.Fatalf("unexpected symlink target. got=%q want=%q", target, wantTarget)
-	}
-}
-
-func captureAppTestStdout(t *testing.T) func() {
-	t.Helper()
-
-	original := os.Stdout
-	reader, writer, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("pipe stdout: %v", err)
-	}
-	os.Stdout = writer
-
-	return func() {
-		os.Stdout = original
-		_ = writer.Close()
-		_, _ = io.Copy(io.Discard, reader)
-		_ = reader.Close()
 	}
 }
