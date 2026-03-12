@@ -9,33 +9,11 @@ import (
 )
 
 func RunCodexLogin(codexHome string, extraArgs []string) error {
-	args := append([]string{"login"}, extraArgs...)
-	cmd := exec.Command("codex", args...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Env = withProfileEnv(os.Environ(), codexHome, "")
-	if err := cmd.Run(); err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			return &ExitError{Code: ee.ExitCode(), Message: "codex login failed"}
-		}
-		return fmt.Errorf("run codex login: %w", err)
-	}
-	return nil
+	return runCommandWithEnv("codex", append([]string{"login"}, extraArgs...), withProfileEnv(os.Environ(), codexHome, ""), "codex login failed")
 }
 
 func RunCommand(bin string, args []string) error {
-	cmd := exec.Command(bin, args...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			return &ExitError{Code: ee.ExitCode(), Message: fmt.Sprintf("command failed: %s", strings.Join(append([]string{bin}, args...), " "))}
-		}
-		return fmt.Errorf("run command: %w", err)
-	}
-	return nil
+	return runCommandWithEnv(bin, args, nil, fmt.Sprintf("command failed: %s", strings.Join(append([]string{bin}, args...), " ")))
 }
 
 func RunShellWithProfile(codexHome, profile string) error {
@@ -58,16 +36,22 @@ func RunShellWithProfile(codexHome, profile string) error {
 }
 
 func RunWithProfile(codexHome, profile, bin string, args []string) error {
+	return runCommandWithEnv(bin, args, withProfileEnv(os.Environ(), codexHome, profile), fmt.Sprintf("command failed: %s", strings.Join(append([]string{bin}, args...), " ")))
+}
+
+func runCommandWithEnv(bin string, args []string, env []string, exitMessage string) error {
 	cmd := exec.Command(bin, args...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.Env = withProfileEnv(os.Environ(), codexHome, profile)
+	if env != nil {
+		cmd.Env = env
+	}
 	if err := cmd.Run(); err != nil {
 		if ee, ok := err.(*exec.ExitError); ok {
-			return &ExitError{Code: ee.ExitCode(), Message: fmt.Sprintf("command failed: %s", strings.Join(append([]string{bin}, args...), " "))}
+			return &ExitError{Code: ee.ExitCode(), Message: exitMessage}
 		}
-		return fmt.Errorf("run command with profile: %w", err)
+		return fmt.Errorf("run command %s: %w", bin, err)
 	}
 	return nil
 }
