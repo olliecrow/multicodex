@@ -9,6 +9,7 @@ import (
 )
 
 const configVersion = 1
+const generatedProfileConfigContent = "cli_auth_credentials_store = \"file\"\n"
 
 // Config stores multicodex metadata only. It does not store secrets.
 type Config struct {
@@ -110,21 +111,21 @@ func (s *Store) CreateProfile(name string) (Profile, error) {
 		return Profile{}, fmt.Errorf("create profile dir: %w", err)
 	}
 
-	if err := ensureFileStoreConfig(codexHome); err != nil {
+	if err := s.ensureProfileConfig(codexHome); err != nil {
 		return Profile{}, err
 	}
 
 	return Profile{Name: name, CodexHome: codexHome}, nil
 }
 
-func EnsureProfileDir(profile Profile) error {
+func (s *Store) EnsureProfileDir(profile Profile) error {
 	if profile.CodexHome == "" {
 		return errors.New("profile codex home is empty")
 	}
 	if err := os.MkdirAll(profile.CodexHome, 0o700); err != nil {
 		return fmt.Errorf("create profile codex home: %w", err)
 	}
-	return ensureFileStoreConfig(profile.CodexHome)
+	return s.ensureProfileConfig(profile.CodexHome)
 }
 
 func HasAuthFile(codexHome string) (bool, error) {
@@ -138,16 +139,34 @@ func HasAuthFile(codexHome string) (bool, error) {
 	return false, fmt.Errorf("check auth file: %w", err)
 }
 
-func ensureFileStoreConfig(codexHome string) error {
+func (s *Store) ensureProfileConfig(codexHome string) error {
 	configPath := filepath.Join(codexHome, "config.toml")
-	if _, err := os.Stat(configPath); err == nil {
-		return nil
+	defaultConfigPath := filepath.Join(s.paths.DefaultCodexHome, "config.toml")
+
+	info, err := os.Lstat(configPath)
+	if err == nil {
+		if info.IsDir() {
+			return fmt.Errorf("profile config path is a directory: %s", configPath)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return nil
+		}
+		content, err := os.ReadFile(configPath)
+		if err != nil {
+			return fmt.Errorf("read profile config: %w", err)
+		}
+		if string(content) != generatedProfileConfigContent {
+			return nil
+		}
+		if err := os.Remove(configPath); err != nil {
+			return fmt.Errorf("replace generated profile config: %w", err)
+		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("check profile config: %w", err)
 	}
-	content := "cli_auth_credentials_store = \"file\"\n"
-	if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil {
-		return fmt.Errorf("write profile config: %w", err)
+
+	if err := os.Symlink(defaultConfigPath, configPath); err != nil {
+		return fmt.Errorf("link profile config to default codex config: %w", err)
 	}
 	return nil
 }

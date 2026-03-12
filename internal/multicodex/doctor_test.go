@@ -48,6 +48,18 @@ func TestCheckFileStoreConfig(t *testing.T) {
 	if ok.Status != "ok" {
 		t.Fatalf("expected ok for file-store config, got %s", ok.Status)
 	}
+
+	link := filepath.Join(root, "linked-config.toml")
+	if err := os.Symlink(cfg, link); err != nil {
+		t.Fatalf("symlink config: %v", err)
+	}
+	linked := checkFileStoreConfig("req", link, true)
+	if linked.Status != "ok" {
+		t.Fatalf("expected ok for symlinked file-store config, got %s", linked.Status)
+	}
+	if !strings.Contains(linked.Details, "symlink ->") {
+		t.Fatalf("expected symlink details, got %q", linked.Details)
+	}
 }
 
 func TestRunDoctorMinimal(t *testing.T) {

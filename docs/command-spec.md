@@ -33,6 +33,8 @@
 `multicodex add <name>`
 - Registers a named profile.
 - Creates a profile directory with secure permissions.
+- Defaults the profile `config.toml` to the current default Codex `config.toml` so shared settings stay in sync.
+- Leaves a manual per-profile `config.toml` override intact when present.
 
 `multicodex login <name>`
 - Runs official `codex login` in the profile context.

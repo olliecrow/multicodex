@@ -430,11 +430,24 @@ func checkDefaultAuthPath(path string) DoctorCheck {
 }
 
 func checkFileStoreConfig(name, path string, required bool) DoctorCheck {
+	linkTarget := ""
+	info, err := os.Lstat(path)
+	if err == nil && info.Mode()&os.ModeSymlink != 0 {
+		target, readErr := os.Readlink(path)
+		if readErr != nil {
+			return DoctorCheck{Name: name, Status: "fail", Details: fmt.Sprintf("config.toml symlink read failed: %v", readErr)}
+		}
+		linkTarget = target
+	}
+
 	b, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			if required {
-				return DoctorCheck{Name: name, Status: "fail", Details: "missing config.toml with cli_auth_credentials_store = \"file\""}
+				if linkTarget != "" {
+					return DoctorCheck{Name: name, Status: "fail", Details: "config.toml symlink target not found: " + linkTarget}
+				}
+				return DoctorCheck{Name: name, Status: "fail", Details: "missing config.toml. expected a default-config symlink or manual override with cli_auth_credentials_store = \"file\""}
 			}
 			return DoctorCheck{Name: name, Status: "warn", Details: "config.toml not found"}
 		}
@@ -447,6 +460,9 @@ func checkFileStoreConfig(name, path string, required bool) DoctorCheck {
 			status = "fail"
 		}
 		return DoctorCheck{Name: name, Status: status, Details: "config present but file credential store is not configured"}
+	}
+	if linkTarget != "" {
+		return DoctorCheck{Name: name, Status: "ok", Details: "file credential store configured via symlink -> " + linkTarget}
 	}
 	return DoctorCheck{Name: name, Status: "ok", Details: "file credential store configured"}
 }

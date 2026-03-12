@@ -15,6 +15,7 @@
 ## Data layout
 - `~/multicodex/config.json` for profile metadata.
 - `~/multicodex/profiles/<name>/` for profile-scoped state.
+- `~/multicodex/profiles/<name>/codex-home/config.toml` defaults to a symlink to the default Codex config so profile runs inherit current global settings.
 - `~/multicodex/backups/default-auth.backup` for original global auth restore when needed.
 - `~/multicodex/heartbeat.lock` for non-overlapping heartbeat runs by default.
 - `~/multicodex/monitor/accounts.json` for optional monitor-owned account overrides.
