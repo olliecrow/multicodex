@@ -116,6 +116,7 @@ multicodex monitor completion [shell]
 multicodex doctor [--json] [--timeout 8s]
 multicodex dry-run [operation]
 multicodex completion <bash|zsh|fish>
+multicodex version
 multicodex help [command [subcommand]]
 multicodex --version
 ```
@@ -142,6 +143,7 @@ multicodex exec -s read-only "Summarize the README in 3 bullets."
 ```
 
 `multicodex exec` prefers profiles whose five-hour window is below 60% used, then chooses the lowest weekly-usage profile. If every profile is already at 60% or higher in the five-hour window, it still runs on the lowest weekly-usage profile.
+For help requests such as `multicodex exec --help`, it delegates directly to `codex exec` and does not require any profiles to be configured.
 
 Switch system default account used by default Codex context.
 
