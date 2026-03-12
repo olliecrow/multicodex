@@ -105,6 +105,7 @@ multicodex login <name> [codex login args]
 multicodex login-all
 multicodex use <name> [--shell]
 multicodex run <name> -- <command...>
+multicodex exec [codex exec args]
 multicodex switch-global <name>
 multicodex switch-global --restore-default
 multicodex status
@@ -133,6 +134,14 @@ Run one command in another profile without changing your shell.
 ```bash
 multicodex run personal -- codex login status
 ```
+
+Run `codex exec` on the best available logged-in profile automatically.
+
+```bash
+multicodex exec -s read-only "Summarize the README in 3 bullets."
+```
+
+`multicodex exec` prefers profiles whose five-hour window is below 60% used, then chooses the lowest weekly-usage profile. If every profile is already at 60% or higher in the five-hour window, it still runs on the lowest weekly-usage profile.
 
 Switch system default account used by default Codex context.
 

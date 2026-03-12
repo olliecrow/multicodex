@@ -7,6 +7,7 @@
 - `multicodex login-all`
 - `multicodex use <name>`
 - `multicodex run <name> -- <command...>`
+- `multicodex exec [codex exec args]`
 - `multicodex switch-global <name>`
 - `multicodex switch-global --restore-default`
 - `multicodex status`
@@ -52,6 +53,15 @@
 
 `multicodex run <name> -- <command...>`
 - Executes one command with profile-scoped context.
+- Returns child exit code.
+
+`multicodex exec [codex exec args]`
+- Executes `codex exec` with all remaining arguments passed through unchanged.
+- Automatically selects among configured multicodex profiles.
+- Prefers profiles whose five-hour usage window is strictly below 60%.
+- Among eligible profiles, chooses the lowest weekly usage.
+- When no profile is below the five-hour threshold, falls back to the lowest weekly-usage profile.
+- When usage fetch is unavailable for every profile, falls back to the first sorted profile with `auth.json`, otherwise the first sorted configured profile.
 - Returns child exit code.
 
 `multicodex switch-global <name>`

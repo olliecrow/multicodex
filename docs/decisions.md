@@ -188,3 +188,10 @@ Rationale: Showing configured account labels instead of emails keeps the UI alig
 Trade-offs: Duplicate or missing account labels can still make the display ambiguous, so the UI falls back to stable account or user IDs when labels are unavailable; local rendering means screenshots differ across operator time zones.
 Enforcement: `internal/monitor/tui/model.go` renders window titles and account summaries from labels first, keeps active-account matching keyed off stable identity fields, and formats user-facing timestamps in local time without seconds; `internal/monitor/tui/model_test.go` asserts label-first titles and local-time header/reset formatting.
 References: `internal/monitor/tui/model.go`, `internal/monitor/tui/model_test.go`, `README.md`, `docs/command-spec.md`
+
+Decision: Add `multicodex exec` as an auto-routing wrapper around `codex exec`.
+Context: Users often want the convenience of `codex exec` without manually choosing which logged-in subscription account currently has the most weekly headroom.
+Rationale: A dedicated `multicodex exec` command preserves a simple, familiar interface while keeping account-selection policy explicit and local to multicodex.
+Trade-offs: Selection is still best-effort snapshot routing, so simultaneous launches can choose the same profile and the chosen account may change between invocations.
+Enforcement: `multicodex exec` forwards all arguments directly to `codex exec`, prefers configured profiles whose five-hour usage is below 60%, chooses the lowest weekly usage among eligible profiles, and falls back to the lowest weekly-usage profile when none meet the five-hour threshold.
+References: `internal/multicodex/exec.go`, `internal/multicodex/exec_test.go`, `internal/monitor/usage/select.go`, `internal/monitor/usage/select_test.go`, `README.md`, `docs/command-spec.md`
