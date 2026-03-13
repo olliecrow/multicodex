@@ -2,6 +2,7 @@ package multicodex
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -40,6 +41,42 @@ func TestCmdExecRunsCodexExecWithSelectedProfile(t *testing.T) {
 	}
 	if !strings.Contains(log, "args=exec --skip-git-repo-check hello") {
 		t.Fatalf("expected exec args in log, got %q", log)
+	}
+}
+
+func TestCmdExecWritesSelectedProfileMetadata(t *testing.T) {
+	app, _ := newExecTestApp(t)
+	createExecProfiles(t, app, "alpha", "beta")
+
+	originalSelector := defaultExecAccountSelector
+	defaultExecAccountSelector = func(context.Context, []usage.MonitorAccount, int) (usage.SelectedAccount, error) {
+		return usage.SelectedAccount{
+			Account:              usage.MonitorAccount{Label: "beta"},
+			PrimaryUsedPercent:   15,
+			SecondaryUsedPercent: 10,
+		}, nil
+	}
+	defer func() { defaultExecAccountSelector = originalSelector }()
+
+	metadataPath := filepath.Join(t.TempDir(), "selected-profile.json")
+	t.Setenv(envSelectedProfilePath, metadataPath)
+
+	if err := app.Run([]string{"exec", "--skip-git-repo-check", "hello"}); err != nil {
+		t.Fatalf("exec failed: %v", err)
+	}
+
+	data, err := os.ReadFile(metadataPath)
+	if err != nil {
+		t.Fatalf("read metadata: %v", err)
+	}
+	var payload struct {
+		Profile string `json:"profile"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatalf("unmarshal metadata: %v", err)
+	}
+	if payload.Profile != "beta" {
+		t.Fatalf("expected selected profile beta, got %q", payload.Profile)
 	}
 }
 
@@ -154,6 +191,12 @@ func TestSelectExecProfileFallsBackToFirstSortedProfileWithoutAuth(t *testing.T)
 	}
 	if name != "alpha" {
 		t.Fatalf("expected alpha sorted fallback, got %q", name)
+	}
+}
+
+func TestWriteSelectedProfileMetadataNoPathIsNoOp(t *testing.T) {
+	if err := writeSelectedProfileMetadata("", "alpha"); err != nil {
+		t.Fatalf("writeSelectedProfileMetadata without path failed: %v", err)
 	}
 }
 

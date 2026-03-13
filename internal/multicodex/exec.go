@@ -2,6 +2,9 @@ package multicodex
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -12,6 +15,7 @@ import (
 const (
 	execSelectionPrimaryUsageLimit = 60
 	execSelectionTimeout           = 10 * time.Second
+	envSelectedProfilePath         = "MULTICODEX_SELECTED_PROFILE_PATH"
 )
 
 type execAccountSelector func(context.Context, []usage.MonitorAccount, int) (usage.SelectedAccount, error)
@@ -37,8 +41,31 @@ func (a *App) cmdExec(args []string) error {
 	if err := a.store.EnsureProfileDir(profile); err != nil {
 		return err
 	}
+	if err := writeSelectedProfileMetadata(os.Getenv(envSelectedProfilePath), name); err != nil {
+		return err
+	}
 
 	return RunWithProfile(profile.CodexHome, name, "codex", append([]string{"exec"}, args...))
+}
+
+func writeSelectedProfileMetadata(path, profile string) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil
+	}
+	payload := struct {
+		Profile string `json:"profile"`
+	}{
+		Profile: strings.TrimSpace(profile),
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal selected profile metadata: %w", err)
+	}
+	if err := os.WriteFile(path, append(data, '\n'), 0o600); err != nil {
+		return fmt.Errorf("write selected profile metadata: %w", err)
+	}
+	return nil
 }
 
 func execArgsAreHelpRequest(args []string) bool {
