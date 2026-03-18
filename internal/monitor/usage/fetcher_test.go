@@ -499,7 +499,7 @@ func TestFetcherDeduplicatesByAccountIDWhenEmailMissing(t *testing.T) {
 	}
 }
 
-func TestFetcherMergesUnverifiedAccountsIntoSingleIdentity(t *testing.T) {
+func TestFetcherKeepsUnverifiedAccountsDistinctByHome(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("CODEX_HOME", "/a")
@@ -535,17 +535,17 @@ func TestFetcherMergesUnverifiedAccountsIntoSingleIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out.TotalAccounts != 1 || out.SuccessfulAccounts != 1 {
-		t.Fatalf("expected unverified accounts merged to one identity, got %d/%d", out.SuccessfulAccounts, out.TotalAccounts)
+	if out.TotalAccounts != 2 || out.SuccessfulAccounts != 2 {
+		t.Fatalf("expected unverified accounts to remain distinct, got %d/%d", out.SuccessfulAccounts, out.TotalAccounts)
 	}
-	if len(out.Accounts) != 1 {
-		t.Fatalf("expected one account row after unverified merge, got %d", len(out.Accounts))
+	if len(out.Accounts) != 2 {
+		t.Fatalf("expected two account rows for unverified homes, got %d", len(out.Accounts))
 	}
-	if out.ObservedTokens5h == nil || *out.ObservedTokens5h != 150 {
-		t.Fatalf("expected merged unverified observed 5h max total, got %+v", out.ObservedTokens5h)
+	if out.ObservedTokens5h == nil || *out.ObservedTokens5h != 250 {
+		t.Fatalf("expected summed unverified observed 5h total, got %+v", out.ObservedTokens5h)
 	}
-	if out.ObservedTokensWeekly == nil || *out.ObservedTokensWeekly != 200 {
-		t.Fatalf("expected merged unverified observed weekly max total, got %+v", out.ObservedTokensWeekly)
+	if out.ObservedTokensWeekly == nil || *out.ObservedTokensWeekly != 380 {
+		t.Fatalf("expected summed unverified observed weekly total, got %+v", out.ObservedTokensWeekly)
 	}
 }
 

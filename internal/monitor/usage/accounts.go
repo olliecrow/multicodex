@@ -213,6 +213,9 @@ func discoverMonitorAccountsFromFilesystem() ([]MonitorAccount, string, error) {
 
 	out := make([]MonitorAccount, 0, len(paths))
 	for _, path := range paths {
+		if shouldIgnoreDiscoveredHome(path) {
+			continue
+		}
 		if !hasUsageSignals(path) {
 			continue
 		}
@@ -296,6 +299,28 @@ func hasUsageSignals(codexHome string) bool {
 	}
 	if dirExists(filepath.Join(codexHome, "archived_sessions")) {
 		return true
+	}
+	return false
+}
+
+func shouldIgnoreDiscoveredHome(codexHome string) bool {
+	normalized := strings.ToLower(normalizeHome(codexHome))
+	if normalized == "" {
+		return false
+	}
+
+	separators := string(filepath.Separator)
+	fragments := []string{
+		separators + "loopy" + separators + "launches" + separators,
+		separators + ".codex" + separators + "worktrees" + separators,
+		separators + ".cache" + separators,
+		separators + "library" + separators + "caches" + separators,
+		separators + "archived-contexts" + separators,
+	}
+	for _, fragment := range fragments {
+		if strings.Contains(normalized, fragment) {
+			return true
+		}
 	}
 	return false
 }

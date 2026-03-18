@@ -396,9 +396,15 @@ func identityKey(email, accountID, userID string) string {
 	return ""
 }
 
-func accountIdentityOrHomeKey(account AccountSummary, _ string) string {
+func accountIdentityOrHomeKey(account AccountSummary, codexHome string) string {
 	if identity := identityKey(account.AccountEmail, account.AccountID, account.UserID); identity != "" {
 		return identity
+	}
+	if home := normalizeHome(codexHome); home != "" {
+		return "home:" + strings.ToLower(home)
+	}
+	if label := strings.TrimSpace(account.Label); label != "" {
+		return "label:" + strings.ToLower(label)
 	}
 	return unverifiedAccountIdentityKey
 }
