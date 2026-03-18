@@ -412,7 +412,11 @@ func summarizeAccountIdentities(accounts []usage.AccountSummary) []string {
 	for _, account := range accounts {
 		identityKey := accountIdentityKey(account.AccountEmail, account.AccountID, account.UserID)
 		if identityKey == "" {
-			identityKey = "unidentified"
+			if label := strings.TrimSpace(account.Label); label != "" {
+				identityKey = "label:" + strings.ToLower(label)
+			} else {
+				identityKey = "unidentified"
+			}
 		}
 		if _, ok := seen[identityKey]; ok {
 			continue

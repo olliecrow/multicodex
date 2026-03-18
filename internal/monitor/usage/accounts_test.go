@@ -132,6 +132,52 @@ func TestLoadMonitorAccountsAutoDiscoversSystemCodexHomes(t *testing.T) {
 	}
 }
 
+func TestLoadMonitorAccountsSkipsTransientAutoDiscoveredHomes(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv(multicodexHomeEnvVar, filepath.Join(tmp, defaultMulticodexHomeDirName))
+	t.Setenv(accountsFileEnvVar, filepath.Join(tmp, "missing.json"))
+
+	stableHome := filepath.Join(tmp, "profiles", "work", "codex-home")
+	if err := os.MkdirAll(stableHome, 0o755); err != nil {
+		t.Fatalf("mkdir stable home: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(stableHome, "auth.json"), []byte(`{"tokens":{"access_token":"x"}}`), 0o600); err != nil {
+		t.Fatalf("write stable auth file: %v", err)
+	}
+
+	transientHome := filepath.Join(tmp, "loopy", "launches", "20260317T071323Z-ba3a94ce", "codex-home")
+	if err := os.MkdirAll(transientHome, 0o755); err != nil {
+		t.Fatalf("mkdir transient home: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(transientHome, "auth.json"), []byte(`{"tokens":{"access_token":"x"}}`), 0o600); err != nil {
+		t.Fatalf("write transient auth file: %v", err)
+	}
+
+	accounts, _, err := loadMonitorAccounts()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	stableFound := false
+	transientFound := false
+	for _, account := range accounts {
+		switch account.CodexHome {
+		case normalizeHome(stableHome):
+			stableFound = true
+		case normalizeHome(transientHome):
+			transientFound = true
+		}
+	}
+	if !stableFound {
+		t.Fatalf("expected stable discovered home to be included")
+	}
+	if transientFound {
+		t.Fatalf("expected transient loopy launch home to be excluded")
+	}
+}
+
 func TestAccountCollectorDeduplicatesSymlinkAndRealHomes(t *testing.T) {
 	tmp := t.TempDir()
 	realHome := filepath.Join(tmp, "profiles", "work", "codex-home")

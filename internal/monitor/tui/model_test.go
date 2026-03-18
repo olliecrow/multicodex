@@ -253,6 +253,22 @@ func TestAccountsLineShowsDetectedAndNames(t *testing.T) {
 	}
 }
 
+func TestAccountsLineShowsDistinctLabelsForUnidentifiedAccounts(t *testing.T) {
+	m := seededModel()
+	m.width = 140
+	m.height = 28
+	m.summary.TotalAccounts = 2
+	m.summary.Accounts = []usage.AccountSummary{
+		{Label: "apple"},
+		{Label: "crowoy"},
+	}
+
+	out := m.View()
+	if !strings.Contains(out, "accounts: 2 detected [apple, crowoy]") {
+		t.Fatalf("expected unidentified accounts to remain distinct by label, got:\n%s", out)
+	}
+}
+
 func TestAccountsLineTruncatesWithDots(t *testing.T) {
 	m := seededModel()
 	m.summary.TotalAccounts = 2
