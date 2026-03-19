@@ -70,13 +70,29 @@ func TestCmdExecWritesSelectedProfileMetadata(t *testing.T) {
 		t.Fatalf("read metadata: %v", err)
 	}
 	var payload struct {
-		Profile string `json:"profile"`
+		Profile                      string `json:"profile"`
+		SelectionSource              string `json:"selection_source"`
+		PrimaryUsedPercent           *int   `json:"primary_used_percent"`
+		SecondaryUsedPercent         *int   `json:"secondary_used_percent"`
+		UsedPrimaryThresholdFallback bool   `json:"used_primary_threshold_fallback"`
 	}
 	if err := json.Unmarshal(data, &payload); err != nil {
 		t.Fatalf("unmarshal metadata: %v", err)
 	}
 	if payload.Profile != "beta" {
 		t.Fatalf("expected selected profile beta, got %q", payload.Profile)
+	}
+	if payload.SelectionSource != "usage_selector" {
+		t.Fatalf("expected selection source usage_selector, got %q", payload.SelectionSource)
+	}
+	if payload.PrimaryUsedPercent == nil || *payload.PrimaryUsedPercent != 15 {
+		t.Fatalf("expected primary_used_percent 15, got %v", payload.PrimaryUsedPercent)
+	}
+	if payload.SecondaryUsedPercent == nil || *payload.SecondaryUsedPercent != 10 {
+		t.Fatalf("expected secondary_used_percent 10, got %v", payload.SecondaryUsedPercent)
+	}
+	if payload.UsedPrimaryThresholdFallback {
+		t.Fatal("expected used_primary_threshold_fallback false")
 	}
 }
 
@@ -163,14 +179,17 @@ func TestSelectExecProfileFallsBackToFirstProfileWithAuth(t *testing.T) {
 		t.Fatalf("loadConfigIfExists: %v", err)
 	}
 
-	name, _, err := app.selectExecProfile(cfg, func(context.Context, []usage.MonitorAccount, int) (usage.SelectedAccount, error) {
+	selected, err := app.selectExecProfile(cfg, func(context.Context, []usage.MonitorAccount, int) (usage.SelectedAccount, error) {
 		return usage.SelectedAccount{}, errors.New("boom")
 	})
 	if err != nil {
 		t.Fatalf("selectExecProfile: %v", err)
 	}
-	if name != "beta" {
-		t.Fatalf("expected beta auth fallback, got %q", name)
+	if selected.Name != "beta" {
+		t.Fatalf("expected beta auth fallback, got %q", selected.Name)
+	}
+	if selected.Metadata.SelectionSource != "first_with_auth_fallback" {
+		t.Fatalf("expected auth fallback selection source, got %q", selected.Metadata.SelectionSource)
 	}
 }
 
@@ -183,19 +202,59 @@ func TestSelectExecProfileFallsBackToFirstSortedProfileWithoutAuth(t *testing.T)
 		t.Fatalf("loadConfigIfExists: %v", err)
 	}
 
-	name, _, err := app.selectExecProfile(cfg, func(context.Context, []usage.MonitorAccount, int) (usage.SelectedAccount, error) {
+	selected, err := app.selectExecProfile(cfg, func(context.Context, []usage.MonitorAccount, int) (usage.SelectedAccount, error) {
 		return usage.SelectedAccount{}, errors.New("boom")
 	})
 	if err != nil {
 		t.Fatalf("selectExecProfile: %v", err)
 	}
-	if name != "alpha" {
-		t.Fatalf("expected alpha sorted fallback, got %q", name)
+	if selected.Name != "alpha" {
+		t.Fatalf("expected alpha sorted fallback, got %q", selected.Name)
+	}
+	if selected.Metadata.SelectionSource != "first_sorted_fallback" {
+		t.Fatalf("expected sorted fallback selection source, got %q", selected.Metadata.SelectionSource)
+	}
+}
+
+func TestSelectExecProfilePersistsUsageThresholdFallbackMetadata(t *testing.T) {
+	app := newTestAppForCLI(t)
+	createExecProfiles(t, app, "alpha", "beta")
+
+	cfg, err := app.loadConfigIfExists()
+	if err != nil {
+		t.Fatalf("loadConfigIfExists: %v", err)
+	}
+
+	selected, err := app.selectExecProfile(cfg, func(context.Context, []usage.MonitorAccount, int) (usage.SelectedAccount, error) {
+		return usage.SelectedAccount{
+			Account:                      usage.MonitorAccount{Label: "beta"},
+			PrimaryUsedPercent:           91,
+			SecondaryUsedPercent:         7,
+			UsedPrimaryThresholdFallback: true,
+		}, nil
+	})
+	if err != nil {
+		t.Fatalf("selectExecProfile: %v", err)
+	}
+	if selected.Name != "beta" {
+		t.Fatalf("expected beta selected, got %q", selected.Name)
+	}
+	if selected.Metadata.SelectionSource != "usage_selector" {
+		t.Fatalf("expected usage_selector selection source, got %q", selected.Metadata.SelectionSource)
+	}
+	if selected.Metadata.PrimaryUsedPercent == nil || *selected.Metadata.PrimaryUsedPercent != 91 {
+		t.Fatalf("expected primary_used_percent 91, got %v", selected.Metadata.PrimaryUsedPercent)
+	}
+	if selected.Metadata.SecondaryUsedPercent == nil || *selected.Metadata.SecondaryUsedPercent != 7 {
+		t.Fatalf("expected secondary_used_percent 7, got %v", selected.Metadata.SecondaryUsedPercent)
+	}
+	if !selected.Metadata.UsedPrimaryThresholdFallback {
+		t.Fatal("expected used_primary_threshold_fallback true")
 	}
 }
 
 func TestWriteSelectedProfileMetadataNoPathIsNoOp(t *testing.T) {
-	if err := writeSelectedProfileMetadata("", "alpha"); err != nil {
+	if err := writeSelectedProfileMetadata("", execSelectionMetadata{Profile: "alpha"}); err != nil {
 		t.Fatalf("writeSelectedProfileMetadata without path failed: %v", err)
 	}
 }

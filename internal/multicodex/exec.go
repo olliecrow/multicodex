@@ -20,6 +20,20 @@ const (
 
 type execAccountSelector func(context.Context, []usage.MonitorAccount, int) (usage.SelectedAccount, error)
 
+type execSelectionMetadata struct {
+	Profile                      string `json:"profile"`
+	SelectionSource              string `json:"selection_source,omitempty"`
+	PrimaryUsedPercent           *int   `json:"primary_used_percent,omitempty"`
+	SecondaryUsedPercent         *int   `json:"secondary_used_percent,omitempty"`
+	UsedPrimaryThresholdFallback bool   `json:"used_primary_threshold_fallback,omitempty"`
+}
+
+type execSelection struct {
+	Name     string
+	Profile  Profile
+	Metadata execSelectionMetadata
+}
+
 var defaultExecAccountSelector execAccountSelector = func(ctx context.Context, accounts []usage.MonitorAccount, maxPrimaryUsedPercent int) (usage.SelectedAccount, error) {
 	return usage.SelectBestAccount(ctx, accounts, maxPrimaryUsedPercent)
 }
@@ -34,31 +48,28 @@ func (a *App) cmdExec(args []string) error {
 		return err
 	}
 
-	name, profile, err := a.selectExecProfile(cfg, defaultExecAccountSelector)
+	selected, err := a.selectExecProfile(cfg, defaultExecAccountSelector)
 	if err != nil {
 		return err
 	}
-	if err := a.store.EnsureProfileDir(profile); err != nil {
+	if err := a.store.EnsureProfileDir(selected.Profile); err != nil {
 		return err
 	}
-	if err := writeSelectedProfileMetadata(os.Getenv(envSelectedProfilePath), name); err != nil {
+	if err := writeSelectedProfileMetadata(os.Getenv(envSelectedProfilePath), selected.Metadata); err != nil {
 		return err
 	}
 
-	return RunWithProfile(profile.CodexHome, name, "codex", append([]string{"exec"}, args...))
+	return RunWithProfile(selected.Profile.CodexHome, selected.Name, "codex", append([]string{"exec"}, args...))
 }
 
-func writeSelectedProfileMetadata(path, profile string) error {
+func writeSelectedProfileMetadata(path string, metadata execSelectionMetadata) error {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return nil
 	}
-	payload := struct {
-		Profile string `json:"profile"`
-	}{
-		Profile: strings.TrimSpace(profile),
-	}
-	data, err := json.Marshal(payload)
+	metadata.Profile = strings.TrimSpace(metadata.Profile)
+	metadata.SelectionSource = strings.TrimSpace(metadata.SelectionSource)
+	data, err := json.Marshal(metadata)
 	if err != nil {
 		return fmt.Errorf("marshal selected profile metadata: %w", err)
 	}
@@ -81,9 +92,9 @@ func execArgsAreHelpRequest(args []string) bool {
 	return args[0] == "help"
 }
 
-func (a *App) selectExecProfile(cfg *Config, selector execAccountSelector) (string, Profile, error) {
+func (a *App) selectExecProfile(cfg *Config, selector execAccountSelector) (execSelection, error) {
 	if len(cfg.Profiles) == 0 {
-		return "", Profile{}, &ExitError{Code: 2, Message: "no profiles configured. add one with: multicodex add <name>"}
+		return execSelection{}, &ExitError{Code: 2, Message: "no profiles configured. add one with: multicodex add <name>"}
 	}
 
 	names := sortedProfileNames(cfg)
@@ -110,17 +121,42 @@ func (a *App) selectExecProfile(cfg *Config, selector execAccountSelector) (stri
 		selected, err := selector(ctx, accounts, execSelectionPrimaryUsageLimit)
 		if err == nil {
 			if name, profile, ok := lookupSelectedExecProfile(cfg, selected); ok {
-				return name, profile, nil
+				metadata := execSelectionMetadata{
+					Profile:                      name,
+					SelectionSource:              "usage_selector",
+					PrimaryUsedPercent:           intPtr(selected.PrimaryUsedPercent),
+					SecondaryUsedPercent:         intPtr(selected.SecondaryUsedPercent),
+					UsedPrimaryThresholdFallback: selected.UsedPrimaryThresholdFallback,
+				}
+				return execSelection{Name: name, Profile: profile, Metadata: metadata}, nil
 			}
 		}
 	}
 
 	if firstWithAuth != "" {
-		return firstWithAuth, cfg.Profiles[firstWithAuth], nil
+		return execSelection{
+			Name:    firstWithAuth,
+			Profile: cfg.Profiles[firstWithAuth],
+			Metadata: execSelectionMetadata{
+				Profile:         firstWithAuth,
+				SelectionSource: "first_with_auth_fallback",
+			},
+		}, nil
 	}
 
 	first := names[0]
-	return first, cfg.Profiles[first], nil
+	return execSelection{
+		Name:    first,
+		Profile: cfg.Profiles[first],
+		Metadata: execSelectionMetadata{
+			Profile:         first,
+			SelectionSource: "first_sorted_fallback",
+		},
+	}, nil
+}
+
+func intPtr(v int) *int {
+	return &v
 }
 
 func lookupSelectedExecProfile(cfg *Config, selected usage.SelectedAccount) (string, Profile, bool) {
