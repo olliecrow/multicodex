@@ -134,7 +134,7 @@
   - `use <name>`
   - `login <name>`
   - `run <name> -- <command...>`
-  - `switch-global <name>`
+  - `switch-global <name> [--force]`
   - `switch-global --restore-default`
 
 `multicodex completion <shell>`
