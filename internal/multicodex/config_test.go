@@ -3,6 +3,7 @@ package multicodex
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -171,5 +172,80 @@ func TestEnsureProfileDirPreservesManualProfileConfig(t *testing.T) {
 	}
 	if string(b) != want {
 		t.Fatalf("unexpected manual profile config content: %q", string(b))
+	}
+}
+
+func TestProfileConfigUsesFileStoreMatchesExactKey(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{
+			name: "exact root key",
+			content: strings.Join([]string{
+				"model = \"gpt-5\"",
+				"cli_auth_credentials_store = \"file\"",
+			}, "\n"),
+			want: true,
+		},
+		{
+			name: "literal string value",
+			content: strings.Join([]string{
+				"model = \"gpt-5\"",
+				"cli_auth_credentials_store = 'file'",
+			}, "\n"),
+			want: true,
+		},
+		{
+			name: "comment false positive",
+			content: strings.Join([]string{
+				"# cli_auth_credentials_store = \"file\"",
+				"model = \"file\"",
+			}, "\n"),
+			want: false,
+		},
+		{
+			name:    "string false positive",
+			content: `note = "cli_auth_credentials_store should not imply file"`,
+			want:    false,
+		},
+		{
+			name: "wrong exact value with file in comment",
+			content: strings.Join([]string{
+				"cli_auth_credentials_store = \"keychain\" # file",
+			}, "\n"),
+			want: false,
+		},
+		{
+			name: "nested table ignored",
+			content: strings.Join([]string{
+				"[auth]",
+				"cli_auth_credentials_store = \"file\"",
+			}, "\n"),
+			want: false,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			path := filepath.Join(t.TempDir(), "config.toml")
+			if err := os.WriteFile(path, []byte(tc.content), 0o600); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+
+			got, err := profileConfigUsesFileStore(path)
+			if err != nil {
+				t.Fatalf("profileConfigUsesFileStore: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("profileConfigUsesFileStore(%q) = %v, want %v", tc.name, got, tc.want)
+			}
+		})
 	}
 }

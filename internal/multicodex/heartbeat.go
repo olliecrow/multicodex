@@ -71,6 +71,42 @@ func (a *App) cmdHeartbeat(args []string) error {
 	failed := 0
 	for _, name := range names {
 		profile := cfg.Profiles[name]
+		if err := a.store.EnsureProfileDir(profile); err != nil {
+			failed++
+			rows = append(rows, heartbeatRow{
+				Profile: name,
+				Status:  "fail",
+				Detail:  err.Error(),
+			})
+			continue
+		}
+		hasAuth, err := HasAuthFile(profile.CodexHome)
+		if err != nil {
+			failed++
+			rows = append(rows, heartbeatRow{
+				Profile: name,
+				Status:  "fail",
+				Detail:  err.Error(),
+			})
+			continue
+		}
+		if err := ensureProfileCodexExecutionReady(a.store.paths, profile); err != nil {
+			if !hasAuth {
+				rows = append(rows, heartbeatRow{
+					Profile: name,
+					Status:  "skipped",
+					Detail:  "auth.json not found. run multicodex login <name>",
+				})
+				continue
+			}
+			failed++
+			rows = append(rows, heartbeatRow{
+				Profile: name,
+				Status:  "fail",
+				Detail:  err.Error(),
+			})
+			continue
+		}
 		state, account, detail := codexLoginStatus(profile.CodexHome)
 		if state != "logged-in" {
 			rows = append(rows, heartbeatRow{

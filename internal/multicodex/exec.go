@@ -55,6 +55,9 @@ func (a *App) cmdExec(args []string) error {
 	if err := a.store.EnsureProfileDir(selected.Profile); err != nil {
 		return err
 	}
+	if err := ensureProfileCodexExecutionReady(a.store.paths, selected.Profile); err != nil {
+		return err
+	}
 	if err := writeSelectedProfileMetadata(os.Getenv(envSelectedProfilePath), selected.Metadata); err != nil {
 		return err
 	}

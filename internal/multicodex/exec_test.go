@@ -116,6 +116,33 @@ func TestCmdExecHelpWorksWithoutProfiles(t *testing.T) {
 	}
 }
 
+func TestCmdExecFailsWhenSharedConfigDoesNotUseFileStore(t *testing.T) {
+	app, logPath := newExecTestApp(t)
+	createExecProfiles(t, app, "alpha")
+	writeDefaultConfig(t, app, "model = \"global\"\n")
+
+	originalSelector := defaultExecAccountSelector
+	defaultExecAccountSelector = func(context.Context, []usage.MonitorAccount, int) (usage.SelectedAccount, error) {
+		return usage.SelectedAccount{Account: usage.MonitorAccount{Label: "alpha"}}, nil
+	}
+	defer func() { defaultExecAccountSelector = originalSelector }()
+
+	err := app.Run([]string{"exec", "--skip-git-repo-check", "hello"})
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("expected ExitError, got %T (%v)", err, err)
+	}
+	if exitErr.Code != 2 {
+		t.Fatalf("expected exit code 2, got %d", exitErr.Code)
+	}
+	if !strings.Contains(exitErr.Message, "requires file-backed auth") {
+		t.Fatalf("unexpected error message: %s", exitErr.Message)
+	}
+	if _, err := os.Stat(logPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected codex to not be invoked, stat err=%v", err)
+	}
+}
+
 func TestExecArgsAreHelpRequest(t *testing.T) {
 	t.Parallel()
 
@@ -281,6 +308,7 @@ func newExecTestApp(t *testing.T) (*App, string) {
 	if err != nil {
 		t.Fatalf("NewApp: %v", err)
 	}
+	writeDefaultFileStoreConfig(t, app)
 	return app, logPath
 }
 
@@ -370,6 +398,7 @@ exit 1
 	if err != nil {
 		t.Fatalf("NewApp: %v", err)
 	}
+	writeDefaultFileStoreConfig(t, app)
 	return app, logPath, root
 }
 
