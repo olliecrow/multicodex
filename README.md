@@ -153,7 +153,7 @@ Switch system default account used by default Codex context.
 multicodex switch-global work
 ```
 
-Restore the original default account state.
+Restore the latest saved non-multicodex-managed default account state.
 
 ```bash
 multicodex switch-global --restore-default
