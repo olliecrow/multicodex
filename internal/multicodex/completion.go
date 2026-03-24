@@ -84,7 +84,11 @@ _multicodex_complete() {
       ;;
     switch-global)
       if (( COMP_CWORD == 2 )); then
-        COMPREPLY=( $(compgen -W "$(_multicodex_profiles) --restore-default" -- "$cur") )
+        COMPREPLY=( $(compgen -W "$(_multicodex_profiles) --restore-default --force" -- "$cur") )
+        return 0
+      fi
+      if (( COMP_CWORD == 3 )); then
+        COMPREPLY=( $(compgen -W "--force" -- "$cur") )
         return 0
       fi
       ;;
@@ -199,7 +203,11 @@ _multicodex_complete() {
       ;;
     switch-global)
       if (( CURRENT == 3 )); then
-        compadd -- ${=($(_multicodex_profiles))} --restore-default
+        compadd -- ${=($(_multicodex_profiles))} --restore-default --force
+        return
+      fi
+      if (( CURRENT == 4 )); then
+        compadd -- --force
         return
       fi
       ;;
@@ -269,7 +277,7 @@ end
 complete -c multicodex -f -n '__fish_use_subcommand' -a 'init add login login-all use run exec switch-global status heartbeat monitor doctor dry-run completion version help'
 complete -c multicodex -f -n '__fish_seen_subcommand_from add login use' -a '(__multicodex_profiles)'
 complete -c multicodex -f -n '__fish_seen_subcommand_from run' -a '(__multicodex_profiles)'
-complete -c multicodex -f -n '__fish_seen_subcommand_from switch-global' -a '(__multicodex_profiles) --restore-default'
+complete -c multicodex -f -n '__fish_seen_subcommand_from switch-global' -a '(__multicodex_profiles) --restore-default --force'
 complete -c multicodex -f -n '__fish_seen_subcommand_from monitor' -a 'doctor completion help tui'
 complete -c multicodex -f -n '__fish_seen_subcommand_from monitor' -l interval
 complete -c multicodex -f -n '__fish_seen_subcommand_from monitor' -l timeout

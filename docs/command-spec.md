@@ -8,7 +8,7 @@
 - `multicodex use <name>`
 - `multicodex run <name> -- <command...>`
 - `multicodex exec [codex exec args]`
-- `multicodex switch-global <name>`
+- `multicodex switch-global <name> [--force]`
 - `multicodex switch-global --restore-default`
 - `multicodex status`
 - `multicodex heartbeat`
@@ -53,21 +53,25 @@
 
 `multicodex run <name> -- <command...>`
 - Executes one command with profile-scoped context.
+- Re-checks file-backed auth isolation before direct `codex` invocations.
 - Returns child exit code.
 
 `multicodex exec [codex exec args]`
 - Executes `codex exec` with all remaining arguments passed through unchanged.
 - For help requests (`--help`, `-h`, or `help`), delegates directly to `codex exec` and does not require profiles to be configured.
 - Automatically selects among configured multicodex profiles.
+- Re-checks file-backed auth isolation before launching `codex exec`.
 - Prefers profiles whose five-hour usage window is strictly below 60%.
 - Among eligible profiles, chooses the lowest weekly usage.
 - When no profile is below the five-hour threshold, falls back to the lowest weekly-usage profile.
 - When usage fetch is unavailable for every profile, falls back to the first sorted profile with `auth.json`, otherwise the first sorted configured profile.
 - Returns child exit code.
 
-`multicodex switch-global <name>`
+`multicodex switch-global <name> [--force]`
 - Explicit global operation.
 - Changes only minimal auth pointer or file required for default Codex identity.
+- Re-checks file-backed auth isolation before switching unless `--force` is supplied.
+- Refreshes restore metadata whenever the current default auth state changed outside multicodex.
 - Avoids touching unrelated Codex session data.
 
 `multicodex status`
@@ -77,6 +81,7 @@
 `multicodex heartbeat`
 - Runs a minimal read-only `codex exec --skip-git-repo-check --sandbox read-only --color never hello` keepalive for each logged-in profile.
 - Skips profiles that are currently logged out.
+- Re-checks file-backed auth isolation before per-profile Codex execution.
 - Uses a non-blocking local lock so overlapping heartbeat runs are skipped instead of overlapping.
 - Retries failed logged-in profile heartbeats with linear backoff by default.
 - Prints per-profile result rows and a final summary.
@@ -88,9 +93,12 @@
 - Runs a live terminal UI for Codex subscription usage across compatible local accounts.
 - Defaults to the integrated monitor UI when no monitor subcommand is provided.
 - Prefers account definitions from multicodex profile config and monitor-owned account overrides.
+- Always includes the default Codex home as a candidate account home before broader filesystem discovery.
 - Shows account labels instead of raw email addresses in the TUI when labels are available.
 - Keeps tracked timestamps in UTC internally while rendering user-facing TUI timestamps in local time without seconds.
 - Continues to support legacy monitor account-file locations as a compatibility fallback.
+- Uses read-only filesystem auto-discovery under the home directory, scanning for `.codex*`, `.codex`, and `codex-home` paths up to depth 5 before filtering transient/cache locations and requiring usage signals.
+- Treats observed-token totals as local estimates derived from session logs rather than official provider counters.
 - Remains read-only with respect to Codex account state.
 
 `multicodex monitor help`
@@ -104,6 +112,7 @@
 - Runs read-only monitor setup and source checks.
 - Supports JSON output for automation.
 - Checks codex binary access, auth-file readability, app-server usage fetch, and oauth usage fetch.
+- Exits success when at least one usage source works, while surfacing degraded output when a source is unavailable.
 
 `multicodex monitor completion`
 - Compatibility alias for shell completion setup after migration from the standalone monitor.

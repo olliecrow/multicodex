@@ -138,6 +138,15 @@ func printMonitorDoctorHuman(report usage.DoctorReport) {
 		fmt.Printf("[%s] %s\n", state, c.Name)
 		fmt.Printf("  %s\n", c.Details)
 	}
+	fmt.Println()
+	switch report.Status() {
+	case "healthy":
+		fmt.Println("monitor doctor result: PASS")
+	case "degraded":
+		fmt.Println("monitor doctor result: PASS (degraded: at least one usage source is unavailable)")
+	default:
+		fmt.Println("monitor doctor result: FAIL")
+	}
 }
 
 func printMonitorUsage() {

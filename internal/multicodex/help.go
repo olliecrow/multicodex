@@ -23,7 +23,7 @@ var commandSummaries = []struct {
 	{Name: "use <name> [--shell]", Summary: "switch profile in current terminal context"},
 	{Name: "run <name> -- <command...>", Summary: "run one command in profile context"},
 	{Name: "exec [codex exec args]", Summary: "run codex exec on the best available profile"},
-	{Name: "switch-global <name>", Summary: "switch default global codex auth to profile"},
+	{Name: "switch-global <name> [--force]", Summary: "switch default global codex auth to profile"},
 	{Name: "switch-global --restore-default", Summary: "restore original global default auth"},
 	{Name: "status", Summary: "show all profile auth states"},
 	{Name: "heartbeat", Summary: "send a minimal keepalive hello for logged-in profiles"},
@@ -93,10 +93,11 @@ var commandHelpByName = map[string]commandHelp{
 		},
 	},
 	"switch-global": {
-		Usage:       "multicodex switch-global <name> | --restore-default",
-		Description: "Explicitly switch global default auth pointer to a profile, or restore pre-multicodex default state.",
+		Usage:       "multicodex switch-global <name> [--force] | --restore-default",
+		Description: "Explicitly switch global default auth pointer to a profile, or restore the latest saved non-multicodex-managed default state. By default this refuses when the effective profile config no longer enables file-backed auth isolation; use --force only when you understand the risk.",
 		Examples: []string{
 			"multicodex switch-global personal",
+			"multicodex switch-global --force personal",
 			"multicodex switch-global --restore-default",
 		},
 	},
@@ -125,7 +126,7 @@ var commandHelpByName = map[string]commandHelp{
 	},
 	"monitor doctor": {
 		Usage:       "multicodex monitor doctor [--json] [--timeout 20s]",
-		Description: "Run read-only monitor checks against the active/default Codex account data sources.",
+		Description: "Run read-only monitor checks against the active/default Codex account data sources. The command succeeds when at least one usage source works and reports degraded status when a source is unavailable.",
 		Examples: []string{
 			"multicodex monitor doctor",
 			"multicodex monitor doctor --json",

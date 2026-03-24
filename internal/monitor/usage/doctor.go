@@ -30,6 +30,10 @@ func RunDoctor(ctx context.Context) DoctorReport {
 }
 
 func (r DoctorReport) Healthy() bool {
+	return r.Status() != "failed"
+}
+
+func (r DoctorReport) Status() string {
 	var appOK, oauthOK bool
 	for _, c := range r.Checks {
 		switch c.Name {
@@ -39,7 +43,14 @@ func (r DoctorReport) Healthy() bool {
 			oauthOK = c.OK
 		}
 	}
-	return appOK || oauthOK
+	switch {
+	case appOK && oauthOK:
+		return "healthy"
+	case appOK || oauthOK:
+		return "degraded"
+	default:
+		return "failed"
+	}
 }
 
 func checkCodexBinary(ctx context.Context) DoctorCheck {
