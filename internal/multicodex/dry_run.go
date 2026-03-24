@@ -64,7 +64,7 @@ func renderDryRunOverview(store *Store, cfg *Config) string {
 	b.WriteString("3. login <name> runs official codex login within that profile context.\n")
 	b.WriteString("4. use <name> outputs shell exports for current-terminal switching only.\n")
 	b.WriteString("5. run <name> executes one command with that profile context only.\n")
-	b.WriteString("6. switch-global <name> updates only default auth pointer plus restore metadata, after checking file-backed auth isolation.\n")
+	b.WriteString("6. switch-global <name> [--force] updates only default auth pointer plus restore metadata; by default it first checks file-backed auth isolation.\n")
 	b.WriteString("7. switch-global --restore-default restores the latest saved non-multicodex-managed default auth state.\n\n")
 	b.WriteString("dry-run only: no commands were executed and no files were changed.\n")
 	return b.String()
