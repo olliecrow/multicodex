@@ -203,6 +203,10 @@ func (a *App) cmdLogin(args []string) error {
 }
 
 func ensureLoginConfigReady(paths Paths, profile Profile) error {
+	return ensureProfileCodexExecutionReady(paths, profile)
+}
+
+func ensureProfileCodexExecutionReady(paths Paths, profile Profile) error {
 	configPath := filepath.Join(profile.CodexHome, "config.toml")
 	ok, err := profileConfigUsesFileStore(configPath)
 	if err != nil {
@@ -214,12 +218,17 @@ func ensureLoginConfigReady(paths Paths, profile Profile) error {
 	return &ExitError{
 		Code: 2,
 		Message: fmt.Sprintf(
-			"profile %q requires file-backed auth. set cli_auth_credentials_store = \"file\" in %s or create a per-profile override at %s",
+			"profile %q requires file-backed auth to keep auth isolated. set cli_auth_credentials_store = \"file\" in %s or create a per-profile override at %s",
 			profile.Name,
 			filepath.Join(paths.DefaultCodexHome, "config.toml"),
 			configPath,
 		),
 	}
+}
+
+func commandRequiresProfileCodexIsolation(cmd string) bool {
+	base := filepath.Base(strings.TrimSpace(cmd))
+	return base == "codex"
 }
 
 func (a *App) cmdLoginAll() error {
@@ -310,15 +319,20 @@ func (a *App) cmdRun(args []string) error {
 	if err := a.store.EnsureProfileDir(profile); err != nil {
 		return err
 	}
-
 	cmd := args[sep+1]
 	cmdArgs := args[sep+2:]
+	if commandRequiresProfileCodexIsolation(cmd) {
+		if err := ensureProfileCodexExecutionReady(a.store.paths, profile); err != nil {
+			return err
+		}
+	}
 	return RunWithProfile(profile.CodexHome, name, cmd, cmdArgs)
 }
 
 func (a *App) cmdSwitchGlobal(args []string) error {
-	if len(args) != 1 {
-		return &ExitError{Code: 2, Message: "usage: multicodex switch-global <name> | --restore-default"}
+	name, restoreDefault, force, err := parseSwitchGlobalArgs(args)
+	if err != nil {
+		return err
 	}
 
 	cfg, err := a.loadOrInitConfig()
@@ -326,7 +340,7 @@ func (a *App) cmdSwitchGlobal(args []string) error {
 		return err
 	}
 
-	if args[0] == "--restore-default" {
+	if restoreDefault {
 		changed, err := a.store.RestoreGlobalAuth(cfg)
 		if err != nil {
 			return err
@@ -342,13 +356,18 @@ func (a *App) cmdSwitchGlobal(args []string) error {
 		return nil
 	}
 
-	name := args[0]
 	profile, ok := cfg.Profiles[name]
 	if !ok {
 		return &ExitError{Code: 2, Message: fmt.Sprintf("unknown profile: %s", name)}
 	}
 	if err := a.store.EnsureProfileDir(profile); err != nil {
 		return err
+	}
+	if err := ensureProfileCodexExecutionReady(a.store.paths, profile); err != nil {
+		if !force {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "warning: forcing global switch despite disabled file-backed auth isolation: %v\n", err)
 	}
 	if err := a.store.SwitchGlobalAuthToProfile(cfg, profile); err != nil {
 		return err
@@ -359,10 +378,49 @@ func (a *App) cmdSwitchGlobal(args []string) error {
 
 	fmt.Printf("global codex auth now points to profile %q\n", name)
 	fmt.Println("note: only auth pointer was switched. unrelated codex files were left untouched")
-	if !IsFileStoreLikelyConfigured(a.store.paths.DefaultCodexHome) {
-		fmt.Println("warning: default codex config may still use keychain storage. if global switching does not take effect everywhere, set cli_auth_credentials_store to file in ~/.codex/config.toml")
+	if force {
+		fmt.Println("warning: forced switch bypassed file-backed auth isolation preflight")
 	}
 	return nil
+}
+
+func parseSwitchGlobalArgs(args []string) (string, bool, bool, error) {
+	usageErr := &ExitError{Code: 2, Message: "usage: multicodex switch-global <name> [--force] | --restore-default"}
+	if len(args) == 0 || len(args) > 2 {
+		return "", false, false, usageErr
+	}
+
+	var (
+		name           string
+		restoreDefault bool
+		force          bool
+	)
+	for _, arg := range args {
+		switch strings.TrimSpace(arg) {
+		case "":
+			return "", false, false, usageErr
+		case "--restore-default":
+			restoreDefault = true
+		case "--force":
+			force = true
+		default:
+			if name != "" {
+				return "", false, false, usageErr
+			}
+			name = arg
+		}
+	}
+
+	if restoreDefault {
+		if force || name != "" {
+			return "", false, false, usageErr
+		}
+		return "", true, false, nil
+	}
+	if name == "" {
+		return "", false, false, usageErr
+	}
+	return name, false, force, nil
 }
 
 func (a *App) cmdStatus() error {

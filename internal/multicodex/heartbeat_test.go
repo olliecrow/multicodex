@@ -110,6 +110,36 @@ func TestCmdHeartbeatSkipsWhenRunAlreadyInProgress(t *testing.T) {
 	}
 }
 
+func TestCmdHeartbeatFailsWhenSharedConfigDoesNotUseFileStore(t *testing.T) {
+	app := newHeartbeatTestApp(t, fakeCodexScript{
+		loginStatusByProfile: map[string]fakeStatus{
+			"alpha": {exitCode: 0, output: "Logged in using ChatGPT"},
+		},
+		execByProfile: map[string]fakeStatus{
+			"alpha": {exitCode: 0, output: "ok"},
+		},
+	})
+	createHeartbeatProfiles(t, app, "alpha")
+	writeDefaultConfig(t, app, "model = \"global\"\n")
+	if err := os.WriteFile(filepath.Join(app.store.paths.ProfilesDir, "alpha", "codex-home", "auth.json"), []byte(`{"tokens":{"access_token":"x"}}`), 0o600); err != nil {
+		t.Fatalf("write auth: %v", err)
+	}
+
+	out, err := captureStdout(t, func() error {
+		return app.cmdHeartbeat(nil)
+	})
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("expected ExitError, got %T (%v)", err, err)
+	}
+	if exitErr.Code != 1 {
+		t.Fatalf("expected exit code 1, got %d", exitErr.Code)
+	}
+	if !strings.Contains(out, "requires file-backed auth") {
+		t.Fatalf("expected heartbeat output to mention file-backed auth, got %q", out)
+	}
+}
+
 func TestRunCodexHeartbeatTimeout(t *testing.T) {
 	root := t.TempDir()
 	profileHome := filepath.Join(root, "profile")
@@ -403,6 +433,7 @@ func newHeartbeatTestApp(t *testing.T, cfg fakeCodexScript) *App {
 	if err != nil {
 		t.Fatalf("new app: %v", err)
 	}
+	writeDefaultFileStoreConfig(t, app)
 	return app
 }
 

@@ -1,6 +1,7 @@
 package multicodex
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -76,57 +77,141 @@ func (s *Store) RestoreGlobalAuth(cfg *Config) (bool, error) {
 }
 
 func (s *Store) ensureGlobalBackup(cfg *Config) error {
-	if cfg.Global.BackupInitialized {
+	snapshot, err := s.captureDefaultAuthSnapshot()
+	if err != nil {
+		return err
+	}
+	if !cfg.Global.BackupInitialized {
+		return s.storeBackupSnapshot(cfg, snapshot)
+	}
+	if s.isManagedDefaultAuthSnapshot(snapshot) {
 		return nil
 	}
+	matches, err := s.backupSnapshotMatches(cfg, snapshot)
+	if err != nil {
+		return err
+	}
+	if matches {
+		return nil
+	}
+	return s.storeBackupSnapshot(cfg, snapshot)
+}
 
+func (s *Store) captureDefaultAuthSnapshot() (authPathSnapshot, error) {
 	info, err := os.Lstat(s.paths.DefaultAuthPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			cfg.Global.BackupMode = "missing"
-			cfg.Global.BackupInitialized = true
-			return nil
+			return authPathSnapshot{Mode: "missing"}, nil
 		}
-		return fmt.Errorf("inspect default auth: %w", err)
+		return authPathSnapshot{}, fmt.Errorf("inspect default auth: %w", err)
 	}
-
 	if info.Mode()&os.ModeSymlink != 0 {
 		target, err := os.Readlink(s.paths.DefaultAuthPath)
 		if err != nil {
-			return fmt.Errorf("read default auth symlink: %w", err)
+			return authPathSnapshot{}, fmt.Errorf("read default auth symlink: %w", err)
 		}
-		cfg.Global.BackupMode = "symlink"
-		cfg.Global.BackupLinkTarget = target
-		cfg.Global.BackupInitialized = true
-		return nil
+		return authPathSnapshot{Mode: "symlink", LinkTarget: target}, nil
 	}
-
 	if !info.Mode().IsRegular() {
-		return fmt.Errorf("default auth exists but is not regular file or symlink")
+		return authPathSnapshot{}, fmt.Errorf("default auth exists but is not regular file or symlink")
 	}
-
-	backupPath := filepath.Join(s.paths.BackupsDir, "default-auth.backup")
 	b, err := os.ReadFile(s.paths.DefaultAuthPath)
 	if err != nil {
-		return fmt.Errorf("read default auth file: %w", err)
+		return authPathSnapshot{}, fmt.Errorf("read default auth file: %w", err)
 	}
-	if err := os.WriteFile(backupPath, b, 0o600); err != nil {
-		return fmt.Errorf("write auth backup file: %w", err)
-	}
-
-	cfg.Global.BackupMode = "file"
-	cfg.Global.BackupFilePath = backupPath
-	cfg.Global.BackupInitialized = true
-	return nil
+	return authPathSnapshot{Mode: "file", FileBytes: b}, nil
 }
 
-func IsFileStoreLikelyConfigured(defaultCodexHome string) bool {
-	b, err := os.ReadFile(filepath.Join(defaultCodexHome, "config.toml"))
-	if err != nil {
+func (s *Store) storeBackupSnapshot(cfg *Config, snapshot authPathSnapshot) error {
+	cfg.Global.BackupMode = snapshot.Mode
+	cfg.Global.BackupFilePath = ""
+	cfg.Global.BackupLinkTarget = ""
+	cfg.Global.BackupInitialized = true
+
+	switch snapshot.Mode {
+	case "missing":
+		return nil
+	case "symlink":
+		cfg.Global.BackupLinkTarget = snapshot.LinkTarget
+		return nil
+	case "file":
+		backupPath := filepath.Join(s.paths.BackupsDir, "default-auth.backup")
+		if err := os.MkdirAll(s.paths.BackupsDir, 0o700); err != nil {
+			return fmt.Errorf("create backups dir: %w", err)
+		}
+		if err := os.WriteFile(backupPath, snapshot.FileBytes, 0o600); err != nil {
+			return fmt.Errorf("write auth backup file: %w", err)
+		}
+		cfg.Global.BackupFilePath = backupPath
+		return nil
+	default:
+		return fmt.Errorf("unknown auth snapshot mode: %s", snapshot.Mode)
+	}
+}
+
+func (s *Store) backupSnapshotMatches(cfg *Config, snapshot authPathSnapshot) (bool, error) {
+	if !cfg.Global.BackupInitialized {
+		return false, nil
+	}
+	if cfg.Global.BackupMode != snapshot.Mode {
+		return false, nil
+	}
+
+	switch snapshot.Mode {
+	case "missing":
+		return true, nil
+	case "symlink":
+		return normalizeAuthLinkTarget(s.paths.DefaultAuthPath, cfg.Global.BackupLinkTarget) == normalizeAuthLinkTarget(s.paths.DefaultAuthPath, snapshot.LinkTarget), nil
+	case "file":
+		if cfg.Global.BackupFilePath == "" {
+			return false, nil
+		}
+		b, err := os.ReadFile(cfg.Global.BackupFilePath)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return false, nil
+			}
+			return false, fmt.Errorf("read auth backup file: %w", err)
+		}
+		return bytes.Equal(b, snapshot.FileBytes), nil
+	default:
+		return false, fmt.Errorf("unknown backup mode: %s", snapshot.Mode)
+	}
+}
+
+func (s *Store) isManagedDefaultAuthSnapshot(snapshot authPathSnapshot) bool {
+	if snapshot.Mode != "symlink" {
 		return false
 	}
-	content := string(b)
-	return strings.Contains(content, "cli_auth_credentials_store") && strings.Contains(content, "file")
+	target := normalizeAuthLinkTarget(s.paths.DefaultAuthPath, snapshot.LinkTarget)
+	if target == "" {
+		return false
+	}
+	return isSubpath(s.paths.ProfilesDir, target) && filepath.Base(target) == "auth.json"
+}
+
+func normalizeAuthLinkTarget(linkPath, target string) string {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return ""
+	}
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(filepath.Dir(linkPath), target)
+	}
+	target = filepath.Clean(target)
+	if abs, err := filepath.Abs(target); err == nil {
+		target = abs
+	}
+	if resolved, err := filepath.EvalSymlinks(target); err == nil && strings.TrimSpace(resolved) != "" {
+		target = resolved
+	}
+	return filepath.Clean(target)
+}
+
+type authPathSnapshot struct {
+	Mode       string
+	FileBytes  []byte
+	LinkTarget string
 }
 
 func removeAuthPath(path string) error {
