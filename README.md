@@ -6,7 +6,7 @@ It keeps accounts isolated in named local profiles. You log in once per profile,
 
 By default, each profile reuses your global Codex `config.toml`, so normal Codex settings changes continue to apply across all multicodex profiles. A profile can still opt into its own config by replacing its profile-local `config.toml`.
 
-Profile login still requires file-backed auth. If your shared global Codex config does not set `cli_auth_credentials_store = "file"`, `multicodex login` will fail with a setup error until you either enable file-backed auth globally or create a per-profile override.
+Profile login still requires file-backed auth. If your shared global Codex config does not set `cli_auth_credentials_store = "file"`, `multicodex login` will fail with a setup error until you either enable file-backed auth globally or create a per-profile override. The same preflight is re-checked before profile-scoped Codex execution (`multicodex exec`, `multicodex heartbeat`, direct `multicodex run ... -- codex ...`, and `multicodex switch-global` unless you explicitly force it), so later edits to the shared config cannot silently weaken isolation.
 
 By default it only changes the current terminal context. It does not change your system default Codex session unless you run an explicit global switch command.
 
@@ -17,7 +17,7 @@ By default it only changes the current terminal context. It does not change your
 
 ## Prerequisites
 
-- Go (for building from source).
+- Go 1.24 or newer (for building from source).
 - Official `codex` CLI installed and available in `PATH`.
 - supported host platforms: macOS and Linux only
 
@@ -106,7 +106,7 @@ multicodex login-all
 multicodex use <name> [--shell]
 multicodex run <name> -- <command...>
 multicodex exec [codex exec args]
-multicodex switch-global <name>
+multicodex switch-global <name> [--force]
 multicodex switch-global --restore-default
 multicodex status
 multicodex heartbeat
@@ -157,6 +157,12 @@ Restore the original default account state.
 
 ```bash
 multicodex switch-global --restore-default
+```
+
+If you deliberately need to bypass the file-backed-auth preflight, use `--force`.
+
+```bash
+multicodex switch-global --force work
 ```
 
 Run non-mutating checks and preview commands.
@@ -221,13 +227,20 @@ Monitor account resolution order:
 - explicit account file under `~/multicodex/monitor/accounts.json`
 - configured multicodex profiles from `~/multicodex/config.json`
 - active `CODEX_HOME`
+- default Codex home at `~/.codex`
 - compatible Codex homes discovered from the local filesystem
+
+Filesystem discovery is read-only but intentionally broad: it scans your home directory for `.codex*`, `.codex`, and `codex-home` directories up to depth 5, then filters known transient/cache locations and requires real usage signals before including a home.
 
 Legacy account-file paths are still read when the new multicodex monitor file is absent:
 - `~/codex-usage-monitor/accounts.json`
 - `~/.codex-usage-monitor/accounts.json`
 
 For migration convenience, `multicodex monitor completion [shell]` is also supported and defaults to bash, matching the old standalone monitor habit.
+
+`multicodex monitor doctor` succeeds when at least one usage source works. A passing result can still be degraded if either the app-server path or the OAuth fallback is unavailable.
+
+Observed token totals shown by the monitor are local estimates derived from session logs. Treat them as advisory and separate from the official five-hour and weekly windows.
 
 Example manual monitor account file:
 
