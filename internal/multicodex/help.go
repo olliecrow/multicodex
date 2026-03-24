@@ -24,7 +24,7 @@ var commandSummaries = []struct {
 	{Name: "run <name> -- <command...>", Summary: "run one command in profile context"},
 	{Name: "exec [codex exec args]", Summary: "run codex exec on the best available profile"},
 	{Name: "switch-global <name> [--force]", Summary: "switch default global codex auth to profile"},
-	{Name: "switch-global --restore-default", Summary: "restore original global default auth"},
+	{Name: "switch-global --restore-default", Summary: "restore latest saved external global auth"},
 	{Name: "status", Summary: "show all profile auth states"},
 	{Name: "heartbeat", Summary: "send a minimal keepalive hello for logged-in profiles"},
 	{Name: "monitor [flags]", Summary: "show live subscription usage across accounts"},
