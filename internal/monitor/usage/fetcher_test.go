@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -29,6 +30,17 @@ func (f *fakeSource) Close() error {
 	f.closed = true
 	return nil
 }
+
+type blockingSource struct {
+	name string
+}
+
+func (b *blockingSource) Name() string { return b.name }
+func (b *blockingSource) Fetch(ctx context.Context) (*Summary, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+func (b *blockingSource) Close() error { return nil }
 
 func TestFetcherUsesPrimaryOnSuccess(t *testing.T) {
 	primary := &fakeSource{name: "primary", out: &Summary{Source: "primary"}}
@@ -61,6 +73,26 @@ func TestFetcherFallsBackWithWarning(t *testing.T) {
 	}
 	if !strings.Contains(out.Warnings[0], "primary") {
 		t.Fatalf("warning should mention primary failure")
+	}
+}
+
+func TestFetchWithFallbackReservesTimeForFallback(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	out, err := fetchWithFallback(ctx, &blockingSource{name: "primary"}, &fakeSource{name: "fallback", out: &Summary{Source: "fallback"}})
+	if err != nil {
+		t.Fatalf("expected fallback success, got error: %v", err)
+	}
+	if out.Source != "fallback" {
+		t.Fatalf("expected fallback summary, got %q", out.Source)
+	}
+	if time.Since(start) >= 95*time.Millisecond {
+		t.Fatalf("expected fallback to succeed before parent context expiry")
+	}
+	if len(out.Warnings) == 0 || !strings.Contains(out.Warnings[0], `primary source "primary" failed`) {
+		t.Fatalf("expected primary failure warning, got %+v", out.Warnings)
 	}
 }
 
@@ -631,6 +663,292 @@ func TestFetcherMarksWindowUnavailableWhenActiveFetchFails(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(out.Warnings, " | "), "window cards are unavailable") {
 		t.Fatalf("expected warning about unavailable window cards")
+	}
+}
+
+func TestFetcherUsesDefaultAuthSymlinkTargetAsActiveAlias(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("CODEX_HOME", "")
+
+	defaultHome := filepath.Join(tmp, ".codex")
+	profileHome := filepath.Join(tmp, "multicodex", "profiles", "crowoy", "codex-home")
+	if err := os.MkdirAll(defaultHome, 0o700); err != nil {
+		t.Fatalf("mkdir default home: %v", err)
+	}
+	if err := os.MkdirAll(profileHome, 0o700); err != nil {
+		t.Fatalf("mkdir profile home: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(profileHome, "auth.json"), []byte(`{"tokens":{"access_token":"x"}}`), 0o600); err != nil {
+		t.Fatalf("write profile auth: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(profileHome, "auth.json"), filepath.Join(defaultHome, "auth.json")); err != nil {
+		t.Fatalf("symlink default auth: %v", err)
+	}
+
+	f := &Fetcher{
+		accounts: []accountFetcher{
+			{
+				account:  MonitorAccount{Label: "default", CodexHome: defaultHome},
+				primary:  &fakeSource{name: "primary-default", err: errors.New("boom")},
+				fallback: &fakeSource{name: "fallback-default", err: errors.New("fallback boom")},
+			},
+			{
+				account:  MonitorAccount{Label: "crowoy", CodexHome: profileHome},
+				primary:  &fakeSource{name: "primary-crowoy", out: &Summary{AccountEmail: "crowoy@example.com", PrimaryWindow: WindowSummary{UsedPercent: 15}, SecondaryWindow: WindowSummary{UsedPercent: 19}}},
+				fallback: &fakeSource{name: "fallback-crowoy"},
+			},
+		},
+		observed: fakeEstimator{
+			values: map[string]ObservedTokenEstimate{
+				defaultHome: {Window5h: ObservedTokenBreakdown{Total: 1}, WindowWeekly: ObservedTokenBreakdown{Total: 2}, Status: observedTokensStatusEstimated},
+				profileHome: {Window5h: ObservedTokenBreakdown{Total: 3}, WindowWeekly: ObservedTokenBreakdown{Total: 4}, Status: observedTokensStatusEstimated},
+			},
+		},
+	}
+
+	out, err := f.Fetch(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !out.WindowDataAvailable {
+		t.Fatalf("expected active window data to remain available via auth symlink target")
+	}
+	if out.AccountEmail != "crowoy@example.com" {
+		t.Fatalf("expected active account email from auth-linked profile, got %q", out.AccountEmail)
+	}
+	if out.WindowAccountLabel != "crowoy" {
+		t.Fatalf("expected active window label from auth-linked profile, got %q", out.WindowAccountLabel)
+	}
+	if out.PrimaryWindow.UsedPercent != 15 || out.SecondaryWindow.UsedPercent != 19 {
+		t.Fatalf("expected active windows from auth-linked profile")
+	}
+}
+
+func TestFetcherPrefersProfileLabelForActiveAliasWhenBothRowsSucceed(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("CODEX_HOME", "")
+
+	defaultHome := filepath.Join(tmp, ".codex")
+	profileHome := filepath.Join(tmp, "multicodex", "profiles", "crowoy", "codex-home")
+	if err := os.MkdirAll(defaultHome, 0o700); err != nil {
+		t.Fatalf("mkdir default home: %v", err)
+	}
+	if err := os.MkdirAll(profileHome, 0o700); err != nil {
+		t.Fatalf("mkdir profile home: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(profileHome, "auth.json"), []byte(`{"tokens":{"access_token":"x"}}`), 0o600); err != nil {
+		t.Fatalf("write profile auth: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(profileHome, "auth.json"), filepath.Join(defaultHome, "auth.json")); err != nil {
+		t.Fatalf("symlink default auth: %v", err)
+	}
+
+	f := &Fetcher{
+		accounts: []accountFetcher{
+			{
+				account:  MonitorAccount{Label: "crowoy", CodexHome: profileHome},
+				primary:  &fakeSource{name: "primary-crowoy", out: &Summary{AccountEmail: "crowoy@example.com", PrimaryWindow: WindowSummary{UsedPercent: 15}, SecondaryWindow: WindowSummary{UsedPercent: 19}}},
+				fallback: &fakeSource{name: "fallback-crowoy"},
+			},
+			{
+				account:  MonitorAccount{Label: "default", CodexHome: defaultHome},
+				primary:  &fakeSource{name: "primary-default", out: &Summary{AccountEmail: "crowoy@example.com", PrimaryWindow: WindowSummary{UsedPercent: 88}, SecondaryWindow: WindowSummary{UsedPercent: 89}}},
+				fallback: &fakeSource{name: "fallback-default"},
+			},
+		},
+		observed: fakeEstimator{
+			values: map[string]ObservedTokenEstimate{
+				defaultHome: {Window5h: ObservedTokenBreakdown{Total: 1}, WindowWeekly: ObservedTokenBreakdown{Total: 2}, Status: observedTokensStatusEstimated},
+				profileHome: {Window5h: ObservedTokenBreakdown{Total: 3}, WindowWeekly: ObservedTokenBreakdown{Total: 4}, Status: observedTokensStatusEstimated},
+			},
+		},
+	}
+
+	out, err := f.Fetch(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.WindowAccountLabel != "crowoy" {
+		t.Fatalf("expected active alias to prefer real profile label, got %q", out.WindowAccountLabel)
+	}
+	if out.PrimaryWindow.UsedPercent != 15 || out.SecondaryWindow.UsedPercent != 19 {
+		t.Fatalf("expected active windows to follow real profile row")
+	}
+	if len(out.Accounts) != 1 {
+		t.Fatalf("expected alias rows to deduplicate, got %d", len(out.Accounts))
+	}
+	if out.Accounts[0].Label != "crowoy" {
+		t.Fatalf("expected deduplicated row to keep real profile label, got %q", out.Accounts[0].Label)
+	}
+}
+
+func TestFetcherDeduplicatesFailedAliasHomesUsingAuthEmail(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("CODEX_HOME", "")
+
+	defaultHome := filepath.Join(tmp, ".codex")
+	profileHome := filepath.Join(tmp, "multicodex", "profiles", "crowoy", "codex-home")
+	if err := os.MkdirAll(defaultHome, 0o700); err != nil {
+		t.Fatalf("mkdir default home: %v", err)
+	}
+	if err := os.MkdirAll(profileHome, 0o700); err != nil {
+		t.Fatalf("mkdir profile home: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(profileHome, "auth.json"), []byte(`{"email":"crowoy@example.com","tokens":{"access_token":"x"}}`), 0o600); err != nil {
+		t.Fatalf("write profile auth: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(profileHome, "auth.json"), filepath.Join(defaultHome, "auth.json")); err != nil {
+		t.Fatalf("symlink default auth: %v", err)
+	}
+
+	f := &Fetcher{
+		accounts: []accountFetcher{
+			{
+				account:  MonitorAccount{Label: "crowoy", CodexHome: profileHome},
+				primary:  &fakeSource{name: "primary-crowoy", err: errors.New("boom")},
+				fallback: &fakeSource{name: "fallback-crowoy", err: errors.New("fallback boom")},
+			},
+			{
+				account:  MonitorAccount{Label: "default", CodexHome: defaultHome},
+				primary:  &fakeSource{name: "primary-default", err: errors.New("boom")},
+				fallback: &fakeSource{name: "fallback-default", err: errors.New("fallback boom")},
+			},
+		},
+		observed: fakeEstimator{
+			values: map[string]ObservedTokenEstimate{
+				defaultHome: {Window5h: ObservedTokenBreakdown{Total: 1}, WindowWeekly: ObservedTokenBreakdown{Total: 2}, Status: observedTokensStatusEstimated},
+				profileHome: {Window5h: ObservedTokenBreakdown{Total: 3}, WindowWeekly: ObservedTokenBreakdown{Total: 4}, Status: observedTokensStatusEstimated},
+			},
+		},
+	}
+
+	out, err := f.Fetch(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.TotalAccounts != 1 {
+		t.Fatalf("expected failed alias homes to deduplicate to one logical account, got %d", out.TotalAccounts)
+	}
+	if len(out.Accounts) != 1 {
+		t.Fatalf("expected one account row after deduplication, got %d", len(out.Accounts))
+	}
+	if out.Accounts[0].AccountEmail != "crowoy@example.com" {
+		t.Fatalf("expected auth-derived email on failed deduped row, got %q", out.Accounts[0].AccountEmail)
+	}
+	if out.WindowAccountLabel != "crowoy" {
+		t.Fatalf("expected active alias to prefer real profile label, got %q", out.WindowAccountLabel)
+	}
+	if out.Accounts[0].Label != "crowoy" {
+		t.Fatalf("expected failed deduplicated row to keep real profile label, got %q", out.Accounts[0].Label)
+	}
+}
+
+func TestFetcherDeduplicatesFailedAliasHomesUsingResolvedAuthFile(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("CODEX_HOME", "")
+
+	defaultHome := filepath.Join(tmp, ".codex")
+	profileHome := filepath.Join(tmp, "multicodex", "profiles", "crowoy", "codex-home")
+	if err := os.MkdirAll(defaultHome, 0o700); err != nil {
+		t.Fatalf("mkdir default home: %v", err)
+	}
+	if err := os.MkdirAll(profileHome, 0o700); err != nil {
+		t.Fatalf("mkdir profile home: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(profileHome, "auth.json"), []byte(`{"tokens":{"access_token":"x"}}`), 0o600); err != nil {
+		t.Fatalf("write profile auth: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(profileHome, "auth.json"), filepath.Join(defaultHome, "auth.json")); err != nil {
+		t.Fatalf("symlink default auth: %v", err)
+	}
+
+	f := &Fetcher{
+		accounts: []accountFetcher{
+			{
+				account:  MonitorAccount{Label: "crowoy", CodexHome: profileHome},
+				primary:  &fakeSource{name: "primary-crowoy", err: errors.New("boom")},
+				fallback: &fakeSource{name: "fallback-crowoy", err: errors.New("fallback boom")},
+			},
+			{
+				account:  MonitorAccount{Label: "default", CodexHome: defaultHome},
+				primary:  &fakeSource{name: "primary-default", err: errors.New("boom")},
+				fallback: &fakeSource{name: "fallback-default", err: errors.New("fallback boom")},
+			},
+		},
+		observed: fakeEstimator{
+			values: map[string]ObservedTokenEstimate{
+				defaultHome: {Window5h: ObservedTokenBreakdown{Total: 1}, WindowWeekly: ObservedTokenBreakdown{Total: 2}, Status: observedTokensStatusEstimated},
+				profileHome: {Window5h: ObservedTokenBreakdown{Total: 3}, WindowWeekly: ObservedTokenBreakdown{Total: 4}, Status: observedTokensStatusEstimated},
+			},
+		},
+	}
+
+	out, err := f.Fetch(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.TotalAccounts != 1 {
+		t.Fatalf("expected resolved auth-file identity to deduplicate alias homes, got %d", out.TotalAccounts)
+	}
+	if len(out.Accounts) != 1 {
+		t.Fatalf("expected one account row after auth-file deduplication, got %d", len(out.Accounts))
+	}
+}
+
+func TestFetcherPrioritizesActiveAccountWhenWorkerPoolIsFull(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("CODEX_HOME", "/active")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Millisecond)
+	defer cancel()
+
+	f := &Fetcher{
+		accounts: []accountFetcher{
+			{
+				account:  MonitorAccount{Label: "a", CodexHome: "/a"},
+				primary:  &blockingSource{name: "primary-a"},
+				fallback: &blockingSource{name: "fallback-a"},
+			},
+			{
+				account:  MonitorAccount{Label: "b", CodexHome: "/b"},
+				primary:  &blockingSource{name: "primary-b"},
+				fallback: &blockingSource{name: "fallback-b"},
+			},
+			{
+				account:  MonitorAccount{Label: "c", CodexHome: "/c"},
+				primary:  &blockingSource{name: "primary-c"},
+				fallback: &blockingSource{name: "fallback-c"},
+			},
+			{
+				account:  MonitorAccount{Label: "d", CodexHome: "/d"},
+				primary:  &blockingSource{name: "primary-d"},
+				fallback: &blockingSource{name: "fallback-d"},
+			},
+			{
+				account:  MonitorAccount{Label: "active", CodexHome: "/active"},
+				primary:  &fakeSource{name: "primary-active", out: &Summary{AccountEmail: "active@example.com", PrimaryWindow: WindowSummary{UsedPercent: 12}, SecondaryWindow: WindowSummary{UsedPercent: 18}}},
+				fallback: &fakeSource{name: "fallback-active"},
+			},
+		},
+	}
+
+	out, err := f.Fetch(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !out.WindowDataAvailable {
+		t.Fatalf("expected active window data to stay available despite queued inactive accounts")
+	}
+	if out.WindowAccountLabel != "active" {
+		t.Fatalf("expected active account label, got %q", out.WindowAccountLabel)
+	}
+	if out.AccountEmail != "active@example.com" {
+		t.Fatalf("expected active account email, got %q", out.AccountEmail)
 	}
 }
 

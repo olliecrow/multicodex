@@ -3,6 +3,7 @@ package usage
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -101,32 +102,43 @@ func (f *Fetcher) fetchMultiAccount(ctx context.Context) (*Summary, error) {
 	successfulAccountIdentities := map[string]struct{}{}
 	seenObservedByIdentity := map[string]observedWindowPair{}
 	accountByIdentity := map[string]accountSummaryWithHome{}
-	activeHome := resolveActiveCodexHome()
-	var activeSuccess *Summary
-	activeLabel := ""
+	activeHomes := resolveActiveCodexHomes()
+	var activeSuccessChoice *accountFetchResult
+	var activeLabelChoice *accountSummaryWithHome
 	activeHomeDiscovered := false
 	activeFetchFailed := false
 
-	results := f.fetchAccountsConcurrent(ctx, now)
+	results := f.fetchAccountsConcurrent(ctx, now, activeHomes)
 	for _, result := range results {
 		accountOut := result.account
 		accountIdentity := accountIdentityOrHomeKey(accountOut, result.codexHome)
 		totalAccountIdentities[accountIdentity] = struct{}{}
-		if activeHome != "" && normalizeHome(result.codexHome) == activeHome {
+		if activeHomes.matches(result.codexHome) {
 			activeHomeDiscovered = true
-			activeLabel = accountOut.Label
+			if activeLabelChoice == nil || shouldPreferAccountSummary(*activeLabelChoice, accountOut, result.codexHome, activeHomes) {
+				choice := accountSummaryWithHome{
+					account:   accountOut,
+					codexHome: result.codexHome,
+				}
+				activeLabelChoice = &choice
+			}
 		}
 		if result.fetchErr != nil {
 			out.Warnings = append(out.Warnings, fmt.Sprintf("account %q fetch failed: %v", accountOut.Label, result.fetchErr))
-			if activeHome != "" && normalizeHome(result.codexHome) == activeHome {
+			if activeHomes.matches(result.codexHome) {
 				activeFetchFailed = true
 			}
 		} else if result.snapshot != nil {
 			anyAccountSuccess = true
 			successfulAccountIdentities[accountIdentity] = struct{}{}
-			if activeHome != "" && normalizeHome(result.codexHome) == activeHome {
-				activeSuccess = result.snapshot
-				activeLabel = accountOut.Label
+			if activeHomes.matches(result.codexHome) {
+				if activeSuccessChoice == nil || shouldPreferAccountSummary(accountSummaryWithHome{
+					account:   activeSuccessChoice.account,
+					codexHome: activeSuccessChoice.codexHome,
+				}, accountOut, result.codexHome, activeHomes) {
+					candidate := result
+					activeSuccessChoice = &candidate
+				}
 			}
 		}
 		if result.observedAvailable {
@@ -152,7 +164,7 @@ func (f *Fetcher) fetchMultiAccount(ctx context.Context) (*Summary, error) {
 		}
 		out.Warnings = append(out.Warnings, result.warnings...)
 		existing, ok := accountByIdentity[accountIdentity]
-		if !ok || shouldPreferAccountSummary(existing, accountOut, result.codexHome, activeHome) {
+		if !ok || shouldPreferAccountSummary(existing, accountOut, result.codexHome, activeHomes) {
 			accountByIdentity[accountIdentity] = accountSummaryWithHome{
 				account:   accountOut,
 				codexHome: result.codexHome,
@@ -162,8 +174,12 @@ func (f *Fetcher) fetchMultiAccount(ctx context.Context) (*Summary, error) {
 	out.Accounts = accountSummariesFromIdentityMap(accountByIdentity)
 	out.TotalAccounts = len(totalAccountIdentities)
 	out.SuccessfulAccounts = len(successfulAccountIdentities)
+	if activeLabelChoice != nil {
+		out.WindowAccountLabel = activeLabelChoice.account.Label
+	}
 
-	if activeSuccess != nil {
+	if activeSuccessChoice != nil && activeSuccessChoice.snapshot != nil {
+		activeSuccess := activeSuccessChoice.snapshot
 		out.Source = activeSuccess.Source
 		out.PlanType = activeSuccess.PlanType
 		out.AccountEmail = activeSuccess.AccountEmail
@@ -172,14 +188,12 @@ func (f *Fetcher) fetchMultiAccount(ctx context.Context) (*Summary, error) {
 		out.WindowDataAvailable = true
 		out.PrimaryWindow = activeSuccess.PrimaryWindow
 		out.SecondaryWindow = activeSuccess.SecondaryWindow
-		out.WindowAccountLabel = activeLabel
 		out.AdditionalLimitCount = activeSuccess.AdditionalLimitCount
 		out.FetchedAt = activeSuccess.FetchedAt
 	} else {
 		out.WindowDataAvailable = false
-		out.WindowAccountLabel = activeLabel
 		switch {
-		case activeHome == "":
+		case activeHomes.primary == "":
 			out.Warnings = append(out.Warnings, "active account home is unavailable; window cards are unavailable")
 		case !activeHomeDiscovered:
 			out.Warnings = append(out.Warnings, "active account home is not in discovered accounts; window cards are unavailable")
@@ -225,7 +239,9 @@ func fetchWithFallback(ctx context.Context, primary Source, fallback Source) (*S
 		return nil, fmt.Errorf("missing primary source")
 	}
 
-	primarySummary, primaryErr := primary.Fetch(ctx)
+	primaryCtx, cancelPrimary := attemptContext(ctx, fallback != nil)
+	primarySummary, primaryErr := primary.Fetch(primaryCtx)
+	cancelPrimary()
 	if primaryErr == nil {
 		return primarySummary, nil
 	}
@@ -234,7 +250,9 @@ func fetchWithFallback(ctx context.Context, primary Source, fallback Source) (*S
 		return nil, fmt.Errorf("primary source %q failed: %w", primary.Name(), primaryErr)
 	}
 
-	fallbackSummary, fallbackErr := fallback.Fetch(ctx)
+	fallbackCtx, cancelFallback := attemptContext(ctx, false)
+	fallbackSummary, fallbackErr := fallback.Fetch(fallbackCtx)
+	cancelFallback()
 	if fallbackErr == nil {
 		fallbackSummary.Warnings = append(fallbackSummary.Warnings, fmt.Sprintf("primary source %q failed: %v", primary.Name(), primaryErr))
 		return fallbackSummary, nil
@@ -244,6 +262,25 @@ func fetchWithFallback(ctx context.Context, primary Source, fallback Source) (*S
 		"primary source %q failed: %v; fallback source %q failed: %v",
 		primary.Name(), primaryErr, fallback.Name(), fallbackErr,
 	)
+}
+
+func attemptContext(parent context.Context, reserveForFallback bool) (context.Context, context.CancelFunc) {
+	deadline, ok := parent.Deadline()
+	if !ok {
+		return parent, func() {}
+	}
+
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		return parent, func() {}
+	}
+	if reserveForFallback {
+		remaining /= 2
+	}
+	if remaining <= 0 {
+		return parent, func() {}
+	}
+	return context.WithTimeout(parent, remaining)
 }
 
 func (f *Fetcher) Close() error {
@@ -383,6 +420,46 @@ func resolveActiveCodexHome() string {
 	return normalizeHome(home)
 }
 
+type activeHomeSet struct {
+	primary string
+	homes   map[string]struct{}
+}
+
+func resolveActiveCodexHomes() activeHomeSet {
+	primary := resolveActiveCodexHome()
+	out := activeHomeSet{
+		primary: primary,
+		homes:   map[string]struct{}{},
+	}
+	if primary == "" {
+		return out
+	}
+	out.homes[primary] = struct{}{}
+
+	authPath := filepath.Join(primary, "auth.json")
+	info, err := os.Lstat(authPath)
+	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+		return out
+	}
+
+	resolvedAuthPath, err := filepath.EvalSymlinks(authPath)
+	if err != nil {
+		return out
+	}
+	if aliasHome := normalizeHome(filepath.Dir(resolvedAuthPath)); aliasHome != "" {
+		out.homes[aliasHome] = struct{}{}
+	}
+	return out
+}
+
+func (s activeHomeSet) matches(home string) bool {
+	if len(s.homes) == 0 {
+		return false
+	}
+	_, ok := s.homes[normalizeHome(home)]
+	return ok
+}
+
 func identityKey(email, accountID, userID string) string {
 	if v := strings.TrimSpace(email); v != "" {
 		return "email:" + strings.ToLower(v)
@@ -400,6 +477,9 @@ func accountIdentityOrHomeKey(account AccountSummary, codexHome string) string {
 	if identity := identityKey(account.AccountEmail, account.AccountID, account.UserID); identity != "" {
 		return identity
 	}
+	if identity := authIdentityKeyForHome(codexHome); identity != "" {
+		return identity
+	}
 	if home := normalizeHome(codexHome); home != "" {
 		return "home:" + strings.ToLower(home)
 	}
@@ -414,17 +494,22 @@ type accountSummaryWithHome struct {
 	codexHome string
 }
 
-func shouldPreferAccountSummary(existing accountSummaryWithHome, candidate AccountSummary, candidateHome, activeHome string) bool {
+func shouldPreferAccountSummary(existing accountSummaryWithHome, candidate AccountSummary, candidateHome string, activeHomes activeHomeSet) bool {
 	existingOK := strings.TrimSpace(existing.account.Error) == ""
 	candidateOK := strings.TrimSpace(candidate.Error) == ""
 	if existingOK != candidateOK {
 		return candidateOK
 	}
 
-	existingActive := activeHome != "" && normalizeHome(existing.codexHome) == activeHome
-	candidateActive := activeHome != "" && normalizeHome(candidateHome) == activeHome
+	existingActive := activeHomes.matches(existing.codexHome)
+	candidateActive := activeHomes.matches(candidateHome)
 	if existingActive != candidateActive {
 		return candidateActive
+	}
+	existingSyntheticDefault := isSyntheticDefaultAlias(existing.account.Label, existing.codexHome, activeHomes)
+	candidateSyntheticDefault := isSyntheticDefaultAlias(candidate.Label, candidateHome, activeHomes)
+	if existingSyntheticDefault != candidateSyntheticDefault {
+		return !candidateSyntheticDefault
 	}
 
 	if existing.account.FetchedAt == nil {
@@ -434,6 +519,12 @@ func shouldPreferAccountSummary(existing accountSummaryWithHome, candidate Accou
 		return false
 	}
 	return candidate.FetchedAt.After(*existing.account.FetchedAt)
+}
+
+func isSyntheticDefaultAlias(label, codexHome string, activeHomes activeHomeSet) bool {
+	return activeHomes.primary != "" &&
+		normalizeHome(codexHome) == activeHomes.primary &&
+		strings.EqualFold(strings.TrimSpace(label), "default")
 }
 
 func accountSummariesFromIdentityMap(byIdentity map[string]accountSummaryWithHome) []AccountSummary {
@@ -490,7 +581,7 @@ func mergeBreakdownMax(a, b ObservedTokenBreakdown) ObservedTokenBreakdown {
 	return a
 }
 
-func (f *Fetcher) fetchAccountsConcurrent(ctx context.Context, now time.Time) []accountFetchResult {
+func (f *Fetcher) fetchAccountsConcurrent(ctx context.Context, now time.Time, activeHomes activeHomeSet) []accountFetchResult {
 	if len(f.accounts) == 0 {
 		return nil
 	}
@@ -504,16 +595,20 @@ func (f *Fetcher) fetchAccountsConcurrent(ctx context.Context, now time.Time) []
 	sem := make(chan struct{}, parallelism)
 	var wg sync.WaitGroup
 
-	for i, account := range f.accounts {
-		i := i
-		account := account
+	fetchOne := func(i int, account accountFetcher, usePool bool) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
+			if usePool {
+				sem <- struct{}{}
+				defer func() { <-sem }()
+			}
 			results[i] = f.fetchAccountResult(ctx, account, now)
 		}()
+	}
+
+	for i, account := range f.accounts {
+		fetchOne(i, account, !activeHomes.matches(account.account.CodexHome))
 	}
 	wg.Wait()
 	return results
@@ -530,6 +625,9 @@ func (f *Fetcher) fetchAccountResult(ctx context.Context, account accountFetcher
 	snapshot, fetchErr := fetchWithFallback(ctx, account.primary, account.fallback)
 	if fetchErr != nil {
 		result.fetchErr = fetchErr
+		if email, err := accountEmailFromAuthFileForHome(account.account.CodexHome); err == nil {
+			result.account.AccountEmail = email
+		}
 		result.account.Error = fetchErr.Error()
 	} else {
 		result.snapshot = snapshot

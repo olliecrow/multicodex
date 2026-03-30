@@ -217,6 +217,41 @@ Trade-offs: Human output gains one more summary state to interpret.
 Enforcement: `monitor doctor` reports PASS, PASS (degraded), or FAIL based on per-source checks, while exit status still succeeds when at least one source works.
 References: `internal/monitor/usage/doctor.go`, `internal/multicodex/monitor.go`, `README.md`, `docs/command-spec.md`
 
+Decision: Treat the default auth symlink target as an active-home alias in the monitor.
+Context: In common multicodex setups, `~/.codex/auth.json` is a symlink into the currently selected profile home, so the logical active account may be reachable through both `~/.codex` and `~/multicodex/profiles/<name>/codex-home`.
+Rationale: Matching only the `~/.codex` directory can blank the active window cards when the default alias row fails even though the linked profile row succeeds in the same refresh.
+Trade-offs: Active-account detection now follows one extra filesystem indirection through `auth.json`, which slightly increases coupling to the file-backed-auth setup already required by multicodex.
+Enforcement: Monitor active-account selection matches both the active Codex home and the resolved directory of its `auth.json` symlink target; regression tests cover the alias case.
+References: `internal/monitor/usage/fetcher.go`, `internal/monitor/usage/fetcher_test.go`
+
+Decision: Prioritize active-window availability warnings in the monitor diagnostics line.
+Context: The monitor can accumulate many warnings in one refresh, but the single-line diagnostics summary is the main operator hint when the active window cards go unavailable.
+Rationale: Showing the first account-specific warning in sort order can hide the actual active-window failure and mislead operators into debugging the wrong account first.
+Trade-offs: The diagnostics line is less strictly chronological because it now prefers the warning with the highest operator value rather than the first collected warning.
+Enforcement: The TUI diagnostics summary prefers warnings mentioning unavailable window cards, then other active-account warnings, before falling back to the first warning; tests cover the prioritization.
+References: `internal/monitor/tui/model.go`, `internal/monitor/tui/model_test.go`
+
+Decision: Default monitor polls use a 20-second fetch timeout.
+Context: With multiple accounts, the first poll after a long idle gap can require enough concurrent app-server and OAuth work that the previous 10-second shared poll budget intermittently timed out healthy accounts, leaving official window cards unavailable while observed token totals stayed ready.
+Rationale: Raising the default per-poll timeout to 20 seconds preserves the existing fetch pipeline while removing the reproduced idle-gap failures in real monitor runs.
+Trade-offs: A truly degraded refresh can now take longer to declare failure, but the default view is materially more reliable for normal multi-account operation.
+Enforcement: The TUI default timeout and the user-facing monitor/help usage strings default to 20 seconds; shorter timeouts remain available via `--timeout` for operators who prefer faster failure.
+References: `internal/monitor/tui/model.go`, `internal/multicodex/monitor.go`, `internal/multicodex/help.go`
+
+Decision: Active-account alias rows prefer the real profile label over the synthetic `default` alias.
+Context: When `~/.codex/auth.json` is linked into a multicodex profile home, the monitor can discover the same logical account twice: once via the synthetic `default` row and once via the real profile row.
+Rationale: Surfacing the synthetic `default` label for that deduplicated account makes the active window cards disagree with `multicodex status` and obscures which profile is actually selected.
+Trade-offs: The monitor now treats the profile row as the canonical display identity for an active alias pair, even if the synthetic `default` row was encountered later in the refresh.
+Enforcement: Active-account label selection and deduplicated account-row selection both prefer non-synthetic profile labels over the `default` alias when they resolve to the same active account; regression tests cover healthy and degraded alias cases.
+References: `internal/monitor/usage/fetcher.go`, `internal/monitor/usage/fetcher_test.go`
+
+Decision: Active account fetches bypass the shared inactive-account worker pool.
+Context: The monitor fetcher limits background account work to four pooled workers, which can otherwise leave the active account queued behind slower inactive accounts in larger setups.
+Rationale: Starting active-account fetches immediately preserves the official window cards even when inactive accounts are still timing out or backing up the shared pool.
+Trade-offs: A refresh can now run one or two extra concurrent active fetches outside the inactive-account pool, which slightly increases peak concurrency in exchange for more reliable active-window availability.
+Enforcement: Accounts whose homes match the active home or its resolved auth-symlink alias start outside the pooled semaphore; regression tests cover the saturated-worker case.
+References: `internal/monitor/usage/fetcher.go`, `internal/monitor/usage/fetcher_test.go`
+
 Decision: Default-branch-first day-to-day workflow is acceptable in this personal repo.
 Context: This repository is part of the user's personal GitHub portfolio and often supports experimental or fast-iteration work. The user explicitly prefers to work directly on the default branch for normal day-to-day changes unless there is a task-specific reason to branch.
 Rationale: Working directly on the default branch keeps personal-repo execution simple and fast. Branches remain available when they materially help with coordination, isolation, or review.

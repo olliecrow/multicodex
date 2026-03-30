@@ -146,9 +146,10 @@ type oauthWindowSnapshot struct {
 }
 
 type authFilePayload struct {
-	AuthMode string `json:"auth_mode"`
-	Tokens   struct {
+	Email  string `json:"email"`
+	Tokens struct {
 		AccessToken string `json:"access_token"`
+		IDToken     string `json:"id_token"`
 	} `json:"tokens"`
 }
 

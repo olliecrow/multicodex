@@ -340,6 +340,35 @@ func TestStatusSectionFixedRowsAcrossCounts(t *testing.T) {
 	}
 }
 
+func TestDiagnosticsStatusPrefersActiveWindowWarning(t *testing.T) {
+	m := seededModel()
+	m.summary.Warnings = []string{
+		`account "apple" fetch failed: primary source "app-server" failed`,
+		"active account usage fetch failed; window cards are unavailable",
+	}
+
+	line := m.diagnosticsStatusLine()
+	if line.level != "warning" {
+		t.Fatalf("expected warning level, got %q", line.level)
+	}
+	if !strings.Contains(line.value, "window cards are unavailable") {
+		t.Fatalf("expected active-window warning to be prioritized, got %q", line.value)
+	}
+}
+
+func TestDiagnosticsStatusPreservesFirstWarningWhenNoActiveWindowWarningExists(t *testing.T) {
+	m := seededModel()
+	m.summary.Warnings = []string{
+		`account "apple" fetch failed: primary source "app-server" failed`,
+		`account "crowoy" observed tokens unavailable: warming token estimate`,
+	}
+
+	line := m.diagnosticsStatusLine()
+	if line.value != `account "apple" fetch failed: primary source "app-server" failed (+1 more)` {
+		t.Fatalf("unexpected diagnostics summary: %q", line.value)
+	}
+}
+
 func TestStatusRowsForLayoutExpandsInTallViewport(t *testing.T) {
 	rows := statusRowsForLayout(46, 6, 2)
 	if rows <= 4 {
