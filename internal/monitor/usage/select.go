@@ -33,7 +33,7 @@ func (f *Fetcher) SelectAccount(ctx context.Context, maxPrimaryUsedPercent int) 
 	now := time.Now().UTC()
 	f.refreshAccounts(now, false)
 
-	results := f.fetchAccountsConcurrent(ctx, now)
+	results := f.fetchAccountsConcurrent(ctx, now, activeHomeSet{})
 	return selectBestAccountFromResults(results, maxPrimaryUsedPercent)
 }
 

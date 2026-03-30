@@ -91,11 +91,11 @@ func (a *App) runMonitorTUI(args []string) error {
 	fs := flag.NewFlagSet("monitor", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	interval := fs.Duration("interval", 60*time.Second, "poll interval")
-	timeout := fs.Duration("timeout", 10*time.Second, "per-poll fetch timeout")
+	timeout := fs.Duration("timeout", 20*time.Second, "per-poll fetch timeout")
 	noColor := fs.Bool("no-color", false, "disable color styling")
 	noAltScreen := fs.Bool("no-alt-screen", false, "disable alternate screen mode")
 	if err := fs.Parse(args); err != nil {
-		return &ExitError{Code: 2, Message: "usage: multicodex monitor [--interval 60s] [--timeout 10s] [--no-color] [--no-alt-screen]"}
+		return &ExitError{Code: 2, Message: "usage: multicodex monitor [--interval 60s] [--timeout 20s] [--no-color] [--no-alt-screen]"}
 	}
 	if *interval <= 0 {
 		return &ExitError{Code: 2, Message: "error: --interval must be > 0"}
@@ -173,7 +173,7 @@ func printMonitorUsage() {
 	fmt.Println()
 	fmt.Println("Monitor terminal user interface flags:")
 	fmt.Println("  --interval 60s    Poll interval")
-	fmt.Println("  --timeout 10s     Per-poll fetch timeout")
+	fmt.Println("  --timeout 20s     Per-poll fetch timeout")
 	fmt.Println("  --no-color        Disable color styling")
 	fmt.Println("  --no-alt-screen   Disable alternate screen mode")
 }

@@ -80,7 +80,7 @@ type fetchResultMsg struct {
 
 const (
 	defaultInterval = 60 * time.Second
-	defaultTimeout  = 10 * time.Second
+	defaultTimeout  = 20 * time.Second
 )
 
 func NewModel(opts Options) Model {
@@ -666,23 +666,11 @@ func (m Model) diagnosticsStatusLine() statusLine {
 		return statusLine{level: "error", name: "source + diagnostics", value: trimmed}
 	}
 
-	warnings := make([]string, 0, len(m.summary.Warnings))
-	seen := map[string]struct{}{}
-	for _, warning := range m.summary.Warnings {
-		trimmed := strings.TrimSpace(warning)
-		if trimmed == "" {
-			continue
-		}
-		if _, ok := seen[trimmed]; ok {
-			continue
-		}
-		seen[trimmed] = struct{}{}
-		warnings = append(warnings, trimmed)
-	}
+	warnings := dedupeWarnings(m.summary.Warnings)
 	if len(warnings) > 0 {
-		value := warnings[0]
+		value := preferredDiagnosticWarning(warnings)
 		if len(warnings) > 1 {
-			value = fmt.Sprintf("%s (+%d more)", warnings[0], len(warnings)-1)
+			value = fmt.Sprintf("%s (+%d more)", value, len(warnings)-1)
 		}
 		return statusLine{level: "warning", name: "source + diagnostics", value: value}
 	}
@@ -692,6 +680,40 @@ func (m Model) diagnosticsStatusLine() statusLine {
 		source = "ok"
 	}
 	return statusLine{level: "status", name: "source + diagnostics", value: source}
+}
+
+func dedupeWarnings(in []string) []string {
+	out := make([]string, 0, len(in))
+	seen := map[string]struct{}{}
+	for _, warning := range in {
+		trimmed := strings.TrimSpace(warning)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		out = append(out, trimmed)
+	}
+	return out
+}
+
+func preferredDiagnosticWarning(warnings []string) string {
+	if len(warnings) == 0 {
+		return ""
+	}
+	for _, warning := range warnings {
+		if strings.Contains(strings.ToLower(warning), "window cards are unavailable") {
+			return warning
+		}
+	}
+	for _, warning := range warnings {
+		if strings.Contains(strings.ToLower(warning), "active account") {
+			return warning
+		}
+	}
+	return warnings[0]
 }
 
 func statusRowsForLayout(viewportHeight, windowsBlockHeight, panelVerticalOverhead int) int {
