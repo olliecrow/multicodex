@@ -240,7 +240,7 @@ For migration convenience, `multicodex monitor completion [shell]` is also suppo
 
 `multicodex monitor doctor` succeeds when at least one usage source works. A passing result can still be degraded if either the app-server path or the OAuth fallback is unavailable.
 
-Observed token totals shown by the monitor are local estimates derived from session logs. Treat them as advisory and separate from the official five-hour and weekly windows.
+Observed token totals shown by the monitor are local estimates derived from session logs. Treat them as advisory and separate from the official five-hour and weekly windows. The TUI labels them as token estimates and can show partial results when some account-home estimates are unavailable.
 
 Example manual monitor account file:
 

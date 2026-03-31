@@ -119,6 +119,101 @@ func TestEstimateTokensFromFileDoesNotDoubleCountDuplicateTotals(t *testing.T) {
 	}
 }
 
+func TestEstimateTokensFromFileFallsBackToLastWhenTotalResets(t *testing.T) {
+	now := time.Date(2026, 2, 26, 20, 0, 0, 0, time.UTC)
+	cutoff5h := now.Add(-5 * time.Hour)
+	cutoff1w := now.Add(-7 * 24 * time.Hour)
+
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	content := ""
+	content += tokenCountJSONLineDetailed(now.Add(-2*time.Hour),
+		tokenUsageTotal{TotalTokens: 100, InputTokens: 80, OutputTokens: 20},
+		tokenUsageTotal{TotalTokens: 100, InputTokens: 80, OutputTokens: 20},
+	) + "\n"
+	content += tokenCountJSONLineDetailed(now.Add(-90*time.Minute),
+		tokenUsageTotal{TotalTokens: 30, InputTokens: 20, OutputTokens: 10},
+		tokenUsageTotal{TotalTokens: 30, InputTokens: 20, OutputTokens: 10},
+	) + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write usage file: %v", err)
+	}
+
+	sum5h, sum1w, _, err := estimateTokensFromFile(path, cutoff5h, cutoff1w)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if sum5h.Total != 130 {
+		t.Fatalf("expected reset fallback total 130 in 5h window, got %d", sum5h.Total)
+	}
+	if sum1w.Total != 130 {
+		t.Fatalf("expected reset fallback total 130 in weekly window, got %d", sum1w.Total)
+	}
+}
+
+func TestEstimateTokensFromFileAccumulatesSplitBreakdown(t *testing.T) {
+	now := time.Date(2026, 2, 26, 20, 0, 0, 0, time.UTC)
+	cutoff5h := now.Add(-5 * time.Hour)
+	cutoff1w := now.Add(-7 * 24 * time.Hour)
+
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	content := ""
+	content += tokenCountJSONLineDetailed(now.Add(-2*time.Hour),
+		tokenUsageTotal{
+			TotalTokens:           15,
+			InputTokens:           10,
+			CachedInputTokens:     4,
+			OutputTokens:          5,
+			ReasoningOutputTokens: 2,
+			CachedOutputTokens:    1,
+		},
+		tokenUsageTotal{
+			TotalTokens:           15,
+			InputTokens:           10,
+			CachedInputTokens:     4,
+			OutputTokens:          5,
+			ReasoningOutputTokens: 2,
+			CachedOutputTokens:    1,
+		},
+	) + "\n"
+	content += tokenCountJSONLineDetailed(now.Add(-90*time.Minute),
+		tokenUsageTotal{
+			TotalTokens:           27,
+			InputTokens:           18,
+			CachedInputTokens:     7,
+			OutputTokens:          9,
+			ReasoningOutputTokens: 4,
+			CachedOutputTokens:    2,
+		},
+		tokenUsageTotal{
+			TotalTokens:           12,
+			InputTokens:           8,
+			CachedInputTokens:     3,
+			OutputTokens:          4,
+			ReasoningOutputTokens: 2,
+			CachedOutputTokens:    1,
+		},
+	) + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write usage file: %v", err)
+	}
+
+	sum5h, sum1w, _, err := estimateTokensFromFile(path, cutoff5h, cutoff1w)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, sum := range []tokenAccumulator{sum5h, sum1w} {
+		if sum.Total != 27 || sum.Input != 18 || sum.CachedInput != 7 || sum.Output != 9 || sum.ReasoningOutput != 4 || sum.CachedOutput != 2 {
+			t.Fatalf("unexpected split totals: %+v", sum)
+		}
+		if !sum.HasSplit {
+			t.Fatalf("expected split flag to be set")
+		}
+		if !sum.HasCachedOutput {
+			t.Fatalf("expected cached output flag to be set")
+		}
+	}
+}
+
 func tokenCountJSONLine(ts time.Time, total int64) string {
 	return fmt.Sprintf(
 		`{"timestamp":"%s","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":%d}}}}`,
@@ -133,5 +228,24 @@ func tokenCountJSONLineWithLast(ts time.Time, total int64, last int64) string {
 		ts.UTC().Format(time.RFC3339Nano),
 		total,
 		last,
+	)
+}
+
+func tokenCountJSONLineDetailed(ts time.Time, total tokenUsageTotal, last tokenUsageTotal) string {
+	return fmt.Sprintf(
+		`{"timestamp":"%s","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":%d,"input_tokens":%d,"cached_input_tokens":%d,"output_tokens":%d,"reasoning_output_tokens":%d,"cached_output_tokens":%d},"last_token_usage":{"total_tokens":%d,"input_tokens":%d,"cached_input_tokens":%d,"output_tokens":%d,"reasoning_output_tokens":%d,"cached_output_tokens":%d}}}}`,
+		ts.UTC().Format(time.RFC3339Nano),
+		total.TotalTokens,
+		total.InputTokens,
+		total.CachedInputTokens,
+		total.OutputTokens,
+		total.ReasoningOutputTokens,
+		total.CachedOutputTokens,
+		last.TotalTokens,
+		last.InputTokens,
+		last.CachedInputTokens,
+		last.OutputTokens,
+		last.ReasoningOutputTokens,
+		last.CachedOutputTokens,
 	)
 }

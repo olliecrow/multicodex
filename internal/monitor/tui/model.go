@@ -279,9 +279,9 @@ func (m Model) renderBody() string {
 	visibleStatusRows := min(4, statusRows)
 
 	metaLines = append(metaLines, m.renderAccountsLine(maxMetaWidth))
-	metaLines = append(metaLines, m.renderObservedHeaderLine("five-hour tokens", m.summary.ObservedWindow5h, m.summary.ObservedTokens5h))
+	metaLines = append(metaLines, m.renderObservedHeaderLine("five-hour token estimate", m.summary.ObservedWindow5h, m.summary.ObservedTokens5h))
 	metaLines = append(metaLines, m.renderObservedBreakdownLinesFixed(m.summary.ObservedWindow5h, m.summary.ObservedTokens5h)...)
-	metaLines = append(metaLines, m.renderObservedHeaderLine("weekly tokens", m.summary.ObservedWindowWeekly, m.summary.ObservedTokensWeekly))
+	metaLines = append(metaLines, m.renderObservedHeaderLine("weekly token estimate", m.summary.ObservedWindowWeekly, m.summary.ObservedTokensWeekly))
 	metaLines = append(metaLines, m.renderObservedBreakdownLinesFixed(m.summary.ObservedWindowWeekly, m.summary.ObservedTokensWeekly)...)
 	metaLines = append(metaLines, m.renderStatusLinesFixed(visibleStatusRows)...)
 	for i := 0; i < statusRows-visibleStatusRows; i++ {
@@ -379,10 +379,20 @@ func (m Model) observedHeaderState(win *usage.ObservedTokenBreakdown, fallbackTo
 	style := m.styles.warn
 	observedStatus := strings.ToLower(strings.TrimSpace(m.summary.ObservedTokensStatus))
 	warming := m.summary.ObservedTokensWarming
-	if m.fetching && win == nil && fallbackTotal == nil {
+	hasData := win != nil || fallbackTotal != nil
+	if m.fetching && !hasData {
 		state = "loading"
 		style = m.styles.loading
-	} else if win != nil || fallbackTotal != nil {
+	} else if warming && !hasData {
+		state = "loading"
+		style = m.styles.loading
+	} else if observedStatus == "partial" {
+		state = "partial"
+		style = m.styles.warn
+	} else if observedStatus == "unavailable" && !hasData {
+		state = "unavailable"
+		style = m.styles.warn
+	} else if hasData {
 		if m.fetching {
 			state = "refreshing"
 			style = m.styles.loading
@@ -390,15 +400,6 @@ func (m Model) observedHeaderState(win *usage.ObservedTokenBreakdown, fallbackTo
 			state = "ready"
 			style = m.styles.ok
 		}
-	} else if warming {
-		state = "loading"
-		style = m.styles.loading
-	} else if observedStatus == "partial" {
-		state = "partial"
-		style = m.styles.warn
-	} else if observedStatus == "unavailable" {
-		state = "unavailable"
-		style = m.styles.warn
 	}
 	return state, style
 }

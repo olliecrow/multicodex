@@ -153,7 +153,7 @@ func (f *Fetcher) fetchMultiAccount(ctx context.Context) (*Summary, error) {
 
 			identity := accountIdentityOrHomeKey(accountOut, result.codexHome)
 			prev := seenObservedByIdentity[identity]
-			next := mergeObservedPairMax(prev, pair)
+			next := addObservedPairs(prev, pair)
 			seenObservedByIdentity[identity] = next
 		}
 		if result.observedUnavailable {
@@ -565,20 +565,6 @@ func addBreakdowns(a, b ObservedTokenBreakdown) ObservedTokenBreakdown {
 		HasSplit:        a.HasSplit || b.HasSplit,
 		HasCachedOutput: a.HasCachedOutput || b.HasCachedOutput,
 	}
-}
-
-func mergeObservedPairMax(prev, next observedWindowPair) observedWindowPair {
-	return observedWindowPair{
-		Window5h:     mergeBreakdownMax(prev.Window5h, next.Window5h),
-		WindowWeekly: mergeBreakdownMax(prev.WindowWeekly, next.WindowWeekly),
-	}
-}
-
-func mergeBreakdownMax(a, b ObservedTokenBreakdown) ObservedTokenBreakdown {
-	if b.Total > a.Total {
-		return b
-	}
-	return a
 }
 
 func (f *Fetcher) fetchAccountsConcurrent(ctx context.Context, now time.Time, activeHomes activeHomeSet) []accountFetchResult {

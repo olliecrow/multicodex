@@ -99,6 +99,7 @@
 - Continues to support legacy monitor account-file locations as a compatibility fallback.
 - Uses read-only filesystem auto-discovery under the home directory, scanning for `.codex*`, `.codex`, and `codex-home` paths up to depth 5 before filtering transient/cache locations and requiring usage signals.
 - Treats observed-token totals as local estimates derived from session logs rather than official provider counters.
+- Labels observed-token sections as token estimates in the TUI and shows `partial` when some home estimates are missing.
 - Remains read-only with respect to Codex account state.
 
 `multicodex monitor help`
