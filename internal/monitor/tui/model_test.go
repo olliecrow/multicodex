@@ -111,10 +111,10 @@ func TestViewRendersAggregatedTokenSection(t *testing.T) {
 		HasSplit:    true,
 	}
 	out := m.View()
-	if !strings.Contains(out, "five-hour tokens [ready] (sum across accounts):") {
+	if !strings.Contains(out, "five-hour token estimate [ready] (sum across accounts):") {
 		t.Fatalf("expected aggregated five-hour token line in output")
 	}
-	if !strings.Contains(out, "weekly tokens [ready] (sum across accounts):") {
+	if !strings.Contains(out, "weekly token estimate [ready] (sum across accounts):") {
 		t.Fatalf("expected aggregated weekly token line in output")
 	}
 	if !strings.Contains(out, "- total: 120k") {
@@ -228,7 +228,7 @@ func TestMultiAccountShortViewportKeepsAggregatePanelVisible(t *testing.T) {
 	if !strings.Contains(out, "accounts: 3 detected") {
 		t.Fatalf("expected aggregate bottom panel to remain visible, got:\n%s", out)
 	}
-	if !strings.Contains(out, "weekly tokens [") {
+	if !strings.Contains(out, "weekly token estimate [") {
 		t.Fatalf("expected weekly aggregate section to remain visible, got:\n%s", out)
 	}
 	if strings.Contains(out, "five-hour window [bravo]") {
@@ -384,7 +384,7 @@ func TestObservedHeaderShowsLoadingWhenUnavailableAndFetching(t *testing.T) {
 	m.summary.ObservedWindow5h = nil
 	m.summary.ObservedTokens5h = nil
 	out := m.View()
-	if !strings.Contains(out, "five-hour tokens [loading") {
+	if !strings.Contains(out, "five-hour token estimate [loading") {
 		t.Fatalf("expected loading state in five-hour token header when unavailable and fetching")
 	}
 	if strings.Contains(out, "[loading -") || strings.Contains(out, "[refreshing -") {
@@ -403,8 +403,33 @@ func TestObservedHeaderShowsLoadingWhenWarmingWithoutFetchInFlight(t *testing.T)
 	m.summary.ObservedTokensWarming = true
 
 	out := m.View()
-	if !strings.Contains(out, "five-hour tokens [loading] (sum across accounts):") {
+	if !strings.Contains(out, "five-hour token estimate [loading] (sum across accounts):") {
 		t.Fatalf("expected loading state from explicit warming flag")
+	}
+}
+
+func TestObservedHeaderShowsPartialWhenSummaryIsPartial(t *testing.T) {
+	m := seededModel()
+	m.width = 120
+	m.height = 40
+	m.fetching = false
+	total5h := int64(120000)
+	m.summary.ObservedTokensStatus = "partial"
+	m.summary.ObservedTokens5h = &total5h
+	m.summary.ObservedWindow5h = &usage.ObservedTokenBreakdown{
+		Total:       total5h,
+		Input:       100000,
+		CachedInput: 90000,
+		Output:      20000,
+		HasSplit:    true,
+	}
+
+	out := m.View()
+	if !strings.Contains(out, "five-hour token estimate [partial] (sum across accounts):") {
+		t.Fatalf("expected partial header state for observed token estimate")
+	}
+	if !strings.Contains(out, "warning [five-hour token estimate]: partial") {
+		t.Fatalf("expected warning status line for partial observed estimate")
 	}
 }
 

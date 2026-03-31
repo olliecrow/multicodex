@@ -347,7 +347,7 @@ func TestFetcherMarksObservedWarmingWhenUnavailableEstimateIsWarming(t *testing.
 	}
 }
 
-func TestFetcherDeduplicatesObservedTotalsByIdentity(t *testing.T) {
+func TestFetcherSumsObservedTotalsAcrossHomesForSameIdentity(t *testing.T) {
 	f := &Fetcher{
 		accounts: []accountFetcher{
 			{
@@ -372,14 +372,40 @@ func TestFetcherDeduplicatesObservedTotalsByIdentity(t *testing.T) {
 		observed: fakeEstimator{
 			values: map[string]ObservedTokenEstimate{
 				"/a": {
-					Window5h:     ObservedTokenBreakdown{Total: 100},
-					WindowWeekly: ObservedTokenBreakdown{Total: 200},
-					Status:       observedTokensStatusEstimated,
+					Window5h: ObservedTokenBreakdown{
+						Total:       100,
+						Input:       80,
+						CachedInput: 60,
+						Output:      20,
+						HasSplit:    true,
+					},
+					WindowWeekly: ObservedTokenBreakdown{
+						Total:           200,
+						Input:           150,
+						CachedInput:     110,
+						Output:          50,
+						ReasoningOutput: 10,
+						HasSplit:        true,
+					},
+					Status: observedTokensStatusEstimated,
 				},
 				"/b": {
-					Window5h:     ObservedTokenBreakdown{Total: 150},
-					WindowWeekly: ObservedTokenBreakdown{Total: 180},
-					Status:       observedTokensStatusEstimated,
+					Window5h: ObservedTokenBreakdown{
+						Total:           150,
+						Input:           120,
+						CachedInput:     90,
+						Output:          30,
+						ReasoningOutput: 10,
+						HasSplit:        true,
+					},
+					WindowWeekly: ObservedTokenBreakdown{
+						Total:       180,
+						Input:       140,
+						CachedInput: 100,
+						Output:      40,
+						HasSplit:    true,
+					},
+					Status: observedTokensStatusEstimated,
 				},
 			},
 		},
@@ -389,11 +415,17 @@ func TestFetcherDeduplicatesObservedTotalsByIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out.ObservedTokens5h == nil || *out.ObservedTokens5h != 150 {
-		t.Fatalf("expected deduped 5h total by identity, got %+v", out.ObservedTokens5h)
+	if out.ObservedTokens5h == nil || *out.ObservedTokens5h != 250 {
+		t.Fatalf("expected summed 5h total across same-account homes, got %+v", out.ObservedTokens5h)
 	}
-	if out.ObservedTokensWeekly == nil || *out.ObservedTokensWeekly != 200 {
-		t.Fatalf("expected deduped weekly total by identity, got %+v", out.ObservedTokensWeekly)
+	if out.ObservedTokensWeekly == nil || *out.ObservedTokensWeekly != 380 {
+		t.Fatalf("expected summed weekly total across same-account homes, got %+v", out.ObservedTokensWeekly)
+	}
+	if out.ObservedWindow5h == nil || out.ObservedWindow5h.Input != 200 || out.ObservedWindow5h.CachedInput != 150 || out.ObservedWindow5h.Output != 50 || out.ObservedWindow5h.ReasoningOutput != 10 {
+		t.Fatalf("expected 5h breakdown to add across same-account homes, got %+v", out.ObservedWindow5h)
+	}
+	if out.ObservedWindowWeekly == nil || out.ObservedWindowWeekly.Input != 290 || out.ObservedWindowWeekly.CachedInput != 210 || out.ObservedWindowWeekly.Output != 90 || out.ObservedWindowWeekly.ReasoningOutput != 10 {
+		t.Fatalf("expected weekly breakdown to add across same-account homes, got %+v", out.ObservedWindowWeekly)
 	}
 	if out.TotalAccounts != 1 || out.SuccessfulAccounts != 1 {
 		t.Fatalf("expected deduped identity counts 1/1, got %d/%d", out.SuccessfulAccounts, out.TotalAccounts)
@@ -478,7 +510,7 @@ func TestRefreshAccountsReloadsAndReusesExistingHomes(t *testing.T) {
 	}
 }
 
-func TestFetcherDeduplicatesByAccountIDWhenEmailMissing(t *testing.T) {
+func TestFetcherAddsObservedTotalsAcrossHomesWhenDedupingByAccountID(t *testing.T) {
 	f := &Fetcher{
 		accounts: []accountFetcher{
 			{
@@ -520,8 +552,8 @@ func TestFetcherDeduplicatesByAccountIDWhenEmailMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out.ObservedTokens5h == nil || *out.ObservedTokens5h != 150 {
-		t.Fatalf("expected totals to dedupe by account id, got %+v", out.ObservedTokens5h)
+	if out.ObservedTokens5h == nil || *out.ObservedTokens5h != 250 {
+		t.Fatalf("expected totals to add across homes for one account id, got %+v", out.ObservedTokens5h)
 	}
 	if out.TotalAccounts != 1 || out.SuccessfulAccounts != 1 {
 		t.Fatalf("expected deduped identity counts 1/1, got %d/%d", out.SuccessfulAccounts, out.TotalAccounts)
@@ -1180,7 +1212,7 @@ func TestFetcherRandomizedSelectionAndCountInvariants(t *testing.T) {
 			}
 			observed := observedValues[home]
 			prev := observedByIdentity[key]
-			observedByIdentity[key] = mergeObservedPairMax(prev, observedWindowPair{
+			observedByIdentity[key] = addObservedPairs(prev, observedWindowPair{
 				Window5h:     observed.Window5h,
 				WindowWeekly: observed.WindowWeekly,
 			})

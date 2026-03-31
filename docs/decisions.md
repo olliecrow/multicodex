@@ -252,6 +252,13 @@ Trade-offs: A refresh can now run one or two extra concurrent active fetches out
 Enforcement: Accounts whose homes match the active home or its resolved auth-symlink alias start outside the pooled semaphore; regression tests cover the saturated-worker case.
 References: `internal/monitor/usage/fetcher.go`, `internal/monitor/usage/fetcher_test.go`
 
+Decision: Observed token estimates add local session usage across same-account homes.
+Context: The monitor's observed token totals come from per-home session logs, and the same account can be used through more than one Codex home such as `~/.codex` and a multicodex profile home.
+Rationale: Taking the maximum observed total for one account identity drops real local usage from the smaller home, while summing the per-home estimates matches what the monitor is actually measuring: local session-log activity across the discovered homes.
+Trade-offs: If someone manually duplicates the same session logs into more than one home, the observed estimate can overcount, but normal multicodex homes keep separate session stores and the old maximum rule could undercount normal real usage.
+Enforcement: Summary-level observed token estimates add same-identity home totals instead of taking the maximum; the TUI labels these values as token estimates and shows `partial` directly when some home estimates are missing.
+References: `internal/monitor/usage/fetcher.go`, `internal/monitor/usage/fetcher_test.go`, `internal/monitor/tui/model.go`, `internal/monitor/tui/model_test.go`, `README.md`, `docs/command-spec.md`
+
 Decision: Default-branch-first day-to-day workflow is acceptable in this personal repo.
 Context: This repository is part of the user's personal GitHub portfolio and often supports experimental or fast-iteration work. The user explicitly prefers to work directly on the default branch for normal day-to-day changes unless there is a task-specific reason to branch.
 Rationale: Working directly on the default branch keeps personal-repo execution simple and fast. Branches remain available when they materially help with coordination, isolation, or review.
