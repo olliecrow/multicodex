@@ -1,5 +1,10 @@
 # Repository Guidelines
 
+## Repository Ownership
+- This repository belongs under the personal GitHub account `olliecrow`.
+- Do not move it to a GitHub organization or a different personal account unless Ollie explicitly asks for that change.
+- When docs, remotes, automation, releases, or publishing steps need the owning GitHub account, use `olliecrow`.
+
 ## Docs, Plans, and Decisions (agent usage)
 - `docs/` is long-lived and committed (and may use nested directories + cross-links to stay organized).
 - `plan/` is short-lived scratch space and is not committed.
