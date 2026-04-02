@@ -931,6 +931,44 @@ func TestFetcherDeduplicatesFailedAliasHomesUsingResolvedAuthFile(t *testing.T) 
 	}
 }
 
+func TestFetcherSummarizesExpiredAuthWarning(t *testing.T) {
+	t.Setenv("CODEX_HOME", "")
+
+	f := &Fetcher{
+		accounts: []accountFetcher{
+			{
+				account:  MonitorAccount{Label: "crowoy", CodexHome: "/crowoy"},
+				primary:  &fakeSource{name: "primary", err: errors.New(`primary source "app-server" failed: {"code":"token_expired","message":"Provided authentication token is expired. Please try signing in again."}`)},
+				fallback: &fakeSource{name: "fallback", err: errors.New(`oauth endpoint returned HTTP 401: {"code":"token_expired","message":"Provided authentication token is expired. Please try signing in again."}`)},
+			},
+		},
+		observed: fakeEstimator{
+			values: map[string]ObservedTokenEstimate{
+				"/crowoy": {
+					Window5h:     ObservedTokenBreakdown{Total: 3},
+					WindowWeekly: ObservedTokenBreakdown{Total: 7},
+					Status:       observedTokensStatusEstimated,
+				},
+			},
+		},
+	}
+
+	out, err := f.Fetch(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	warnings := strings.Join(out.Warnings, " | ")
+	if !strings.Contains(warnings, `account "crowoy" auth expired; sign in again`) {
+		t.Fatalf("expected simplified auth warning, got %q", warnings)
+	}
+	if strings.Contains(warnings, `account "crowoy" fetch failed:`) {
+		t.Fatalf("did not expect raw fetch warning when auth can be summarized, got %q", warnings)
+	}
+	if !strings.Contains(out.Accounts[0].Error, "token_expired") {
+		t.Fatalf("expected raw account error to keep underlying cause, got %q", out.Accounts[0].Error)
+	}
+}
+
 func TestFetcherPrioritizesActiveAccountWhenWorkerPoolIsFull(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
