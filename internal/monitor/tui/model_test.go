@@ -369,6 +369,19 @@ func TestDiagnosticsStatusPreservesFirstWarningWhenNoActiveWindowWarningExists(t
 	}
 }
 
+func TestDiagnosticsStatusPrefersAuthExpiredWarning(t *testing.T) {
+	m := seededModel()
+	m.summary.Warnings = []string{
+		`account "apple" fetch failed: primary source "app-server" failed`,
+		`account "crowoy" auth expired; sign in again`,
+	}
+
+	line := m.diagnosticsStatusLine()
+	if line.value != `account "crowoy" auth expired; sign in again (+1 more)` {
+		t.Fatalf("expected auth-expired warning to be prioritized, got %q", line.value)
+	}
+}
+
 func TestStatusRowsForLayoutExpandsInTallViewport(t *testing.T) {
 	rows := statusRowsForLayout(46, 6, 2)
 	if rows <= 4 {

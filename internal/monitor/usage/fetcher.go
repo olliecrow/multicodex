@@ -124,7 +124,7 @@ func (f *Fetcher) fetchMultiAccount(ctx context.Context) (*Summary, error) {
 			}
 		}
 		if result.fetchErr != nil {
-			out.Warnings = append(out.Warnings, fmt.Sprintf("account %q fetch failed: %v", accountOut.Label, result.fetchErr))
+			out.Warnings = append(out.Warnings, accountFetchWarning(accountOut.Label, result.fetchErr))
 			if activeHomes.matches(result.codexHome) {
 				activeFetchFailed = true
 			}
@@ -262,6 +262,32 @@ func fetchWithFallback(ctx context.Context, primary Source, fallback Source) (*S
 		"primary source %q failed: %v; fallback source %q failed: %v",
 		primary.Name(), primaryErr, fallback.Name(), fallbackErr,
 	)
+}
+
+func accountFetchWarning(label string, err error) string {
+	if err == nil {
+		return ""
+	}
+	if simplified := simplifiedAuthWarning(label, err); simplified != "" {
+		return simplified
+	}
+	return fmt.Sprintf("account %q fetch failed: %v", label, err)
+}
+
+func simplifiedAuthWarning(label string, err error) string {
+	msg := strings.ToLower(strings.TrimSpace(err.Error()))
+	switch {
+	case msg == "":
+		return ""
+	case strings.Contains(msg, "token_expired"),
+		strings.Contains(msg, "provided authentication token is expired"),
+		strings.Contains(msg, "auth token is expired"):
+		return fmt.Sprintf("account %q auth expired; sign in again", label)
+	case strings.Contains(msg, "401 unauthorized") && strings.Contains(msg, "sign in again"):
+		return fmt.Sprintf("account %q auth rejected; sign in again", label)
+	default:
+		return ""
+	}
 }
 
 func attemptContext(parent context.Context, reserveForFallback bool) (context.Context, context.CancelFunc) {

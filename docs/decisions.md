@@ -259,6 +259,13 @@ Trade-offs: If someone manually duplicates the same session logs into more than 
 Enforcement: Summary-level observed token estimates add same-identity home totals instead of taking the maximum; the TUI labels these values as token estimates and shows `partial` directly when some home estimates are missing.
 References: `internal/monitor/usage/fetcher.go`, `internal/monitor/usage/fetcher_test.go`, `internal/monitor/tui/model.go`, `internal/monitor/tui/model_test.go`, `README.md`, `docs/command-spec.md`
 
+Decision: Prefer a plain-English re-login warning when monitor fetches fail because a profile token expired.
+Context: The monitor can detect expired profile auth from both the app-server path and the oauth fallback, but the raw provider error is long and easy to miss in the TUI diagnostics line.
+Rationale: A short warning such as `account "work" auth expired; sign in again` tells the operator what to do next without hiding the underlying failure from deeper debug output.
+Trade-offs: The top-level warning is less literal than the raw provider response, so the account row still keeps the original error text for debugging and tests.
+Enforcement: Multi-account monitor summaries collapse token-expired fetch errors into plain-English account warnings, and the TUI diagnostics priority prefers those re-login warnings ahead of generic account fetch failures when no active-window warning is present.
+References: `internal/monitor/usage/fetcher.go`, `internal/monitor/usage/fetcher_test.go`, `internal/monitor/tui/model.go`, `internal/monitor/tui/model_test.go`, `README.md`, `docs/command-spec.md`
+
 Decision: Default-branch-first day-to-day workflow is acceptable in this personal repo.
 Context: This repository is part of the user's personal GitHub portfolio and often supports experimental or fast-iteration work. The user explicitly prefers to work directly on the default branch for normal day-to-day changes unless there is a task-specific reason to branch.
 Rationale: Working directly on the default branch keeps personal-repo execution simple and fast. Branches remain available when they materially help with coordination, isolation, or review.
@@ -292,8 +299,7 @@ Enforcement:
 References:
 `AGENTS.md`
 
-Decision:
-Treat this repository as belonging under the personal GitHub account `olliecrow`.
+Decision: Treat this repository as belonging under the personal GitHub account `olliecrow`.
 Context:
 Work in this workspace can span personal GitHub accounts and organization-owned repositories. A repo-level ownership note keeps docs, remotes, automation, releases, and publishing steps pointed at the right account.
 Rationale:

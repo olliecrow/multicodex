@@ -710,6 +710,12 @@ func preferredDiagnosticWarning(warnings []string) string {
 		}
 	}
 	for _, warning := range warnings {
+		lower := strings.ToLower(warning)
+		if strings.Contains(lower, "auth expired") || strings.Contains(lower, "auth rejected") || strings.Contains(lower, "sign in again") {
+			return warning
+		}
+	}
+	for _, warning := range warnings {
 		if strings.Contains(strings.ToLower(warning), "active account") {
 			return warning
 		}

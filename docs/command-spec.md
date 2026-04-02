@@ -115,6 +115,11 @@
 - Checks codex binary access, auth-file readability, app-server usage fetch, and oauth usage fetch.
 - Exits success when at least one usage source works, while surfacing degraded output when a source is unavailable.
 
+`multicodex monitor` diagnostics
+- Prefer warnings about unavailable active window cards over other warnings.
+- Prefer plain-English re-login warnings such as `auth expired; sign in again` over generic account fetch failures when an expired profile token is the likely cause.
+- Keep raw per-account error text available in account data for deeper debugging and tests.
+
 `multicodex monitor completion`
 - Compatibility alias for shell completion setup after migration from the standalone monitor.
 - Defaults to bash when no shell is provided.
