@@ -266,6 +266,13 @@ Trade-offs: The top-level warning is less literal than the raw provider response
 Enforcement: Multi-account monitor summaries collapse token-expired fetch errors into plain-English account warnings, and the TUI diagnostics priority prefers those re-login warnings ahead of generic account fetch failures when no active-window warning is present.
 References: `internal/monitor/usage/fetcher.go`, `internal/monitor/usage/fetcher_test.go`, `internal/monitor/tui/model.go`, `internal/monitor/tui/model_test.go`, `README.md`, `docs/command-spec.md`
 
+Decision: Accounts with only one official usage window stay visible in the monitor.
+Context: Some accounts return a valid five-hour official usage window but omit the weekly window entirely. Treating the missing weekly window as a full fetch failure makes the whole account look broken even when real usage data is present.
+Rationale: Operators need to see the usable window data that does exist. Marking only the missing side as unavailable matches the provider response more closely and avoids hiding healthy account data.
+Trade-offs: The TUI can now show mixed availability inside one account row, so readers must understand that one window can be present while the other is missing.
+Enforcement: Usage normalization accepts a missing secondary window, stores it as unavailable instead of failing the whole summary, and the TUI renders availability per window panel rather than per account row. Tests cover both the normalization path and the mixed-availability display.
+References: `internal/monitor/usage/raw_types.go`, `internal/monitor/usage/raw_types_test.go`, `internal/monitor/tui/model.go`, `internal/monitor/tui/model_test.go`, `README.md`, `docs/command-spec.md`
+
 Decision: Default-branch-first day-to-day workflow is acceptable in this personal repo.
 Context: This repository is part of the user's personal GitHub portfolio and often supports experimental or fast-iteration work. The user explicitly prefers to work directly on the default branch for normal day-to-day changes unless there is a task-specific reason to branch.
 Rationale: Working directly on the default branch keeps personal-repo execution simple and fast. Branches remain available when they materially help with coordination, isolation, or review.

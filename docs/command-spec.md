@@ -118,6 +118,7 @@
 `multicodex monitor` diagnostics
 - Prefer warnings about unavailable active window cards over other warnings.
 - Prefer plain-English re-login warnings such as `auth expired; sign in again` over generic account fetch failures when an expired profile token is the likely cause.
+- If an account exposes only one official usage window, keep the account visible and mark only the missing window as unavailable.
 - Keep raw per-account error text available in account data for deeper debugging and tests.
 
 `multicodex monitor completion`
