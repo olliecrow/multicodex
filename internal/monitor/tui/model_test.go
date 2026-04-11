@@ -162,6 +162,24 @@ func TestWindowPanelsShowUnavailableWhenActiveWindowDataMissing(t *testing.T) {
 	}
 }
 
+func TestWindowPanelsAllowOnlyWeeklyWindowToBeUnavailable(t *testing.T) {
+	m := seededModel()
+	m.width = 120
+	m.height = 28
+	m.summary.SecondaryWindow = usage.WindowSummary{UsedPercent: -1}
+
+	out := m.View()
+	if !strings.Contains(out, "five-hour window [me]") {
+		t.Fatalf("expected active account name in five-hour title")
+	}
+	if !strings.Contains(out, "used: 41%") {
+		t.Fatalf("expected five-hour window to stay available")
+	}
+	if strings.Count(out, "used: unavailable") != 1 {
+		t.Fatalf("expected only one unavailable panel, got:\n%s", out)
+	}
+}
+
 func TestSingleAccountViewDoesNotRenderExtraAccountWindowRows(t *testing.T) {
 	m := seededModel()
 	m.width = 120

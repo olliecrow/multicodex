@@ -240,6 +240,7 @@ For migration convenience, `multicodex monitor completion [shell]` is also suppo
 
 `multicodex monitor doctor` succeeds when at least one usage source works. A passing result can still be degraded if either the app-server path or the OAuth fallback is unavailable.
 When a profile login has expired, the monitor prefers a short diagnostics warning that tells you to sign in again instead of only showing a long raw fetch error.
+Some accounts only expose one official usage window. When that happens, the monitor keeps the account visible, shows the window that is present, and marks the missing window as unavailable instead of treating the whole account as failed.
 
 Observed token totals shown by the monitor are local estimates derived from session logs. Treat them as advisory and separate from the official five-hour and weekly windows. The TUI labels them as token estimates and can show partial results when some account-home estimates are unavailable.
 
