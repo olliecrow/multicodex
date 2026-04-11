@@ -256,16 +256,15 @@ func (m Model) renderBody() string {
 	windowRows := []string{
 		m.renderWindowRow(
 			contentWidth,
-			windowPanelSpec{title: fiveHourTitle, window: m.summary.PrimaryWindow, available: m.summary.WindowDataAvailable},
-			windowPanelSpec{title: weeklyTitle, window: m.summary.SecondaryWindow, available: m.summary.WindowDataAvailable},
+			windowPanelSpec{title: fiveHourTitle, window: m.summary.PrimaryWindow, available: summaryWindowAvailable(m.summary.WindowDataAvailable, m.summary.PrimaryWindow)},
+			windowPanelSpec{title: weeklyTitle, window: m.summary.SecondaryWindow, available: summaryWindowAvailable(m.summary.WindowDataAvailable, m.summary.SecondaryWindow)},
 		),
 	}
 	for _, account := range m.additionalAccountWindowRows() {
-		available := accountWindowAvailable(account)
 		windowRows = append(windowRows, m.renderWindowRow(
 			contentWidth,
-			windowPanelSpec{title: windowPanelTitle("five-hour window", account), window: account.PrimaryWindow, available: available},
-			windowPanelSpec{title: windowPanelTitle("weekly window", account), window: account.SecondaryWindow, available: available},
+			windowPanelSpec{title: windowPanelTitle("five-hour window", account), window: account.PrimaryWindow, available: accountWindowAvailable(account, account.PrimaryWindow)},
+			windowPanelSpec{title: windowPanelTitle("weekly window", account), window: account.SecondaryWindow, available: accountWindowAvailable(account, account.SecondaryWindow)},
 		))
 	}
 	panelVerticalOverhead := verticalOverhead(m.styles.panel)
@@ -515,8 +514,16 @@ func accountIdentityKey(email, accountID, userID string) string {
 	return ""
 }
 
-func accountWindowAvailable(account usage.AccountSummary) bool {
-	return strings.TrimSpace(account.Error) == "" && account.FetchedAt != nil
+func summaryWindowAvailable(summaryAvailable bool, win usage.WindowSummary) bool {
+	return summaryAvailable && windowSummaryAvailable(win)
+}
+
+func accountWindowAvailable(account usage.AccountSummary, win usage.WindowSummary) bool {
+	return strings.TrimSpace(account.Error) == "" && account.FetchedAt != nil && windowSummaryAvailable(win)
+}
+
+func windowSummaryAvailable(win usage.WindowSummary) bool {
+	return win.UsedPercent >= 0
 }
 
 func windowPanelTitle(base string, account usage.AccountSummary) string {

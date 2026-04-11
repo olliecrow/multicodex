@@ -5,6 +5,8 @@ import (
 	"time"
 )
 
+const unavailableUsedPercent = -1
+
 type rateLimitWindowRaw struct {
 	UsedPercent        int    `json:"usedPercent"`
 	WindowDurationMins *int   `json:"windowDurationMins"`
@@ -41,9 +43,6 @@ func normalizeSummary(source string, snapshot rateLimitSnapshotRaw, additionalLi
 	if snapshot.Primary == nil {
 		return nil, errors.New("missing primary window")
 	}
-	if snapshot.Secondary == nil {
-		return nil, errors.New("missing secondary window")
-	}
 
 	now := time.Now().UTC()
 	out := &Summary{
@@ -51,10 +50,13 @@ func normalizeSummary(source string, snapshot rateLimitSnapshotRaw, additionalLi
 		PlanType:             snapshot.PlanType,
 		WindowDataAvailable:  true,
 		PrimaryWindow:        toWindowSummary(snapshot.Primary),
-		SecondaryWindow:      toWindowSummary(snapshot.Secondary),
+		SecondaryWindow:      unavailableWindowSummary(),
 		AdditionalLimitCount: additionalLimitCount,
 		Warnings:             warnings,
 		FetchedAt:            now,
+	}
+	if snapshot.Secondary != nil {
+		out.SecondaryWindow = toWindowSummary(snapshot.Secondary)
 	}
 	if identity != nil {
 		out.AccountEmail = identity.Email
@@ -76,4 +78,8 @@ func toWindowSummary(win *rateLimitWindowRaw) WindowSummary {
 		out.SecondsUntilReset = &seconds
 	}
 	return out
+}
+
+func unavailableWindowSummary() WindowSummary {
+	return WindowSummary{UsedPercent: unavailableUsedPercent}
 }
