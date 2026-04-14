@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -336,8 +337,8 @@ func estimateTokensFromFile(path string, cutoff5h, cutoff1w time.Time) (tokenAcc
 	}
 	defer f.Close()
 
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	reader := bufio.NewReaderSize(f, 256*1024)
+	longLineBuf := make([]byte, 0, 64*1024)
 
 	var warnings []string
 	var prevTotal *tokenUsageTotal
@@ -345,8 +346,15 @@ func estimateTokensFromFile(path string, cutoff5h, cutoff1w time.Time) (tokenAcc
 	var sum1w tokenAccumulator
 	parseErrCount := 0
 
-	for scanner.Scan() {
-		line := scanner.Bytes()
+	for {
+		line, err := readJSONLLine(reader, &longLineBuf)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return tokenAccumulator{}, tokenAccumulator{}, nil, fmt.Errorf("read usage file %s: %w", path, err)
+		}
+
 		var rec tokenCountLine
 		if err := json.Unmarshal(line, &rec); err != nil {
 			parseErrCount++
@@ -375,14 +383,50 @@ func estimateTokensFromFile(path string, cutoff5h, cutoff1w time.Time) (tokenAcc
 		prevTotal = &current
 	}
 
-	if err := scanner.Err(); err != nil {
-		return tokenAccumulator{}, tokenAccumulator{}, nil, fmt.Errorf("scan usage file %s: %w", path, err)
-	}
-
 	if parseErrCount > 0 {
 		warnings = append(warnings, fmt.Sprintf("skipped %d unparsable lines in %s", parseErrCount, filepath.Base(path)))
 	}
 	return sum5h, sum1w, warnings, nil
+}
+
+func readJSONLLine(reader *bufio.Reader, longLineBuf *[]byte) ([]byte, error) {
+	buf := (*longLineBuf)[:0]
+	for {
+		fragment, err := reader.ReadSlice('\n')
+		switch {
+		case err == nil:
+			if len(buf) == 0 {
+				return trimJSONLLine(fragment), nil
+			}
+			buf = append(buf, fragment...)
+			*longLineBuf = buf
+			return trimJSONLLine(buf), nil
+		case errors.Is(err, bufio.ErrBufferFull):
+			buf = append(buf, fragment...)
+		case errors.Is(err, io.EOF):
+			if len(fragment) == 0 && len(buf) == 0 {
+				*longLineBuf = buf
+				return nil, io.EOF
+			}
+			buf = append(buf, fragment...)
+			*longLineBuf = buf
+			return trimJSONLLine(buf), nil
+		default:
+			*longLineBuf = buf
+			return nil, err
+		}
+	}
+}
+
+func trimJSONLLine(line []byte) []byte {
+	for len(line) > 0 {
+		last := line[len(line)-1]
+		if last != '\n' && last != '\r' {
+			break
+		}
+		line = line[:len(line)-1]
+	}
+	return line
 }
 
 func usageForEvent(current tokenUsageTotal, last tokenUsageTotal, previous *tokenUsageTotal) (tokenUsageTotal, bool) {

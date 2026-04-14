@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -211,6 +212,39 @@ func TestEstimateTokensFromFileAccumulatesSplitBreakdown(t *testing.T) {
 		if !sum.HasCachedOutput {
 			t.Fatalf("expected cached output flag to be set")
 		}
+	}
+}
+
+func TestEstimateTokensFromFileHandlesLargeJSONLLine(t *testing.T) {
+	now := time.Date(2026, 2, 26, 20, 0, 0, 0, time.UTC)
+	cutoff5h := now.Add(-5 * time.Hour)
+	cutoff1w := now.Add(-7 * 24 * time.Hour)
+
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	largeBlob := strings.Repeat("x", 5*1024*1024)
+	content := ""
+	content += fmt.Sprintf(
+		`{"timestamp":"%s","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":25},"last_token_usage":{"total_tokens":25}}},"blob":"%s"}`+"\n",
+		now.Add(-2*time.Hour).UTC().Format(time.RFC3339Nano),
+		largeBlob,
+	)
+	content += tokenCountJSONLineWithLast(now.Add(-30*time.Minute), 40, 15) + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write usage file: %v", err)
+	}
+
+	sum5h, sum1w, warnings, err := estimateTokensFromFile(path, cutoff5h, cutoff1w)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if sum5h.Total != 40 {
+		t.Fatalf("expected 40 tokens in 5h window, got %d", sum5h.Total)
+	}
+	if sum1w.Total != 40 {
+		t.Fatalf("expected 40 tokens in weekly window, got %d", sum1w.Total)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("did not expect parse warnings, got %+v", warnings)
 	}
 }
 
