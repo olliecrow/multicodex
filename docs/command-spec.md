@@ -61,9 +61,10 @@
 - For help requests (`--help`, `-h`, or `help`), delegates directly to `codex exec` and does not require profiles to be configured.
 - Automatically selects among configured multicodex profiles.
 - Re-checks file-backed auth isolation before launching `codex exec`.
-- Prefers profiles whose five-hour usage window is strictly below 60%.
-- Among eligible profiles, chooses the lowest weekly usage.
-- When no profile is below the five-hour threshold, falls back to the lowest weekly-usage profile.
+- Treats profiles whose five-hour usage window is strictly below 50% as safe to route work to.
+- Among safe profiles, groups weekly reset times into buckets: up to 24 hours, over 24 and up to 72 hours, over 72 hours, then unknown reset times last.
+- Picks randomly inside the first non-empty safe bucket.
+- When no profile is below the five-hour threshold, falls back to the lowest five-hour-usage profile with random tie-breaking.
 - When usage fetch is unavailable for every profile, falls back to the first sorted profile with `auth.json`, otherwise the first sorted configured profile.
 - Returns child exit code.
 

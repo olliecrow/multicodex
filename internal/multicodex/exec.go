@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	execSelectionPrimaryUsageLimit = 60
+	execSelectionPrimaryUsageLimit = 50
 	execSelectionTimeout           = 10 * time.Second
 	envSelectedProfilePath         = "MULTICODEX_SELECTED_PROFILE_PATH"
 )
