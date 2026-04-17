@@ -193,7 +193,7 @@ Decision: Add `multicodex exec` as an auto-routing wrapper around `codex exec`.
 Context: Users often want the convenience of `codex exec` without manually choosing which logged-in subscription account currently has the most weekly headroom.
 Rationale: A dedicated `multicodex exec` command preserves a simple, familiar interface while keeping account-selection policy explicit and local to multicodex.
 Trade-offs: Selection is still best-effort snapshot routing, so simultaneous launches can choose the same profile and the chosen account may change between invocations.
-Enforcement: `multicodex exec` forwards all arguments directly to `codex exec`, bypasses profile selection for help requests, prefers configured profiles whose five-hour usage is below 60%, chooses the lowest weekly usage among eligible profiles, and falls back to the lowest weekly-usage profile when none meet the five-hour threshold.
+Enforcement: `multicodex exec` forwards all arguments directly to `codex exec`, bypasses profile selection for help requests, treats configured profiles below 50% five-hour usage as safe, groups safe profiles by weekly reset time into `<=24h`, `>24h && <=72h`, `>72h`, and unknown-last buckets, picks randomly inside the first non-empty bucket, and falls back to the lowest five-hour-usage profile with random tie-breaking when none meet the safe threshold.
 References: `internal/multicodex/exec.go`, `internal/multicodex/exec_test.go`, `internal/monitor/usage/select.go`, `internal/monitor/usage/select_test.go`, `README.md`, `docs/command-spec.md`
 
 Decision: Parse `cli_auth_credentials_store` by exact key instead of substring matching.
