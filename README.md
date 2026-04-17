@@ -144,7 +144,7 @@ Run `codex exec` on the best available logged-in profile automatically.
 multicodex exec -s read-only "Summarize the README in 3 bullets."
 ```
 
-`multicodex exec` prefers profiles whose five-hour window is below 60% used, then chooses the lowest weekly-usage profile. If every profile is already at 60% or higher in the five-hour window, it still runs on the lowest weekly-usage profile.
+`multicodex exec` first keeps profiles whose five-hour window is below 50% used. It then groups them by weekly reset time: within 24 hours first, over 24 and up to 72 hours next, then later resets, with unknown weekly reset times placed last. It picks randomly inside the first non-empty bucket. If every profile is already at 50% or higher in the five-hour window, it falls back to the profile with the lowest five-hour usage, with random tie-breaking.
 For help requests such as `multicodex exec --help`, it delegates directly to `codex exec` and does not require any profiles to be configured.
 
 Switch system default account used by default Codex context.

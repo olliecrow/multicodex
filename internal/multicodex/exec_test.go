@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"multicodex/internal/monitor/usage"
 )
@@ -173,9 +174,9 @@ func TestExecArgsAreHelpRequest(t *testing.T) {
 func TestCmdExecSelectsBestProfileUsingDefaultSelector(t *testing.T) {
 	app, logPath, root := newExecSelectionTestApp(t)
 	createExecProfiles(t, app, "alpha", "beta", "gamma")
-	writeExecSelectionProfileData(t, root, "alpha", 10, 40)
-	writeExecSelectionProfileData(t, root, "beta", 55, 20)
-	writeExecSelectionProfileData(t, root, "gamma", 80, 1)
+	writeExecSelectionProfileData(t, root, "alpha", 10, 40, 96*time.Hour)
+	writeExecSelectionProfileData(t, root, "beta", 20, 20, 36*time.Hour)
+	writeExecSelectionProfileData(t, root, "gamma", 80, 1, 12*time.Hour)
 
 	if err := app.Run([]string{"exec", "--skip-git-repo-check", "prompt with spaces"}); err != nil {
 		t.Fatalf("exec failed: %v", err)
@@ -344,11 +345,13 @@ with open(usage_path, "r", encoding="utf-8") as fh:
 primary = int(usage["primary_used_percent"])
 secondary = int(usage["weekly_used_percent"])
 email = usage.get("email", "")
+primary_resets_at = usage.get("primary_resets_at")
+secondary_resets_at = usage.get("secondary_resets_at")
 rate_limits = {
     "limitId": "codex",
     "planType": "pro",
-    "primary": {"usedPercent": primary, "windowDurationMins": 300},
-    "secondary": {"usedPercent": secondary, "windowDurationMins": 10080},
+    "primary": {"usedPercent": primary, "windowDurationMins": 300, "resetsAt": primary_resets_at},
+    "secondary": {"usedPercent": secondary, "windowDurationMins": 10080, "resetsAt": secondary_resets_at},
 }
 
 for raw_line in sys.stdin:
@@ -421,14 +424,22 @@ func createExecProfiles(t *testing.T, app *App, names ...string) {
 	}
 }
 
-func writeExecSelectionProfileData(t *testing.T, root, name string, primaryUsed, weeklyUsed int) {
+func writeExecSelectionProfileData(t *testing.T, root, name string, primaryUsed, weeklyUsed int, weeklyResetIn time.Duration) {
 	t.Helper()
 
 	home := filepath.Join(root, "multi", "profiles", name, "codex-home")
 	if err := os.WriteFile(filepath.Join(home, "auth.json"), []byte(fmt.Sprintf(`{"tokens":{"access_token":"token-%s"}}`, name)), 0o600); err != nil {
 		t.Fatalf("write auth: %v", err)
 	}
-	usageJSON := fmt.Sprintf(`{"primary_used_percent": %d, "weekly_used_percent": %d, "email": "%s@example.com"}`, primaryUsed, weeklyUsed, name)
+	now := time.Now().UTC()
+	usageJSON := fmt.Sprintf(
+		`{"primary_used_percent": %d, "weekly_used_percent": %d, "email": "%s@example.com", "primary_resets_at": %d, "secondary_resets_at": %d}`,
+		primaryUsed,
+		weeklyUsed,
+		name,
+		now.Add(5*time.Hour).Unix(),
+		now.Add(weeklyResetIn).Unix(),
+	)
 	if err := os.WriteFile(filepath.Join(home, "usage.json"), []byte(usageJSON), 0o600); err != nil {
 		t.Fatalf("write usage: %v", err)
 	}

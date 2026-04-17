@@ -86,7 +86,7 @@ var commandHelpByName = map[string]commandHelp{
 	},
 	"exec": {
 		Usage:       "multicodex exec [codex exec args]",
-		Description: "Run `codex exec` after automatically selecting the best available configured profile. Profiles under 60% five-hour usage are preferred; selection then picks the lowest weekly usage and falls back to the lowest weekly usage overall when none are under the five-hour threshold.",
+		Description: "Run `codex exec` after automatically selecting the best available configured profile. Profiles below 50% five-hour usage are grouped by weekly reset time: within 24 hours first, then over 24 and up to 72 hours, then later resets, with a random pick inside the first non-empty bucket. When no profile is below the five-hour threshold, selection falls back to the lowest five-hour usage.",
 		Examples: []string{
 			`multicodex exec -s read-only "Summarize the README in 3 bullets."`,
 			"multicodex exec --skip-git-repo-check -C /path/to/repo \"Review the latest diff.\"",
