@@ -93,12 +93,14 @@
 `multicodex monitor`
 - Runs a live terminal UI for Codex subscription usage across compatible local accounts.
 - Defaults to the integrated monitor UI when no monitor subcommand is provided.
+- Defaults both the poll interval and the per-poll fetch timeout to 60 seconds.
 - Prefers account definitions from multicodex profile config and monitor-owned account overrides.
 - Always includes the default Codex home as a candidate account home before broader filesystem discovery.
 - Shows account labels instead of raw email addresses in the TUI when labels are available.
 - Keeps tracked timestamps in UTC internally while rendering user-facing TUI timestamps in local time without seconds.
 - Continues to support legacy monitor account-file locations as a compatibility fallback.
 - Uses read-only filesystem auto-discovery under the home directory, scanning for `.codex*`, `.codex`, and `codex-home` paths up to depth 5 before filtering transient/cache locations and requiring usage signals.
+- When fallback is available, keeps most of a long fetch timeout for the primary source and reserves at most 10 seconds for fallback so slow refreshes are less likely to end as false `unavailable` window cards.
 - Treats observed-token totals as local estimates derived from session logs rather than official provider counters.
 - Labels observed-token sections as token estimates in the TUI and shows `partial` when some home estimates are missing.
 - Remains read-only with respect to Codex account state.
