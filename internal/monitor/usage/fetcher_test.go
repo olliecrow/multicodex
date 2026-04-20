@@ -96,6 +96,24 @@ func TestFetchWithFallbackReservesTimeForFallback(t *testing.T) {
 	}
 }
 
+func TestAttemptContextCapsFallbackReserveForLongTimeouts(t *testing.T) {
+	parent, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	child, childCancel := attemptContext(parent, true)
+	defer childCancel()
+
+	deadline, ok := child.Deadline()
+	if !ok {
+		t.Fatalf("expected child deadline")
+	}
+
+	remaining := time.Until(deadline)
+	if remaining < 45*time.Second || remaining > 55*time.Second {
+		t.Fatalf("expected child timeout near 50s after capped fallback reserve, got %s", remaining)
+	}
+}
+
 func TestFetcherFailsWhenBothSourcesFail(t *testing.T) {
 	primary := &fakeSource{name: "primary", err: errors.New("p")}
 	fallback := &fakeSource{name: "fallback", err: errors.New("f")}
