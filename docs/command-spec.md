@@ -15,7 +15,7 @@
 - `multicodex monitor [flags]`
 - `multicodex monitor help`
 - `multicodex monitor tui [flags]`
-- `multicodex monitor doctor [--json] [--timeout 20s]`
+- `multicodex monitor doctor [--json] [--timeout 60s]`
 - `multicodex monitor completion [shell]`
 - `multicodex doctor [--json] [--timeout 8s]`
 - `multicodex dry-run [operation]`

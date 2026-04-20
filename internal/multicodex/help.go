@@ -116,7 +116,7 @@ var commandHelpByName = map[string]commandHelp{
 		},
 	},
 	"monitor": {
-		Usage:       "multicodex monitor [--interval 60s] [--timeout 20s] [--no-color] [--no-alt-screen]",
+		Usage:       "multicodex monitor [--interval 60s] [--timeout 60s] [--no-color] [--no-alt-screen]",
 		Description: "Run the live subscription-usage terminal UI. The monitor prefers configured multicodex profiles, then falls back to compatible local Codex homes and legacy monitor account files.",
 		Examples: []string{
 			"multicodex monitor",
@@ -125,7 +125,7 @@ var commandHelpByName = map[string]commandHelp{
 		},
 	},
 	"monitor doctor": {
-		Usage:       "multicodex monitor doctor [--json] [--timeout 20s]",
+		Usage:       "multicodex monitor doctor [--json] [--timeout 60s]",
 		Description: "Run read-only monitor checks against the active/default Codex account data sources. The command succeeds when at least one usage source works and reports degraded status when a source is unavailable.",
 		Examples: []string{
 			"multicodex monitor doctor",
@@ -133,7 +133,7 @@ var commandHelpByName = map[string]commandHelp{
 		},
 	},
 	"monitor tui": {
-		Usage:       "multicodex monitor tui [--interval 60s] [--timeout 20s] [--no-color] [--no-alt-screen]",
+		Usage:       "multicodex monitor tui [--interval 60s] [--timeout 60s] [--no-color] [--no-alt-screen]",
 		Description: "Explicit alias for the live subscription-usage terminal UI. This behaves the same as `multicodex monitor` with no monitor subcommand.",
 		Examples: []string{
 			"multicodex monitor tui",
