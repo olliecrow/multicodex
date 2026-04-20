@@ -231,11 +231,11 @@ Trade-offs: The diagnostics line is less strictly chronological because it now p
 Enforcement: The TUI diagnostics summary prefers warnings mentioning unavailable window cards, then other active-account warnings, before falling back to the first warning; tests cover the prioritization.
 References: `internal/monitor/tui/model.go`, `internal/monitor/tui/model_test.go`
 
-Decision: Default monitor polls use a 20-second fetch timeout.
-Context: With multiple accounts, the first poll after a long idle gap can require enough concurrent app-server and OAuth work that the previous 10-second shared poll budget intermittently timed out healthy accounts, leaving official window cards unavailable while observed token totals stayed ready.
-Rationale: Raising the default per-poll timeout to 20 seconds preserves the existing fetch pipeline while removing the reproduced idle-gap failures in real monitor runs.
-Trade-offs: A truly degraded refresh can now take longer to declare failure, but the default view is materially more reliable for normal multi-account operation.
-Enforcement: The TUI default timeout and the user-facing monitor/help usage strings default to 20 seconds; shorter timeouts remain available via `--timeout` for operators who prefer faster failure.
+Decision: Default monitor polls use a 60-second fetch timeout.
+Context: With multiple accounts, the live monitor can still miss healthy official window data when the whole refresh shares one fetch budget and cold or busy account fetches run longer than 20 seconds.
+Rationale: Matching the default fetch timeout to the existing 60-second poll clock gives one full refresh cycle for the current fetch pipeline and reduces false `unavailable` windows in larger real setups.
+Trade-offs: A truly degraded refresh now takes longer to surface as failed by default, but operators can still lower it with `--timeout` when they want faster failure.
+Enforcement: The TUI default timeout and the user-facing monitor/help usage strings default to 60 seconds; shorter timeouts remain available via `--timeout` for operators who prefer faster failure.
 References: `internal/monitor/tui/model.go`, `internal/multicodex/monitor.go`, `internal/multicodex/help.go`
 
 Decision: Active-account alias rows prefer the real profile label over the synthetic `default` alias.

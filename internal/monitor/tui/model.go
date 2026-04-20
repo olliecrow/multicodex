@@ -80,7 +80,7 @@ type fetchResultMsg struct {
 
 const (
 	defaultInterval = 60 * time.Second
-	defaultTimeout  = 20 * time.Second
+	defaultTimeout  = 60 * time.Second
 )
 
 func NewModel(opts Options) Model {

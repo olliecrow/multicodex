@@ -20,6 +20,11 @@ func TestMonitorHelpIncludesDoctorAndTerminalUserInterfaceText(t *testing.T) {
 	if !strings.Contains(out, "multicodex monitor doctor") {
 		t.Fatalf("expected doctor usage in monitor help, got:\n%s", out)
 	}
+	for _, want := range []string{"--interval 60s", "--timeout 60s"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected %q in monitor help, got:\n%s", want, out)
+		}
+	}
 }
 
 func TestHelpMonitorTopic(t *testing.T) {
@@ -32,6 +37,9 @@ func TestHelpMonitorTopic(t *testing.T) {
 	}
 	if !strings.Contains(out, "multicodex monitor") {
 		t.Fatalf("expected monitor help topic output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "[--timeout 60s]") {
+		t.Fatalf("expected 60s timeout in help monitor output, got:\n%s", out)
 	}
 }
 
