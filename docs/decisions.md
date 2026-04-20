@@ -233,10 +233,10 @@ References: `internal/monitor/tui/model.go`, `internal/monitor/tui/model_test.go
 
 Decision: Default monitor polls use a 60-second fetch timeout.
 Context: With multiple accounts, the live monitor can still miss healthy official window data when the whole refresh shares one fetch budget and cold or busy account fetches run longer than 20 seconds.
-Rationale: Matching the default fetch timeout to the existing 60-second poll clock gives one full refresh cycle for the current fetch pipeline and reduces false `unavailable` windows in larger real setups.
+Rationale: Matching the default fetch timeout to the existing 60-second poll clock gives one full refresh cycle for the current fetch pipeline and reduces false `unavailable` windows in larger real setups. The fetcher also caps the time reserved for fallback so a long refresh budget is not still split 50/50 between primary and fallback attempts.
 Trade-offs: A truly degraded refresh now takes longer to surface as failed by default, but operators can still lower it with `--timeout` when they want faster failure.
-Enforcement: The TUI default timeout and the user-facing monitor/help usage strings default to 60 seconds; shorter timeouts remain available via `--timeout` for operators who prefer faster failure.
-References: `internal/monitor/tui/model.go`, `internal/multicodex/monitor.go`, `internal/multicodex/help.go`
+Enforcement: The TUI default timeout and the user-facing monitor/help usage strings default to 60 seconds; shorter timeouts remain available via `--timeout` for operators who prefer faster failure. When fallback is available, the fetcher caps reserved fallback time so the primary path keeps most of a long refresh budget.
+References: `internal/monitor/tui/model.go`, `internal/multicodex/monitor.go`, `internal/multicodex/help.go`, `internal/monitor/usage/fetcher.go`, `internal/monitor/usage/fetcher_test.go`
 
 Decision: Active-account alias rows prefer the real profile label over the synthetic `default` alias.
 Context: When `~/.codex/auth.json` is linked into a multicodex profile home, the monitor can discover the same logical account twice: once via the synthetic `default` row and once via the real profile row.

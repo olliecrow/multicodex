@@ -301,7 +301,11 @@ func attemptContext(parent context.Context, reserveForFallback bool) (context.Co
 		return parent, func() {}
 	}
 	if reserveForFallback {
-		remaining /= 2
+		reserve := remaining / 2
+		if maxReserve := 10 * time.Second; reserve > maxReserve {
+			reserve = maxReserve
+		}
+		remaining -= reserve
 	}
 	if remaining <= 0 {
 		return parent, func() {}
