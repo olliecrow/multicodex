@@ -214,6 +214,7 @@ For periodic refresh, add this command to your cron schedule, for example:
 
 Monitor live subscription usage across your configured and discovered accounts.
 The TUI identifies accounts by configured account label and renders user-facing timestamps in local time without seconds.
+It defaults both the refresh interval and fetch timeout to 60 seconds.
 
 ```bash
 multicodex monitor
@@ -239,6 +240,7 @@ Legacy account-file paths are still read when the new multicodex monitor file is
 For migration convenience, `multicodex monitor completion [shell]` is also supported and defaults to bash, matching the old standalone monitor habit.
 
 `multicodex monitor doctor` succeeds when at least one usage source works. A passing result can still be degraded if either the app-server path or the OAuth fallback is unavailable.
+When fallback is available, the monitor keeps most of a long fetch timeout for the main source and reserves at most 10 seconds for fallback, which helps cut false `unavailable` window cards on slower refreshes.
 When a profile login has expired, the monitor prefers a short diagnostics warning that tells you to sign in again instead of only showing a long raw fetch error.
 Some accounts only expose one official usage window. When that happens, the monitor keeps the account visible, shows the window that is present, and marks the missing window as unavailable instead of treating the whole account as failed.
 

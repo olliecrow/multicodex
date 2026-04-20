@@ -23,7 +23,10 @@ type Fetcher struct {
 	accountsLastRefreshedAt time.Time
 }
 
-const unverifiedAccountIdentityKey = "unverified"
+const (
+	unverifiedAccountIdentityKey = "unverified"
+	maxFallbackReserve           = 10 * time.Second
+)
 
 type accountFetcher struct {
 	account  MonitorAccount
@@ -302,8 +305,8 @@ func attemptContext(parent context.Context, reserveForFallback bool) (context.Co
 	}
 	if reserveForFallback {
 		reserve := remaining / 2
-		if maxReserve := 10 * time.Second; reserve > maxReserve {
-			reserve = maxReserve
+		if reserve > maxFallbackReserve {
+			reserve = maxFallbackReserve
 		}
 		remaining -= reserve
 	}
