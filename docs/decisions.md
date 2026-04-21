@@ -231,12 +231,12 @@ Trade-offs: Active-account detection now follows one extra filesystem indirectio
 Enforcement: Monitor active-account selection matches both the active Codex home and the resolved directory of its `auth.json` symlink target; regression tests cover the alias case.
 References: `internal/monitor/usage/fetcher.go`, `internal/monitor/usage/fetcher_test.go`
 
-Decision: Prioritize active-window availability warnings in the monitor diagnostics line.
-Context: The monitor can accumulate many warnings in one refresh, but the single-line diagnostics summary is the main operator hint when the active window cards go unavailable.
-Rationale: Showing the first account-specific warning in sort order can hide the actual active-window failure and mislead operators into debugging the wrong account first.
-Trade-offs: The diagnostics line is less strictly chronological because it now prefers the warning with the highest operator value rather than the first collected warning.
-Enforcement: The TUI diagnostics summary prefers warnings mentioning unavailable window cards, then other active-account warnings, before falling back to the first warning; tests cover the prioritization.
-References: `internal/monitor/tui/model.go`, `internal/monitor/tui/model_test.go`
+Decision: Keep last good official monitor window cards visible during full refresh outages, and prioritize concrete fetch failures in diagnostics.
+Context: The monitor can hit short periods where every official usage fetch fails together even though the last good official data is still useful and the local token estimate still refreshes. In that state, blanking every window card to `unavailable` is noisy and hides the more useful fetch error.
+Rationale: Showing stale-but-real official window cards is better than dropping all cards at once during a transient outage. When there is also a real fetch error, operators need that concrete error more than a generic `window cards are unavailable` summary.
+Trade-offs: The window cards can now stay on screen briefly after a failed refresh, so the UI must mark them stale clearly to avoid implying they are fresh.
+Enforcement: When a refresh returns zero successful official account fetches, the TUI keeps the last good official window snapshot on screen, marks every official window panel as stale, and keeps the newest observed-token estimate and warnings. The diagnostics summary now prefers auth-expired warnings first, then active-account fetch failures, then other fetch failures, before generic active-window availability warnings.
+References: `internal/monitor/tui/model.go`, `internal/monitor/tui/model_test.go`, `README.md`, `docs/command-spec.md`
 
 Decision: Default monitor polls use a 60-second fetch timeout.
 Context: With multiple accounts, the live monitor can still miss healthy official window data when the whole refresh shares one fetch budget and cold or busy account fetches run longer than 20 seconds.
