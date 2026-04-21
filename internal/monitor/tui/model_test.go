@@ -369,8 +369,8 @@ func TestDiagnosticsStatusPrefersActiveWindowWarning(t *testing.T) {
 	if line.level != "warning" {
 		t.Fatalf("expected warning level, got %q", line.level)
 	}
-	if !strings.Contains(line.value, "window cards are unavailable") {
-		t.Fatalf("expected active-window warning to be prioritized, got %q", line.value)
+	if line.value != `account "apple" fetch failed: primary source "app-server" failed (+1 more)` {
+		t.Fatalf("expected concrete fetch failure to be prioritized, got %q", line.value)
 	}
 }
 
@@ -397,6 +397,21 @@ func TestDiagnosticsStatusPrefersAuthExpiredWarning(t *testing.T) {
 	line := m.diagnosticsStatusLine()
 	if line.value != `account "crowoy" auth expired; sign in again (+1 more)` {
 		t.Fatalf("expected auth-expired warning to be prioritized, got %q", line.value)
+	}
+}
+
+func TestDiagnosticsStatusPrefersActiveAccountFetchFailure(t *testing.T) {
+	m := seededModel()
+	m.summary.WindowAccountLabel = "me"
+	m.summary.Warnings = []string{
+		`account "apple" fetch failed: primary source "app-server" failed`,
+		`account "me" fetch failed: primary source "app-server" failed`,
+		"active account usage fetch failed; window cards are unavailable",
+	}
+
+	line := m.diagnosticsStatusLine()
+	if line.value != `account "me" fetch failed: primary source "app-server" failed (+2 more)` {
+		t.Fatalf("expected active-account fetch failure to be prioritized, got %q", line.value)
 	}
 }
 
@@ -601,6 +616,89 @@ func TestViewShowsExitHintAtBottom(t *testing.T) {
 	}
 	if strings.Contains(out, "last successful snapshot") {
 		t.Fatalf("did not expect last successful snapshot footer line")
+	}
+}
+
+func TestFetchResultKeepsLastGoodUsagePanelsWhenOfficialRefreshFails(t *testing.T) {
+	m := seededMultiAccountModel()
+	m.fetching = true
+	lastGood := cloneSummary(m.summary)
+	m.lastGoodWindowData = cloneSummary(m.summary)
+
+	reset5h := int64(100)
+	reset1w := int64(200)
+	observed5h := int64(12345)
+	observed1w := int64(67890)
+	nextSummary := &usage.Summary{
+		WindowDataAvailable:  false,
+		WindowAccountLabel:   "me",
+		TotalAccounts:        3,
+		SuccessfulAccounts:   0,
+		ObservedTokensStatus: "estimated",
+		ObservedTokens5h:     &observed5h,
+		ObservedTokensWeekly: &observed1w,
+		ObservedWindow5h:     &usage.ObservedTokenBreakdown{Total: observed5h},
+		ObservedWindowWeekly: &usage.ObservedTokenBreakdown{Total: observed1w},
+		Warnings: []string{
+			`account "me" fetch failed: primary source "app-server" failed: timeout`,
+			"active account usage fetch failed; window cards are unavailable",
+		},
+		PrimaryWindow: usage.WindowSummary{
+			UsedPercent:       -1,
+			SecondsUntilReset: &reset5h,
+		},
+		SecondaryWindow: usage.WindowSummary{
+			UsedPercent:       -1,
+			SecondsUntilReset: &reset1w,
+		},
+	}
+
+	updated, cmd := m.Update(fetchResultMsg{
+		at:      m.now,
+		summary: nextSummary,
+	})
+	if cmd != nil {
+		t.Fatalf("expected no follow-up command from fetch result")
+	}
+
+	got := updated.(Model)
+	if !got.showingStaleWindows {
+		t.Fatalf("expected stale window mode after full official refresh failure")
+	}
+	if got.summary == nil {
+		t.Fatalf("expected merged summary")
+	}
+	if !got.summary.WindowDataAvailable {
+		t.Fatalf("expected last good official windows to stay visible")
+	}
+	if got.summary.PrimaryWindow.UsedPercent != lastGood.PrimaryWindow.UsedPercent {
+		t.Fatalf("expected active five-hour window to come from last good snapshot")
+	}
+	if len(got.summary.Accounts) != len(lastGood.Accounts) {
+		t.Fatalf("expected last good account rows to stay visible")
+	}
+	if got.summary.ObservedTokens5h == nil || *got.summary.ObservedTokens5h != observed5h {
+		t.Fatalf("expected current observed totals to stay current")
+	}
+
+	got.width = 140
+	got.height = 36
+	out := got.View()
+	if !strings.Contains(out, "five-hour window [me] [stale]") {
+		t.Fatalf("expected stale marker on active panel title, got:\n%s", out)
+	}
+	if !strings.Contains(out, "five-hour window [alpha] [stale]") {
+		t.Fatalf("expected stale marker on extra account panel title, got:\n%s", out)
+	}
+	if !strings.Contains(out, "used: 41%") {
+		t.Fatalf("expected last good usage values to remain visible, got:\n%s", out)
+	}
+	if !strings.Contains(out, "warning [active windows]: stale (2s old)") {
+		t.Fatalf("expected stale active-window status line, got:\n%s", out)
+	}
+	line := got.diagnosticsStatusLine()
+	if line.value != `account "me" fetch failed: primary source "app-server" failed: timeout (+1 more)` {
+		t.Fatalf("expected concrete fetch failure in diagnostics, got %q", line.value)
 	}
 }
 

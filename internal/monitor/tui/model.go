@@ -43,8 +43,10 @@ type Model struct {
 	lastError         string
 	nextFetchAt       time.Time
 
-	summary *usage.Summary
-	styles  styles
+	summary             *usage.Summary
+	lastGoodWindowData  *usage.Summary
+	showingStaleWindows bool
+	styles              styles
 }
 
 type styles struct {
@@ -187,6 +189,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.lastError = ""
 		m.lastSuccessAt = v.at.UTC()
+		if hasFreshWindowData(v.summary) {
+			m.lastGoodWindowData = cloneSummary(v.summary)
+			m.showingStaleWindows = false
+			m.summary = v.summary
+			return m, nil
+		}
+		if shouldReuseLastGoodWindowData(v.summary, m.lastGoodWindowData) {
+			m.showingStaleWindows = true
+			m.summary = mergeStaleWindowData(v.summary, m.lastGoodWindowData)
+			return m, nil
+		}
+		m.showingStaleWindows = false
 		m.summary = v.summary
 		return m, nil
 	}
@@ -252,6 +266,10 @@ func (m Model) renderBody() string {
 		fiveHourTitle += " [unavailable]"
 		weeklyTitle += " [unavailable]"
 	}
+	if m.showingStaleWindows {
+		fiveHourTitle += " [stale]"
+		weeklyTitle += " [stale]"
+	}
 
 	windowRows := []string{
 		m.renderWindowRow(
@@ -263,8 +281,8 @@ func (m Model) renderBody() string {
 	for _, account := range m.additionalAccountWindowRows() {
 		windowRows = append(windowRows, m.renderWindowRow(
 			contentWidth,
-			windowPanelSpec{title: windowPanelTitle("five-hour window", account), window: account.PrimaryWindow, available: accountWindowAvailable(account, account.PrimaryWindow)},
-			windowPanelSpec{title: windowPanelTitle("weekly window", account), window: account.SecondaryWindow, available: accountWindowAvailable(account, account.SecondaryWindow)},
+			windowPanelSpec{title: windowPanelTitle("five-hour window", account, m.showingStaleWindows), window: account.PrimaryWindow, available: accountWindowAvailable(account, account.PrimaryWindow)},
+			windowPanelSpec{title: windowPanelTitle("weekly window", account, m.showingStaleWindows), window: account.SecondaryWindow, available: accountWindowAvailable(account, account.SecondaryWindow)},
 		))
 	}
 	panelVerticalOverhead := verticalOverhead(m.styles.panel)
@@ -526,9 +544,16 @@ func windowSummaryAvailable(win usage.WindowSummary) bool {
 	return win.UsedPercent >= 0
 }
 
-func windowPanelTitle(base string, account usage.AccountSummary) string {
+func windowPanelTitle(base string, account usage.AccountSummary, stale bool) string {
 	if name := accountDisplayName(account); name != "" {
-		return base + " [" + name + "]"
+		title := base + " [" + name + "]"
+		if stale {
+			title += " [stale]"
+		}
+		return title
+	}
+	if stale {
+		return base + " [stale]"
 	}
 	return base
 }
@@ -643,6 +668,9 @@ func (m Model) renderStatusLinesFixed(rows int) []string {
 }
 
 func (m Model) activeWindowsStatusLine() statusLine {
+	if m.showingStaleWindows {
+		return statusLine{level: "warning", name: "active windows", value: "stale (" + staleWindowAge(m.now, m.summary) + " old)"}
+	}
 	if !m.summary.WindowDataAvailable {
 		if m.fetching {
 			return statusLine{level: "status", name: "active windows", value: "loading"}
@@ -676,7 +704,7 @@ func (m Model) diagnosticsStatusLine() statusLine {
 
 	warnings := dedupeWarnings(m.summary.Warnings)
 	if len(warnings) > 0 {
-		value := preferredDiagnosticWarning(warnings)
+		value := preferredDiagnosticWarning(warnings, m.summary.WindowAccountLabel)
 		if len(warnings) > 1 {
 			value = fmt.Sprintf("%s (+%d more)", value, len(warnings)-1)
 		}
@@ -707,18 +735,27 @@ func dedupeWarnings(in []string) []string {
 	return out
 }
 
-func preferredDiagnosticWarning(warnings []string) string {
+func preferredDiagnosticWarning(warnings []string, activeLabel string) string {
 	if len(warnings) == 0 {
 		return ""
 	}
 	for _, warning := range warnings {
-		if strings.Contains(strings.ToLower(warning), "window cards are unavailable") {
+		lower := strings.ToLower(warning)
+		if strings.Contains(lower, "auth expired") || strings.Contains(lower, "auth rejected") || strings.Contains(lower, "sign in again") {
 			return warning
 		}
 	}
+	if label := strings.TrimSpace(activeLabel); label != "" {
+		quotedLabel := `account "` + label + `"`
+		for _, warning := range warnings {
+			lower := strings.ToLower(warning)
+			if strings.Contains(warning, quotedLabel) && strings.Contains(lower, "fetch failed") {
+				return warning
+			}
+		}
+	}
 	for _, warning := range warnings {
-		lower := strings.ToLower(warning)
-		if strings.Contains(lower, "auth expired") || strings.Contains(lower, "auth rejected") || strings.Contains(lower, "sign in again") {
+		if strings.Contains(strings.ToLower(warning), "fetch failed") {
 			return warning
 		}
 	}
@@ -727,7 +764,108 @@ func preferredDiagnosticWarning(warnings []string) string {
 			return warning
 		}
 	}
+	for _, warning := range warnings {
+		if strings.Contains(strings.ToLower(warning), "window cards are unavailable") {
+			return warning
+		}
+	}
 	return warnings[0]
+}
+
+func hasFreshWindowData(summary *usage.Summary) bool {
+	return summary != nil && summary.WindowDataAvailable && summary.SuccessfulAccounts > 0
+}
+
+func shouldReuseLastGoodWindowData(summary, cached *usage.Summary) bool {
+	return summary != nil && cached != nil && summary.SuccessfulAccounts == 0
+}
+
+func mergeStaleWindowData(current, cached *usage.Summary) *usage.Summary {
+	if current == nil {
+		return cloneSummary(cached)
+	}
+	if cached == nil {
+		return cloneSummary(current)
+	}
+
+	out := cloneSummary(current)
+	out.Source = cached.Source
+	out.PlanType = cached.PlanType
+	out.AccountEmail = cached.AccountEmail
+	out.AccountID = cached.AccountID
+	out.UserID = cached.UserID
+	out.WindowDataAvailable = cached.WindowDataAvailable
+	out.PrimaryWindow = cached.PrimaryWindow
+	out.SecondaryWindow = cached.SecondaryWindow
+	out.WindowAccountLabel = cached.WindowAccountLabel
+	out.AdditionalLimitCount = cached.AdditionalLimitCount
+	out.Accounts = cloneAccountSummaries(cached.Accounts)
+	out.FetchedAt = cached.FetchedAt
+	if out.TotalAccounts == 0 {
+		out.TotalAccounts = cached.TotalAccounts
+	}
+	return out
+}
+
+func cloneSummary(summary *usage.Summary) *usage.Summary {
+	if summary == nil {
+		return nil
+	}
+	out := *summary
+	out.Accounts = cloneAccountSummaries(summary.Accounts)
+	out.Warnings = append([]string(nil), summary.Warnings...)
+	if summary.ObservedWindow5h != nil {
+		clone := *summary.ObservedWindow5h
+		out.ObservedWindow5h = &clone
+	}
+	if summary.ObservedWindowWeekly != nil {
+		clone := *summary.ObservedWindowWeekly
+		out.ObservedWindowWeekly = &clone
+	}
+	if summary.ObservedTokens5h != nil {
+		clone := *summary.ObservedTokens5h
+		out.ObservedTokens5h = &clone
+	}
+	if summary.ObservedTokensWeekly != nil {
+		clone := *summary.ObservedTokensWeekly
+		out.ObservedTokensWeekly = &clone
+	}
+	return &out
+}
+
+func cloneAccountSummaries(in []usage.AccountSummary) []usage.AccountSummary {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]usage.AccountSummary, len(in))
+	copy(out, in)
+	for i := range out {
+		out[i].Warnings = append([]string(nil), in[i].Warnings...)
+		if in[i].ObservedWindow5h != nil {
+			clone := *in[i].ObservedWindow5h
+			out[i].ObservedWindow5h = &clone
+		}
+		if in[i].ObservedWindowWeekly != nil {
+			clone := *in[i].ObservedWindowWeekly
+			out[i].ObservedWindowWeekly = &clone
+		}
+		if in[i].ObservedTokens5h != nil {
+			clone := *in[i].ObservedTokens5h
+			out[i].ObservedTokens5h = &clone
+		}
+		if in[i].ObservedTokensWeekly != nil {
+			clone := *in[i].ObservedTokensWeekly
+			out[i].ObservedTokensWeekly = &clone
+		}
+	}
+	return out
+}
+
+func staleWindowAge(now time.Time, summary *usage.Summary) string {
+	if summary == nil || summary.FetchedAt.IsZero() {
+		return "unknown"
+	}
+	return humanDuration(now.Sub(summary.FetchedAt))
 }
 
 func statusRowsForLayout(viewportHeight, windowsBlockHeight, panelVerticalOverhead int) int {
