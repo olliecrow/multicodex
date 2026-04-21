@@ -2,8 +2,10 @@ package multicodex
 
 import (
 	"context"
+	cryptorand "crypto/rand"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,7 +15,7 @@ import (
 )
 
 const (
-	execSelectionPrimaryUsageLimit = 50
+	execSelectionPrimaryUsageLimit = 40
 	execSelectionTimeout           = 10 * time.Second
 	envSelectedProfilePath         = "MULTICODEX_SELECTED_PROFILE_PATH"
 )
@@ -21,11 +23,10 @@ const (
 type execAccountSelector func(context.Context, []usage.MonitorAccount, int) (usage.SelectedAccount, error)
 
 type execSelectionMetadata struct {
-	Profile                      string `json:"profile"`
-	SelectionSource              string `json:"selection_source,omitempty"`
-	PrimaryUsedPercent           *int   `json:"primary_used_percent,omitempty"`
-	SecondaryUsedPercent         *int   `json:"secondary_used_percent,omitempty"`
-	UsedPrimaryThresholdFallback bool   `json:"used_primary_threshold_fallback,omitempty"`
+	Profile              string `json:"profile"`
+	SelectionSource      string `json:"selection_source,omitempty"`
+	PrimaryUsedPercent   *int   `json:"primary_used_percent,omitempty"`
+	SecondaryUsedPercent *int   `json:"secondary_used_percent,omitempty"`
 }
 
 type execSelection struct {
@@ -36,6 +37,21 @@ type execSelection struct {
 
 var defaultExecAccountSelector execAccountSelector = func(ctx context.Context, accounts []usage.MonitorAccount, maxPrimaryUsedPercent int) (usage.SelectedAccount, error) {
 	return usage.SelectBestAccount(ctx, accounts, maxPrimaryUsedPercent)
+}
+
+var chooseRandomProfileName = func(names []string) string {
+	if len(names) == 0 {
+		return ""
+	}
+	if len(names) == 1 {
+		return names[0]
+	}
+
+	n, err := cryptorand.Int(cryptorand.Reader, big.NewInt(int64(len(names))))
+	if err != nil {
+		return names[0]
+	}
+	return names[int(n.Int64())]
 }
 
 func (a *App) cmdExec(args []string) error {
@@ -102,19 +118,12 @@ func (a *App) selectExecProfile(cfg *Config, selector execAccountSelector) (exec
 
 	names := sortedProfileNames(cfg)
 	accounts := make([]usage.MonitorAccount, 0, len(names))
-	firstWithAuth := ""
 	for _, name := range names {
 		profile := cfg.Profiles[name]
 		accounts = append(accounts, usage.MonitorAccount{
 			Label:     name,
 			CodexHome: profile.CodexHome,
 		})
-		if firstWithAuth == "" {
-			hasAuth, err := HasAuthFile(profile.CodexHome)
-			if err == nil && hasAuth {
-				firstWithAuth = name
-			}
-		}
 	}
 
 	if selector != nil {
@@ -125,35 +134,23 @@ func (a *App) selectExecProfile(cfg *Config, selector execAccountSelector) (exec
 		if err == nil {
 			if name, profile, ok := lookupSelectedExecProfile(cfg, selected); ok {
 				metadata := execSelectionMetadata{
-					Profile:                      name,
-					SelectionSource:              "usage_selector",
-					PrimaryUsedPercent:           intPtr(selected.PrimaryUsedPercent),
-					SecondaryUsedPercent:         intPtr(selected.SecondaryUsedPercent),
-					UsedPrimaryThresholdFallback: selected.UsedPrimaryThresholdFallback,
+					Profile:              name,
+					SelectionSource:      "usage_selector",
+					PrimaryUsedPercent:   intPtr(selected.PrimaryUsedPercent),
+					SecondaryUsedPercent: intPtr(selected.SecondaryUsedPercent),
 				}
 				return execSelection{Name: name, Profile: profile, Metadata: metadata}, nil
 			}
 		}
 	}
 
-	if firstWithAuth != "" {
-		return execSelection{
-			Name:    firstWithAuth,
-			Profile: cfg.Profiles[firstWithAuth],
-			Metadata: execSelectionMetadata{
-				Profile:         firstWithAuth,
-				SelectionSource: "first_with_auth_fallback",
-			},
-		}, nil
-	}
-
-	first := names[0]
+	first := chooseRandomProfileName(names)
 	return execSelection{
 		Name:    first,
 		Profile: cfg.Profiles[first],
 		Metadata: execSelectionMetadata{
 			Profile:         first,
-			SelectionSource: "first_sorted_fallback",
+			SelectionSource: "random_profile_fallback",
 		},
 	}, nil
 }
