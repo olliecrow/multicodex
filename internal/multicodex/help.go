@@ -21,6 +21,7 @@ var commandSummaries = []struct {
 	{Name: "login <name> [codex login args]", Summary: "login profile using official codex flow"},
 	{Name: "login-all", Summary: "run login for every known profile"},
 	{Name: "use <name> [--shell]", Summary: "switch profile in current terminal context"},
+	{Name: "app <name>", Summary: "launch a new Codex Mac app instance for one profile"},
 	{Name: "run <name> -- <command...>", Summary: "run one command in profile context"},
 	{Name: "exec [codex exec args]", Summary: "run codex exec on the best available profile"},
 	{Name: "switch-global <name> [--force]", Summary: "switch default global codex auth to profile"},
@@ -77,6 +78,14 @@ var commandHelpByName = map[string]commandHelp{
 			"multicodex use personal --shell",
 		},
 	},
+	"app": {
+		Usage:       "multicodex app <name>",
+		Description: "Launch a new Codex Mac app instance for one profile while keeping shared app state. This switches the shared global auth pointer to that profile, then launches Codex with the shared default CODEX_HOME.",
+		Examples: []string{
+			"multicodex app personal",
+			"multicodex app work",
+		},
+	},
 	"run": {
 		Usage:       "multicodex run <name> -- <command...>",
 		Description: "Run one command in a selected profile context without changing your current shell.",
@@ -86,7 +95,7 @@ var commandHelpByName = map[string]commandHelp{
 	},
 	"exec": {
 		Usage:       "multicodex exec [codex exec args]",
-		Description: "Run `codex exec` after automatically selecting the best available configured profile. Profiles below 50% five-hour usage are grouped by weekly reset time: within 24 hours first, then over 24 and up to 72 hours, then later resets, with a random pick inside the first non-empty bucket. When no profile is below the five-hour threshold, selection falls back to the lowest five-hour usage.",
+		Description: "Run `codex exec` after automatically selecting the best available configured profile. Profiles below 40% five-hour usage are eligible, and multicodex picks the eligible profile whose weekly reset is soonest. When no profile is eligible, it picks a random accessible profile for that call. If usage data is unavailable for every profile, it picks a random configured profile.",
 		Examples: []string{
 			`multicodex exec -s read-only "Summarize the README in 3 bullets."`,
 			"multicodex exec --skip-git-repo-check -C /path/to/repo \"Review the latest diff.\"",
@@ -209,6 +218,7 @@ func printHelp() {
 	fmt.Println("  multicodex init")
 	fmt.Println("  multicodex add personal")
 	fmt.Println(`  eval "$(multicodex use personal)"`)
+	fmt.Println("  multicodex app personal")
 	fmt.Println("  multicodex monitor")
 	fmt.Println("  multicodex heartbeat")
 	fmt.Println(`  eval "$(multicodex completion zsh)"`)
@@ -217,8 +227,8 @@ func printHelp() {
 	fmt.Println("  multicodex help <command> [subcommand]")
 	fmt.Println()
 	fmt.Println("Notes:")
-	fmt.Println("  - default behavior is local-first and does not change your system default session")
-	fmt.Println("  - global switching only happens with explicit switch-global commands")
+	fmt.Println("  - most commands are local-first and do not change shared default auth")
+	fmt.Println("  - multicodex app and switch-global both update shared default auth on purpose")
 }
 
 func (a *App) cmdHelp(args []string) error {

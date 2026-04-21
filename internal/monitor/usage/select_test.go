@@ -6,38 +6,34 @@ import (
 	"time"
 )
 
-func TestSelectBestAccountPrefersSoonestNonEmptySafeBucket(t *testing.T) {
+func TestSelectBestAccountPrefersSoonestWeeklyResetAmongEligibleAccounts(t *testing.T) {
 	selected, err := selectBestAccountFromResults([]accountFetchResult{
-		testAccountFetchResult("after-72h", 10, 40, 80*time.Hour),
-		testAccountFetchResult("within-72h", 20, 70, 36*time.Hour),
-		testAccountFetchResult("within-24h", 30, 90, 12*time.Hour),
-		testAccountFetchResult("unsafe", 80, 1, 2*time.Hour),
-	}, 50)
+		testAccountFetchResult("later-reset", 10, 40, 80*time.Hour),
+		testAccountFetchResult("sooner-reset", 20, 70, 36*time.Hour),
+		testAccountFetchResult("not-eligible", 80, 1, 12*time.Hour),
+	}, 40)
 	if err != nil {
 		t.Fatalf("selectBestAccountFromResults: %v", err)
 	}
-	if selected.Account.Label != "within-24h" {
-		t.Fatalf("expected within-24h, got %q", selected.Account.Label)
-	}
-	if selected.UsedPrimaryThresholdFallback {
-		t.Fatalf("did not expect threshold fallback")
+	if selected.Account.Label != "sooner-reset" {
+		t.Fatalf("expected sooner-reset, got %q", selected.Account.Label)
 	}
 }
 
-func TestSelectBestAccountUsesWithin72HourBucketWhenSoonerBucketIsEmpty(t *testing.T) {
+func TestSelectBestAccountTreatsExactThresholdAsNotEligible(t *testing.T) {
 	selected, err := selectBestAccountFromResults([]accountFetchResult{
-		testAccountFetchResult("after-72h", 10, 40, 96*time.Hour),
-		testAccountFetchResult("within-72h", 20, 70, 48*time.Hour),
-	}, 50)
+		testAccountFetchResult("at-threshold", 40, 10, 1*time.Hour),
+		testAccountFetchResult("eligible", 39, 90, 48*time.Hour),
+	}, 40)
 	if err != nil {
 		t.Fatalf("selectBestAccountFromResults: %v", err)
 	}
-	if selected.Account.Label != "within-72h" {
-		t.Fatalf("expected within-72h, got %q", selected.Account.Label)
+	if selected.Account.Label != "eligible" {
+		t.Fatalf("expected eligible, got %q", selected.Account.Label)
 	}
 }
 
-func TestSelectBestAccountKeepsUnknownWeeklyResetAfterKnownBuckets(t *testing.T) {
+func TestSelectBestAccountUsesKnownWeeklyResetBeforeUnknownWeeklyReset(t *testing.T) {
 	selected, err := selectBestAccountFromResults([]accountFetchResult{
 		{
 			codexHome: "/unknown",
@@ -49,7 +45,7 @@ func TestSelectBestAccountKeepsUnknownWeeklyResetAfterKnownBuckets(t *testing.T)
 			snapshot: &Summary{},
 		},
 		testAccountFetchResult("known", 20, 30, 96*time.Hour),
-	}, 50)
+	}, 40)
 	if err != nil {
 		t.Fatalf("selectBestAccountFromResults: %v", err)
 	}
@@ -58,7 +54,74 @@ func TestSelectBestAccountKeepsUnknownWeeklyResetAfterKnownBuckets(t *testing.T)
 	}
 }
 
-func TestSelectBestAccountChoosesRandomWithinWinningBucket(t *testing.T) {
+func TestSelectBestAccountChoosesRandomEligibleAccountWhenAllEligibleWeeklyResetsAreUnknown(t *testing.T) {
+	originalChooser := chooseRandomResultIndex
+	chooseRandomResultIndex = func(candidates []int) int {
+		if len(candidates) == 0 {
+			return -1
+		}
+		if len(candidates) != 2 {
+			t.Fatalf("expected 2 candidates, got %d", len(candidates))
+		}
+		return candidates[1]
+	}
+	defer func() { chooseRandomResultIndex = originalChooser }()
+
+	selected, err := selectBestAccountFromResults([]accountFetchResult{
+		{
+			codexHome: "/alpha",
+			account: AccountSummary{
+				Label:           "alpha",
+				PrimaryWindow:   WindowSummary{UsedPercent: 10},
+				SecondaryWindow: WindowSummary{UsedPercent: 30},
+			},
+			snapshot: &Summary{},
+		},
+		{
+			codexHome: "/beta",
+			account: AccountSummary{
+				Label:           "beta",
+				PrimaryWindow:   WindowSummary{UsedPercent: 20},
+				SecondaryWindow: WindowSummary{UsedPercent: 31},
+			},
+			snapshot: &Summary{},
+		},
+	}, 40)
+	if err != nil {
+		t.Fatalf("selectBestAccountFromResults: %v", err)
+	}
+	if selected.Account.Label != "beta" {
+		t.Fatalf("expected beta, got %q", selected.Account.Label)
+	}
+}
+
+func TestSelectBestAccountChoosesRandomAccessibleAccountWhenNoAccountIsEligible(t *testing.T) {
+	originalChooser := chooseRandomResultIndex
+	chooseRandomResultIndex = func(candidates []int) int {
+		if len(candidates) == 0 {
+			return -1
+		}
+		if len(candidates) != 3 {
+			t.Fatalf("expected 3 candidates, got %d", len(candidates))
+		}
+		return candidates[2]
+	}
+	defer func() { chooseRandomResultIndex = originalChooser }()
+
+	selected, err := selectBestAccountFromResults([]accountFetchResult{
+		testAccountFetchResult("alpha", 65, 40, 12*time.Hour),
+		testAccountFetchResult("beta", 65, 20, 48*time.Hour),
+		testAccountFetchResult("gamma", 70, 5, 6*time.Hour),
+	}, 40)
+	if err != nil {
+		t.Fatalf("selectBestAccountFromResults: %v", err)
+	}
+	if selected.Account.Label != "gamma" {
+		t.Fatalf("expected gamma, got %q", selected.Account.Label)
+	}
+}
+
+func TestSelectBestAccountChoosesRandomAmongMatchingSoonestEligibleAccounts(t *testing.T) {
 	originalChooser := chooseRandomResultIndex
 	chooseRandomResultIndex = func(candidates []int) int {
 		if len(candidates) != 2 {
@@ -70,9 +133,9 @@ func TestSelectBestAccountChoosesRandomWithinWinningBucket(t *testing.T) {
 
 	selected, err := selectBestAccountFromResults([]accountFetchResult{
 		testAccountFetchResult("alpha", 10, 40, 12*time.Hour),
-		testAccountFetchResult("beta", 20, 41, 18*time.Hour),
+		testAccountFetchResult("beta", 20, 41, 12*time.Hour),
 		testAccountFetchResult("gamma", 30, 42, 80*time.Hour),
-	}, 50)
+	}, 40)
 	if err != nil {
 		t.Fatalf("selectBestAccountFromResults: %v", err)
 	}
@@ -81,72 +144,32 @@ func TestSelectBestAccountChoosesRandomWithinWinningBucket(t *testing.T) {
 	}
 }
 
-func TestSelectBestAccountFallsBackToLowestPrimaryWhenNoSafeAccounts(t *testing.T) {
+func TestSelectBestAccountUsesRandomAccessibleFallbackWhenOnlyInaccessibleResultsRemain(t *testing.T) {
 	originalChooser := chooseRandomResultIndex
 	chooseRandomResultIndex = func(candidates []int) int {
-		if len(candidates) != 2 {
-			t.Fatalf("expected 2 candidates, got %d", len(candidates))
+		if len(candidates) == 0 {
+			return -1
 		}
-		return candidates[1]
+		if len(candidates) != 1 {
+			t.Fatalf("expected 1 candidate, got %d", len(candidates))
+		}
+		return candidates[0]
 	}
 	defer func() { chooseRandomResultIndex = originalChooser }()
 
 	selected, err := selectBestAccountFromResults([]accountFetchResult{
-		testAccountFetchResult("alpha", 65, 40, 12*time.Hour),
-		testAccountFetchResult("beta", 65, 20, 48*time.Hour),
-		testAccountFetchResult("gamma", 70, 5, 6*time.Hour),
-	}, 50)
+		{
+			codexHome: "/broken",
+			account:   AccountSummary{Label: "broken"},
+			fetchErr:  errors.New("boom"),
+		},
+		testAccountFetchResult("working", 85, 10, 2*time.Hour),
+	}, 40)
 	if err != nil {
 		t.Fatalf("selectBestAccountFromResults: %v", err)
 	}
-	if selected.Account.Label != "beta" {
-		t.Fatalf("expected beta, got %q", selected.Account.Label)
-	}
-	if !selected.UsedPrimaryThresholdFallback {
-		t.Fatalf("expected threshold fallback")
-	}
-}
-
-func TestWeeklyResetBucketForWindowUsesInclusiveEdges(t *testing.T) {
-	cases := []struct {
-		name string
-		win  WindowSummary
-		want int
-	}{
-		{
-			name: "within 24 hours",
-			win:  WindowSummary{UsedPercent: 10, SecondsUntilReset: int64Ptr(weeklyResetWithin24HoursSeconds)},
-			want: weeklyResetBucketWithin24Hours,
-		},
-		{
-			name: "within 72 hours",
-			win:  WindowSummary{UsedPercent: 10, SecondsUntilReset: int64Ptr(weeklyResetWithin72HoursSeconds)},
-			want: weeklyResetBucketWithin72Hours,
-		},
-		{
-			name: "after 72 hours",
-			win:  WindowSummary{UsedPercent: 10, SecondsUntilReset: int64Ptr(weeklyResetWithin72HoursSeconds + 1)},
-			want: weeklyResetBucketAfter72Hours,
-		},
-		{
-			name: "unknown",
-			win:  WindowSummary{UsedPercent: unavailableUsedPercent},
-			want: weeklyResetBucketUnknown,
-		},
-		{
-			name: "missing reset time",
-			win:  WindowSummary{UsedPercent: 10},
-			want: weeklyResetBucketUnknown,
-		},
-	}
-
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			if got := weeklyResetBucketForWindow(tc.win); got != tc.want {
-				t.Fatalf("weeklyResetBucketForWindow() = %d, want %d", got, tc.want)
-			}
-		})
+	if selected.Account.Label != "working" {
+		t.Fatalf("expected working, got %q", selected.Account.Label)
 	}
 }
 
@@ -157,7 +180,7 @@ func TestSelectBestAccountErrorsWhenNoAccountsAccessible(t *testing.T) {
 			account:   AccountSummary{Label: "alpha"},
 			fetchErr:  errors.New("boom"),
 		},
-	}, 50)
+	}, 40)
 	if err == nil {
 		t.Fatalf("expected error when all accounts fail")
 	}
