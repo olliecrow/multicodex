@@ -6,6 +6,7 @@
 - `multicodex login <name>`
 - `multicodex login-all`
 - `multicodex use <name>`
+- `multicodex app <name>`
 - `multicodex run <name> -- <command...>`
 - `multicodex exec [codex exec args]`
 - `multicodex switch-global <name> [--force]`
@@ -51,6 +52,17 @@
 - Emits shell env instructions or starts a subshell bound to that profile.
 - Leaves global default untouched.
 
+`multicodex app <name>`
+- macOS only.
+- Switches the shared default auth pointer to the selected profile.
+- Launches a new `Codex.app` instance with the shared default `CODEX_HOME`.
+- Uses `open -n -a` so each call starts a separate app process.
+- Keeps one shared sidebar and thread list across app windows because they share the same default `CODEX_HOME`.
+- Keeps per-window account choice on a best-effort basis rather than as a hard lock because Codex can reload auth later in some flows.
+- Re-checks file-backed auth isolation before launching the app.
+- Accepts installed app bundles in `/Applications/Codex.app`, `/System/Volumes/Data/Applications/Codex.app`, or `~/Applications/Codex.app`.
+- `MULTICODEX_APP_PATH` can override the app bundle path when needed.
+
 `multicodex run <name> -- <command...>`
 - Executes one command with profile-scoped context.
 - Re-checks file-backed auth isolation before direct `codex` invocations.
@@ -61,11 +73,11 @@
 - For help requests (`--help`, `-h`, or `help`), delegates directly to `codex exec` and does not require profiles to be configured.
 - Automatically selects among configured multicodex profiles.
 - Re-checks file-backed auth isolation before launching `codex exec`.
-- Treats profiles whose five-hour usage window is strictly below 50% as safe to route work to.
-- Among safe profiles, groups weekly reset times into buckets: up to 24 hours, over 24 and up to 72 hours, over 72 hours, then unknown reset times last.
-- Picks randomly inside the first non-empty safe bucket.
-- When no profile is below the five-hour threshold, falls back to the lowest five-hour-usage profile with random tie-breaking.
-- When usage fetch is unavailable for every profile, falls back to the first sorted profile with `auth.json`, otherwise the first sorted configured profile.
+- Treats profiles whose five-hour usage window is strictly below 40% as eligible to route work to.
+- Among eligible profiles, picks the one whose weekly reset is soonest.
+- When eligible profiles do not expose a weekly reset time, picks randomly among those eligible profiles.
+- When no profile is eligible, picks a random accessible profile for that call.
+- When usage fetch is unavailable for every profile, picks a random configured profile for that call.
 - Returns child exit code.
 
 `multicodex switch-global <name> [--force]`

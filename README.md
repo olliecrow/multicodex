@@ -8,7 +8,7 @@ By default, each profile reuses your global Codex `config.toml`, so normal Codex
 
 Profile login still requires file-backed auth. If your shared global Codex config does not set `cli_auth_credentials_store = "file"`, `multicodex login` will fail with a setup error until you either enable file-backed auth globally or create a per-profile override. The same preflight is re-checked before profile-scoped Codex execution (`multicodex exec`, `multicodex heartbeat`, direct `multicodex run ... -- codex ...`, and `multicodex switch-global` unless you explicitly force it), so later edits to the shared config cannot silently weaken isolation.
 
-By default it only changes the current terminal context. It does not change your system default Codex session unless you run an explicit global switch command.
+Most commands only change the current terminal context. `multicodex app` and `multicodex switch-global` are the two commands that also update the shared default Codex auth pointer on purpose.
 
 ## Current status
 
@@ -104,6 +104,7 @@ multicodex add <name>
 multicodex login <name> [codex login args]
 multicodex login-all
 multicodex use <name> [--shell]
+multicodex app <name>
 multicodex run <name> -- <command...>
 multicodex exec [codex exec args]
 multicodex switch-global <name> [--force]
@@ -138,13 +139,22 @@ Run one command in another profile without changing your shell.
 multicodex run personal -- codex login status
 ```
 
+Launch a new Codex Mac app instance for one profile while keeping one shared left-side list.
+
+```bash
+multicodex app personal
+multicodex app work
+```
+
+`multicodex app` is for macOS. It first switches the shared default auth pointer to that profile, then launches `Codex.app` with the shared default `CODEX_HOME`, so app windows keep the same shared sidebar state. Already-open app windows usually keep the account they started with, but that split is best-effort rather than a hard lock because Codex can reload auth later in some flows.
+
 Run `codex exec` on the best available logged-in profile automatically.
 
 ```bash
 multicodex exec -s read-only "Summarize the README in 3 bullets."
 ```
 
-`multicodex exec` first keeps profiles whose five-hour window is below 50% used. It then groups them by weekly reset time: within 24 hours first, over 24 and up to 72 hours next, then later resets, with unknown weekly reset times placed last. It picks randomly inside the first non-empty bucket. If every profile is already at 50% or higher in the five-hour window, it falls back to the profile with the lowest five-hour usage, with random tie-breaking.
+`multicodex exec` first keeps profiles whose five-hour window is below 40% used. From those eligible profiles, it picks the one whose weekly reset is soonest. If eligible profiles do not expose a weekly reset time, it picks randomly among those eligible profiles. If no profile is eligible, it picks a random accessible profile for that call. If usage data is unavailable for every profile, it falls back to a random configured profile.
 For help requests such as `multicodex exec --help`, it delegates directly to `codex exec` and does not require any profiles to be configured.
 
 Switch system default account used by default Codex context.

@@ -9,24 +9,10 @@ import (
 )
 
 type SelectedAccount struct {
-	Account                      MonitorAccount
-	PrimaryUsedPercent           int
-	SecondaryUsedPercent         int
-	UsedPrimaryThresholdFallback bool
+	Account              MonitorAccount
+	PrimaryUsedPercent   int
+	SecondaryUsedPercent int
 }
-
-const (
-	weeklyResetBucketWithin24Hours = iota
-	weeklyResetBucketWithin72Hours
-	weeklyResetBucketAfter72Hours
-	weeklyResetBucketUnknown
-	weeklyResetBucketCount
-)
-
-const (
-	weeklyResetWithin24HoursSeconds = int64(24 * 60 * 60)
-	weeklyResetWithin72HoursSeconds = int64(72 * 60 * 60)
-)
 
 var chooseRandomResultIndex = func(candidates []int) int {
 	if len(candidates) == 0 {
@@ -68,74 +54,64 @@ func (f *Fetcher) SelectAccount(ctx context.Context, maxPrimaryUsedPercent int) 
 }
 
 func selectBestAccountFromResults(results []accountFetchResult, maxPrimaryUsedPercent int) (SelectedAccount, error) {
-	safeBuckets := make([][]int, weeklyResetBucketCount)
-	fallbackCandidates := []int{}
-	lowestPrimaryUsedPercent := 0
-	haveFallbackCandidate := false
+	eligibleUnknownResetCandidates := []int{}
+	accessibleCandidates := []int{}
+	soonestEligibleResetSeconds := int64(0)
+	soonestEligibleCandidates := []int{}
 
 	for i, result := range results {
 		if result.fetchErr != nil || result.snapshot == nil {
 			continue
 		}
 
-		primaryUsedPercent := result.account.PrimaryWindow.UsedPercent
-		if !haveFallbackCandidate || primaryUsedPercent < lowestPrimaryUsedPercent {
-			lowestPrimaryUsedPercent = primaryUsedPercent
-			fallbackCandidates = []int{i}
-			haveFallbackCandidate = true
-		} else if primaryUsedPercent == lowestPrimaryUsedPercent {
-			fallbackCandidates = append(fallbackCandidates, i)
-		}
+		accessibleCandidates = append(accessibleCandidates, i)
 
+		primaryUsedPercent := result.account.PrimaryWindow.UsedPercent
 		if primaryUsedPercent >= maxPrimaryUsedPercent {
 			continue
 		}
 
-		bucket := weeklyResetBucketForWindow(result.account.SecondaryWindow)
-		safeBuckets[bucket] = append(safeBuckets[bucket], i)
-	}
-
-	for _, candidates := range safeBuckets {
-		if len(candidates) == 0 {
+		secondsUntilReset, ok := secondsUntilReset(result.account.SecondaryWindow)
+		if !ok {
+			eligibleUnknownResetCandidates = append(eligibleUnknownResetCandidates, i)
 			continue
 		}
-		chosenIndex := chooseRandomResultIndex(candidates)
-		chosen := results[chosenIndex]
-		return SelectedAccount{
-			Account:              MonitorAccount{Label: chosen.account.Label, CodexHome: chosen.codexHome},
-			PrimaryUsedPercent:   chosen.account.PrimaryWindow.UsedPercent,
-			SecondaryUsedPercent: chosen.account.SecondaryWindow.UsedPercent,
-		}, nil
+
+		if len(soonestEligibleCandidates) == 0 || secondsUntilReset < soonestEligibleResetSeconds {
+			soonestEligibleResetSeconds = secondsUntilReset
+			soonestEligibleCandidates = []int{i}
+			continue
+		}
+		if secondsUntilReset == soonestEligibleResetSeconds {
+			soonestEligibleCandidates = append(soonestEligibleCandidates, i)
+		}
 	}
 
-	chosenIndex := chooseRandomResultIndex(fallbackCandidates)
-	if chosenIndex != -1 {
-		chosen := results[chosenIndex]
-		return SelectedAccount{
-			Account:                      MonitorAccount{Label: chosen.account.Label, CodexHome: chosen.codexHome},
-			PrimaryUsedPercent:           chosen.account.PrimaryWindow.UsedPercent,
-			SecondaryUsedPercent:         chosen.account.SecondaryWindow.UsedPercent,
-			UsedPrimaryThresholdFallback: true,
-		}, nil
+	if selected, ok := chooseSelectedAccount(results, soonestEligibleCandidates); ok {
+		return selected, nil
+	}
+	if selected, ok := chooseSelectedAccount(results, eligibleUnknownResetCandidates); ok {
+		return selected, nil
+	}
+	if selected, ok := chooseSelectedAccount(results, accessibleCandidates); ok {
+		return selected, nil
 	}
 
 	return SelectedAccount{}, fmt.Errorf("no accessible accounts")
 }
 
-func weeklyResetBucketForWindow(win WindowSummary) int {
-	secondsUntilReset, ok := secondsUntilReset(win)
-	if !ok {
-		return weeklyResetBucketUnknown
+func chooseSelectedAccount(results []accountFetchResult, candidates []int) (SelectedAccount, bool) {
+	chosenIndex := chooseRandomResultIndex(candidates)
+	if chosenIndex == -1 {
+		return SelectedAccount{}, false
 	}
 
-	switch {
-	case secondsUntilReset <= weeklyResetWithin24HoursSeconds:
-		return weeklyResetBucketWithin24Hours
-	case secondsUntilReset <= weeklyResetWithin72HoursSeconds:
-		return weeklyResetBucketWithin72Hours
-	default:
-		return weeklyResetBucketAfter72Hours
-	}
+	chosen := results[chosenIndex]
+	return SelectedAccount{
+		Account:              MonitorAccount{Label: chosen.account.Label, CodexHome: chosen.codexHome},
+		PrimaryUsedPercent:   chosen.account.PrimaryWindow.UsedPercent,
+		SecondaryUsedPercent: chosen.account.SecondaryWindow.UsedPercent,
+	}, true
 }
 
 func secondsUntilReset(win WindowSummary) (int64, bool) {
