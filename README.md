@@ -251,6 +251,7 @@ For migration convenience, `multicodex monitor completion [shell]` is also suppo
 
 `multicodex monitor doctor` succeeds when at least one usage source works. A passing result can still be degraded if either the app-server path or the OAuth fallback is unavailable.
 When fallback is available, the monitor keeps most of a long fetch timeout for the main source and reserves at most 10 seconds for fallback, which helps cut false `unavailable` window cards on slower refreshes.
+When a refresh loses official window data for every account at once, the TUI keeps showing the last good official window cards, marks them as stale, and keeps the latest local token estimate and refresh warnings visible.
 When a profile login has expired, the monitor prefers a short diagnostics warning that tells you to sign in again instead of only showing a long raw fetch error.
 Some accounts only expose one official usage window. When that happens, the monitor keeps the account visible, shows the window that is present, and marks the missing window as unavailable instead of treating the whole account as failed.
 

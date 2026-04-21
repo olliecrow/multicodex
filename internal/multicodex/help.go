@@ -126,7 +126,7 @@ var commandHelpByName = map[string]commandHelp{
 	},
 	"monitor": {
 		Usage:       "multicodex monitor [--interval 60s] [--timeout 60s] [--no-color] [--no-alt-screen]",
-		Description: "Run the live subscription-usage terminal UI. The monitor prefers configured multicodex profiles, then falls back to compatible local Codex homes and legacy monitor account files.",
+		Description: "Run the live subscription-usage terminal UI. The monitor prefers configured multicodex profiles, then falls back to compatible local Codex homes and legacy monitor account files. If one refresh loses official window data for every account, the last good official window cards stay visible and are marked stale.",
 		Examples: []string{
 			"multicodex monitor",
 			"multicodex monitor --interval 30s",
