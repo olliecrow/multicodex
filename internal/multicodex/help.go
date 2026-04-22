@@ -80,7 +80,7 @@ var commandHelpByName = map[string]commandHelp{
 	},
 	"app": {
 		Usage:       "multicodex app <name>",
-		Description: "Launch a new Codex Mac app instance for one profile while keeping shared app state. This switches the shared global auth pointer to that profile, then launches Codex with the shared default CODEX_HOME.",
+		Description: "Launch a new Codex Mac app instance for one profile while keeping the shared sidebar. This switches the shared global auth pointer to that profile, then launches Codex with the shared default CODEX_HOME and a stable per-profile app-data folder.",
 		Examples: []string{
 			"multicodex app personal",
 			"multicodex app work",

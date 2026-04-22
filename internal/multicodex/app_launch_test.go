@@ -31,7 +31,11 @@ func TestCmdAppLaunchesOpenWithProfileEnv(t *testing.T) {
 		t.Fatalf("read log: %v", err)
 	}
 	log := string(data)
-	if !strings.Contains(log, "args=-n -a "+appPath) {
+	wantAppDataDir, err := profileAppUserDataDir("alpha")
+	if err != nil {
+		t.Fatalf("resolve app data dir: %v", err)
+	}
+	if !strings.Contains(log, "args=-n -a "+appPath+" --args --user-data-dir="+wantAppDataDir) {
 		t.Fatalf("expected open args in log, got %q", log)
 	}
 	wantHome := app.store.paths.DefaultCodexHome
@@ -40,6 +44,9 @@ func TestCmdAppLaunchesOpenWithProfileEnv(t *testing.T) {
 	}
 	if !strings.Contains(log, "profile=alpha") {
 		t.Fatalf("expected active profile in log, got %q", log)
+	}
+	if info, err := os.Stat(wantAppDataDir); err != nil || !info.IsDir() {
+		t.Fatalf("expected app data dir %q to exist, stat err=%v", wantAppDataDir, err)
 	}
 	target, err := os.Readlink(app.store.paths.DefaultAuthPath)
 	if err != nil {
@@ -124,6 +131,7 @@ func newAppLaunchTestApp(t *testing.T) (*App, string, string) {
 	t.Helper()
 
 	root := t.TempDir()
+	t.Setenv("HOME", root)
 	t.Setenv("MULTICODEX_HOME", filepath.Join(root, "multi"))
 	t.Setenv("MULTICODEX_DEFAULT_CODEX_HOME", filepath.Join(root, "default-codex"))
 
