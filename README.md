@@ -146,7 +146,7 @@ multicodex app personal
 multicodex app work
 ```
 
-`multicodex app` is for macOS. It first switches the shared default auth pointer to that profile, then launches `Codex.app` with the shared default `CODEX_HOME`, so app windows keep the same shared sidebar state. Already-open app windows usually keep the account they started with, but that split is best-effort rather than a hard lock because Codex can reload auth later in some flows.
+`multicodex app` is for macOS. It first switches the shared default auth pointer to that profile, then launches `Codex.app` with the shared default `CODEX_HOME` and a stable per-profile app-data folder under `~/Library/Application Support/Codex-multicodex/<profile>`. That keeps one shared sidebar state while avoiding one giant shared Electron app-data folder across every app window. `multicodex` exits after handing the launch off to macOS; it does not keep a helper process running. Already-open app windows usually keep the account they started with, but that split is best-effort rather than a hard lock because Codex can reload auth later in some flows.
 
 Run `codex exec` on the best available logged-in profile automatically.
 
