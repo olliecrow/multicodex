@@ -56,8 +56,11 @@
 - macOS only.
 - Switches the shared default auth pointer to the selected profile.
 - Launches a new `Codex.app` instance with the shared default `CODEX_HOME`.
+- Passes a stable per-profile Electron app-data folder at `~/Library/Application Support/Codex-multicodex/<profile>`.
 - Uses `open -n -a` so each call starts a separate app process.
+- Exits after handing the launch off to macOS; it does not keep a helper process running.
 - Keeps one shared sidebar and thread list across app windows because they share the same default `CODEX_HOME`.
+- Reuses one app-data folder per profile instead of making a fresh folder on every launch.
 - Keeps per-window account choice on a best-effort basis rather than as a hard lock because Codex can reload auth later in some flows.
 - Re-checks file-backed auth isolation before launching the app.
 - Accepts installed app bundles in `/Applications/Codex.app`, `/System/Volumes/Data/Applications/Codex.app`, or `~/Applications/Codex.app`.

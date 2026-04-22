@@ -46,14 +46,29 @@ func (a *App) cmdApp(args []string) error {
 	if err != nil {
 		return err
 	}
+	appUserDataDir, err := profileAppUserDataDir(name)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(appUserDataDir, 0o700); err != nil {
+		return fmt.Errorf("create app data dir: %w", err)
+	}
 
-	fmt.Printf("launching Codex app for profile %q with shared app state\n", name)
+	fmt.Printf("launching Codex app for profile %q with shared sidebar state and profile app data\n", name)
 	return runCommandWithEnv(
 		"open",
-		[]string{"-n", "-a", appPath},
+		[]string{"-n", "-a", appPath, "--args", "--user-data-dir=" + appUserDataDir},
 		withProfileEnv(os.Environ(), a.store.paths.DefaultCodexHome, name),
 		"codex app launch failed",
 	)
+}
+
+func profileAppUserDataDir(profile string) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve home directory: %w", err)
+	}
+	return filepath.Join(home, "Library", "Application Support", "Codex-multicodex", profile), nil
 }
 
 func findCodexAppPath() (string, error) {
