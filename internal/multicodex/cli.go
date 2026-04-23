@@ -41,5 +41,5 @@ func (a *App) cmdCLI(args []string) error {
 
 	cmdArgs := defaultInteractiveCodexArgs()
 	cmdArgs = append(cmdArgs, args[1:]...)
-	return RunWithProfile(profile.CodexHome, name, "codex", cmdArgs)
+	return RunInteractiveWithProfile(profile.CodexHome, name, "codex", cmdArgs)
 }
