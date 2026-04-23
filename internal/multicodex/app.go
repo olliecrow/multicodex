@@ -49,6 +49,8 @@ func (a *App) Run(args []string) error {
 		return a.cmdUse(args[1:])
 	case "app":
 		return a.cmdApp(args[1:])
+	case "cli":
+		return a.cmdCLI(args[1:])
 	case "run":
 		return a.cmdRun(args[1:])
 	case "exec":
