@@ -70,6 +70,9 @@ func selectBestAccountFromResults(results []accountFetchResult, maxPrimaryUsedPe
 		if primaryUsedPercent >= maxPrimaryUsedPercent {
 			continue
 		}
+		if weeklyWindowIsKnownExhausted(result.account.SecondaryWindow) {
+			continue
+		}
 
 		secondsUntilReset, ok := secondsUntilReset(result.account.SecondaryWindow)
 		if !ok {
@@ -98,6 +101,10 @@ func selectBestAccountFromResults(results []accountFetchResult, maxPrimaryUsedPe
 	}
 
 	return SelectedAccount{}, fmt.Errorf("no accessible accounts")
+}
+
+func weeklyWindowIsKnownExhausted(win WindowSummary) bool {
+	return win.UsedPercent != unavailableUsedPercent && win.UsedPercent >= 100
 }
 
 func chooseSelectedAccount(results []accountFetchResult, candidates []int) (SelectedAccount, bool) {

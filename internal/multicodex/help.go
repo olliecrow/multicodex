@@ -104,7 +104,7 @@ var commandHelpByName = map[string]commandHelp{
 	},
 	"exec": {
 		Usage:       "multicodex exec [codex exec args]",
-		Description: "Run `codex exec` after automatically selecting the best available configured profile. Profiles below 40% five-hour usage are eligible, and multicodex picks the eligible profile whose weekly reset is soonest. When no profile is eligible, it picks a random accessible profile for that call. If usage data is unavailable for every profile, it picks a random configured profile.",
+		Description: "Run `codex exec` after automatically selecting the best available configured profile. Profiles below 40% five-hour usage are eligible unless their weekly window is known to be exhausted, and multicodex picks the eligible profile whose weekly reset is soonest. When no profile is eligible, it picks a random accessible profile for that call. If usage data is unavailable for every profile, it picks a random configured profile.",
 		Examples: []string{
 			`multicodex exec -s read-only "Summarize the README in 3 bullets."`,
 			"multicodex exec --skip-git-repo-check -C /path/to/repo \"Review the latest diff.\"",
