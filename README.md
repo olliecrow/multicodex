@@ -94,6 +94,8 @@ multicodex dry-run
 - You can override the state location with `MULTICODEX_HOME`.
 - Profile auth stays isolated under `~/multicodex/profiles/<name>/codex-home/auth.json`.
 - Profile config defaults to a symlink from `~/multicodex/profiles/<name>/codex-home/config.toml` to your default Codex config at `~/.codex/config.toml`.
+- Profile skills fill in missing top-level entries from `~/.codex/skills` so shared skills stay visible in profile-scoped Codex runs.
+- If you want a per-profile skill override, create that top-level entry inside the profile's `codex-home/skills` directory and multicodex will leave it alone.
 - If you want a per-profile Codex config, replace that symlink with a regular `config.toml` file in the profile's `codex-home`.
 
 ## Command reference
@@ -157,6 +159,7 @@ multicodex cli work "check this repo"
 ```
 
 `multicodex cli <name>` is the profile-scoped version of the local `c` alias. It runs `codex --search --dangerously-bypass-approvals-and-sandbox -m gpt-5.4 -c model_reasoning_effort=high` with that profile's `CODEX_HOME`, then appends any extra args you pass after the profile name. It does not change the shared global account.
+When launched from a real interactive terminal, `multicodex cli` hands off directly into `codex` so the live process behaves like a normal Codex CLI session instead of staying wrapped under a long-lived multicodex parent process.
 
 Run `codex exec` on the best available logged-in profile automatically.
 

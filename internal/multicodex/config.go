@@ -116,6 +116,9 @@ func (s *Store) CreateProfile(name string) (Profile, error) {
 	if err := s.ensureProfileConfig(codexHome); err != nil {
 		return Profile{}, err
 	}
+	if err := s.ensureProfileSkills(codexHome); err != nil {
+		return Profile{}, err
+	}
 
 	return Profile{Name: name, CodexHome: codexHome}, nil
 }
@@ -127,7 +130,10 @@ func (s *Store) EnsureProfileDir(profile Profile) error {
 	if err := os.MkdirAll(profile.CodexHome, 0o700); err != nil {
 		return fmt.Errorf("create profile codex home: %w", err)
 	}
-	return s.ensureProfileConfig(profile.CodexHome)
+	if err := s.ensureProfileConfig(profile.CodexHome); err != nil {
+		return err
+	}
+	return s.ensureProfileSkills(profile.CodexHome)
 }
 
 func HasAuthFile(codexHome string) (bool, error) {
@@ -339,5 +345,54 @@ func (s *Store) ensureProfileConfig(codexHome string) error {
 	if err := os.Symlink(defaultConfigPath, configPath); err != nil {
 		return fmt.Errorf("link profile config to default codex config: %w", err)
 	}
+	return nil
+}
+
+func (s *Store) ensureProfileSkills(codexHome string) error {
+	defaultSkillsPath := filepath.Join(s.paths.DefaultCodexHome, "skills")
+	profileSkillsPath := filepath.Join(codexHome, "skills")
+
+	entries, err := os.ReadDir(defaultSkillsPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("read default skills dir: %w", err)
+	}
+	if err := os.MkdirAll(profileSkillsPath, 0o700); err != nil {
+		return fmt.Errorf("create profile skills dir: %w", err)
+	}
+
+	for _, entry := range entries {
+		name := strings.TrimSpace(entry.Name())
+		if name == "" || name == "." || name == ".." || name == ".system" {
+			continue
+		}
+
+		defaultEntryPath := filepath.Join(defaultSkillsPath, name)
+		profileEntryPath := filepath.Join(profileSkillsPath, name)
+
+		info, err := os.Lstat(profileEntryPath)
+		switch {
+		case err == nil:
+			if info.Mode()&os.ModeSymlink != 0 {
+				target, readErr := os.Readlink(profileEntryPath)
+				if readErr != nil {
+					return fmt.Errorf("read profile skill symlink %s: %w", profileEntryPath, readErr)
+				}
+				if target == defaultEntryPath {
+					continue
+				}
+			}
+			continue
+		case !errors.Is(err, os.ErrNotExist):
+			return fmt.Errorf("inspect profile skill entry %s: %w", profileEntryPath, err)
+		}
+
+		if err := os.Symlink(defaultEntryPath, profileEntryPath); err != nil {
+			return fmt.Errorf("link profile skill %s: %w", name, err)
+		}
+	}
+
 	return nil
 }

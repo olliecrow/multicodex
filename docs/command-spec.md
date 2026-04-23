@@ -37,6 +37,8 @@
 - Registers a named profile.
 - Creates a profile directory with secure permissions.
 - Defaults the profile `config.toml` to the current default Codex `config.toml` so shared settings stay in sync.
+- Fills in missing top-level profile skill entries from the default Codex skills tree so shared skills stay available in profile-scoped runs.
+- Leaves any manual top-level profile skill override in place.
 - Leaves a manual per-profile `config.toml` override intact when present.
 
 `multicodex login <name>`
@@ -71,6 +73,7 @@
 - Runs the interactive Codex CLI in the selected profile context.
 - Uses the same default args as the local `c` alias: `--search --dangerously-bypass-approvals-and-sandbox -m gpt-5.4 -c model_reasoning_effort=high`.
 - Appends any extra args after the profile name.
+- When stdin, stdout, and stderr are real terminals, replaces the multicodex process with `codex` so the interactive session behaves like a normal direct Codex launch.
 - Re-checks file-backed auth isolation before launching Codex.
 - Leaves the shared global auth pointer untouched.
 

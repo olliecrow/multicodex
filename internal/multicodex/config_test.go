@@ -175,6 +175,95 @@ func TestEnsureProfileDirPreservesManualProfileConfig(t *testing.T) {
 	}
 }
 
+func TestEnsureProfileDirLinksMissingDefaultSkillsEntries(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("MULTICODEX_HOME", filepath.Join(root, "multicodex"))
+	t.Setenv("MULTICODEX_DEFAULT_CODEX_HOME", filepath.Join(root, "codex-default"))
+
+	paths, err := ResolvePaths()
+	if err != nil {
+		t.Fatalf("ResolvePaths: %v", err)
+	}
+	store := NewStore(paths)
+
+	if err := os.MkdirAll(paths.DefaultCodexHome, 0o700); err != nil {
+		t.Fatalf("mkdir default codex home: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(paths.DefaultCodexHome, "config.toml"), []byte("model = \"gpt-5\"\n"), 0o600); err != nil {
+		t.Fatalf("write default config: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(paths.DefaultCodexHome, "skills", "battletest"), 0o700); err != nil {
+		t.Fatalf("mkdir default battletest skill: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(paths.DefaultCodexHome, "skills", "codex-primary-runtime", "slides"), 0o700); err != nil {
+		t.Fatalf("mkdir default runtime skill family: %v", err)
+	}
+
+	profile := Profile{Name: "work", CodexHome: filepath.Join(paths.ProfilesDir, "work", "codex-home")}
+	if err := store.EnsureProfileDir(profile); err != nil {
+		t.Fatalf("EnsureProfileDir: %v", err)
+	}
+
+	for _, name := range []string{"battletest", "codex-primary-runtime"} {
+		profilePath := filepath.Join(profile.CodexHome, "skills", name)
+		info, err := os.Lstat(profilePath)
+		if err != nil {
+			t.Fatalf("lstat %s: %v", name, err)
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			t.Fatalf("expected %s to be a symlink", name)
+		}
+		target, err := os.Readlink(profilePath)
+		if err != nil {
+			t.Fatalf("readlink %s: %v", name, err)
+		}
+		want := filepath.Join(paths.DefaultCodexHome, "skills", name)
+		if target != want {
+			t.Fatalf("unexpected symlink target for %s. got=%q want=%q", name, target, want)
+		}
+	}
+}
+
+func TestEnsureProfileDirPreservesManualProfileSkillOverride(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("MULTICODEX_HOME", filepath.Join(root, "multicodex"))
+	t.Setenv("MULTICODEX_DEFAULT_CODEX_HOME", filepath.Join(root, "codex-default"))
+
+	paths, err := ResolvePaths()
+	if err != nil {
+		t.Fatalf("ResolvePaths: %v", err)
+	}
+	store := NewStore(paths)
+
+	if err := os.MkdirAll(paths.DefaultCodexHome, 0o700); err != nil {
+		t.Fatalf("mkdir default codex home: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(paths.DefaultCodexHome, "config.toml"), []byte("model = \"gpt-5\"\n"), 0o600); err != nil {
+		t.Fatalf("write default config: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(paths.DefaultCodexHome, "skills", "battletest"), 0o700); err != nil {
+		t.Fatalf("mkdir default battletest skill: %v", err)
+	}
+
+	profile := Profile{Name: "work", CodexHome: filepath.Join(paths.ProfilesDir, "work", "codex-home")}
+	manualSkillPath := filepath.Join(profile.CodexHome, "skills", "battletest")
+	if err := os.MkdirAll(manualSkillPath, 0o700); err != nil {
+		t.Fatalf("mkdir manual profile skill override: %v", err)
+	}
+
+	if err := store.EnsureProfileDir(profile); err != nil {
+		t.Fatalf("EnsureProfileDir: %v", err)
+	}
+
+	info, err := os.Lstat(manualSkillPath)
+	if err != nil {
+		t.Fatalf("lstat manual skill override: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Fatalf("expected manual profile skill override to remain a directory")
+	}
+}
+
 func TestProfileConfigUsesFileStoreMatchesExactKey(t *testing.T) {
 	t.Parallel()
 
