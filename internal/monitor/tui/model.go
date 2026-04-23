@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -271,18 +272,30 @@ func (m Model) renderBody() string {
 		weeklyTitle += " [stale]"
 	}
 
-	windowRows := []string{
-		m.renderWindowRow(
+	accountRows := m.accountWindowRows()
+	windowRows := make([]string, 0, max(1, len(accountRows)))
+	if len(accountRows) == 0 {
+		windowRows = append(windowRows, m.renderWindowRow(
 			contentWidth,
 			windowPanelSpec{title: fiveHourTitle, window: m.summary.PrimaryWindow, available: summaryWindowAvailable(m.summary.WindowDataAvailable, m.summary.PrimaryWindow)},
 			windowPanelSpec{title: weeklyTitle, window: m.summary.SecondaryWindow, available: summaryWindowAvailable(m.summary.WindowDataAvailable, m.summary.SecondaryWindow)},
-		),
+		))
 	}
-	for _, account := range m.additionalAccountWindowRows() {
+	for _, row := range accountRows {
+		fiveHourTitle := "five-hour window"
+		weeklyTitle := "weekly window"
+		if row.name != "" {
+			fiveHourTitle += " [" + row.name + "]"
+			weeklyTitle += " [" + row.name + "]"
+		}
+		if m.showingStaleWindows {
+			fiveHourTitle += " [stale]"
+			weeklyTitle += " [stale]"
+		}
 		windowRows = append(windowRows, m.renderWindowRow(
 			contentWidth,
-			windowPanelSpec{title: windowPanelTitle("five-hour window", account, m.showingStaleWindows), window: account.PrimaryWindow, available: accountWindowAvailable(account, account.PrimaryWindow)},
-			windowPanelSpec{title: windowPanelTitle("weekly window", account, m.showingStaleWindows), window: account.SecondaryWindow, available: accountWindowAvailable(account, account.SecondaryWindow)},
+			windowPanelSpec{title: fiveHourTitle, window: row.primaryWindow, available: row.primaryAvailable},
+			windowPanelSpec{title: weeklyTitle, window: row.secondaryWindow, available: row.secondaryAvailable},
 		))
 	}
 	panelVerticalOverhead := verticalOverhead(m.styles.panel)
@@ -487,19 +500,73 @@ func displayNameFromParts(label, accountID, userID string) string {
 	return ""
 }
 
-func (m Model) additionalAccountWindowRows() []usage.AccountSummary {
+type accountWindowRow struct {
+	name               string
+	primaryWindow      usage.WindowSummary
+	secondaryWindow    usage.WindowSummary
+	primaryAvailable   bool
+	secondaryAvailable bool
+	weeklyResetSeconds int64
+	weeklyResetKnown   bool
+}
+
+func (m Model) accountWindowRows() []accountWindowRow {
 	if m.summary == nil || len(m.summary.Accounts) <= 1 {
 		return nil
 	}
 	activeIndex := activeAccountIndex(m.summary)
-	out := make([]usage.AccountSummary, 0, len(m.summary.Accounts)-1)
+	out := make([]accountWindowRow, 0, len(m.summary.Accounts))
 	for i, account := range m.summary.Accounts {
 		if i == activeIndex {
+			row := accountWindowRow{
+				name:               accountDisplayName(account),
+				primaryWindow:      m.summary.PrimaryWindow,
+				secondaryWindow:    m.summary.SecondaryWindow,
+				primaryAvailable:   summaryWindowAvailable(m.summary.WindowDataAvailable, m.summary.PrimaryWindow),
+				secondaryAvailable: summaryWindowAvailable(m.summary.WindowDataAvailable, m.summary.SecondaryWindow),
+			}
+			row.weeklyResetSeconds, row.weeklyResetKnown = m.windowResetSeconds(row.secondaryWindow)
+			out = append(out, row)
 			continue
 		}
-		out = append(out, account)
+		row := accountWindowRow{
+			name:               accountDisplayName(account),
+			primaryWindow:      account.PrimaryWindow,
+			secondaryWindow:    account.SecondaryWindow,
+			primaryAvailable:   accountWindowAvailable(account, account.PrimaryWindow),
+			secondaryAvailable: accountWindowAvailable(account, account.SecondaryWindow),
+		}
+		row.weeklyResetSeconds, row.weeklyResetKnown = m.windowResetSeconds(row.secondaryWindow)
+		out = append(out, row)
 	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].weeklyResetKnown != out[j].weeklyResetKnown {
+			return out[i].weeklyResetKnown
+		}
+		if out[i].weeklyResetSeconds != out[j].weeklyResetSeconds {
+			return out[i].weeklyResetSeconds < out[j].weeklyResetSeconds
+		}
+		return strings.ToLower(out[i].name) < strings.ToLower(out[j].name)
+	})
 	return out
+}
+
+func (m Model) windowResetSeconds(win usage.WindowSummary) (int64, bool) {
+	if win.SecondsUntilReset != nil {
+		seconds := *win.SecondsUntilReset
+		if seconds < 0 {
+			seconds = 0
+		}
+		return seconds, true
+	}
+	if win.ResetsAt == nil {
+		return 0, false
+	}
+	seconds := int64(win.ResetsAt.Sub(m.now).Seconds())
+	if seconds < 0 {
+		seconds = 0
+	}
+	return seconds, true
 }
 
 func activeAccountIndex(summary *usage.Summary) int {
@@ -542,20 +609,6 @@ func accountWindowAvailable(account usage.AccountSummary, win usage.WindowSummar
 
 func windowSummaryAvailable(win usage.WindowSummary) bool {
 	return win.UsedPercent >= 0
-}
-
-func windowPanelTitle(base string, account usage.AccountSummary, stale bool) string {
-	if name := accountDisplayName(account); name != "" {
-		title := base + " [" + name + "]"
-		if stale {
-			title += " [stale]"
-		}
-		return title
-	}
-	if stale {
-		return base + " [stale]"
-	}
-	return base
 }
 
 func fitWindowRowsToViewport(rows []string, viewportHeight, panelVerticalOverhead int) []string {

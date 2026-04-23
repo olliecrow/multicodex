@@ -237,6 +237,7 @@ For periodic refresh, add this command to your cron schedule, for example:
 
 Monitor live subscription usage across your configured and discovered accounts.
 The TUI identifies accounts by configured account label and renders user-facing timestamps in local time without seconds.
+It orders account rows by weekly reset time, from first to reset at the top to last at the bottom.
 It defaults both the refresh interval and fetch timeout to 60 seconds.
 
 ```bash

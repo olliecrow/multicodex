@@ -215,8 +215,14 @@ func TestMultiAccountViewRendersOneWindowRowPerAccount(t *testing.T) {
 	if strings.Count(out, "weekly window [") != 3 {
 		t.Fatalf("expected one weekly row per account, got:\n%s", out)
 	}
-	if strings.Index(out, "five-hour window [me]") >= strings.Index(out, "five-hour window [alpha]") {
-		t.Fatalf("expected active account row to stay above additional account rows")
+	bravoIndex := strings.Index(out, "five-hour window [bravo]")
+	meIndex := strings.Index(out, "five-hour window [me]")
+	alphaIndex := strings.Index(out, "five-hour window [alpha]")
+	if bravoIndex < 0 || meIndex < 0 || alphaIndex < 0 {
+		t.Fatalf("expected all account rows, got:\n%s", out)
+	}
+	if !(bravoIndex < alphaIndex && alphaIndex < meIndex) {
+		t.Fatalf("expected account rows ordered by weekly reset, got:\n%s", out)
 	}
 }
 
@@ -249,8 +255,31 @@ func TestMultiAccountShortViewportKeepsAggregatePanelVisible(t *testing.T) {
 	if !strings.Contains(out, "weekly token estimate [") {
 		t.Fatalf("expected weekly aggregate section to remain visible, got:\n%s", out)
 	}
-	if strings.Contains(out, "five-hour window [bravo]") {
-		t.Fatalf("expected extra account rows to yield before the aggregate panel in a short viewport")
+	if !strings.Contains(out, "five-hour window [bravo]") {
+		t.Fatalf("expected earliest weekly reset account row to stay visible, got:\n%s", out)
+	}
+	if strings.Contains(out, "five-hour window [alpha]") {
+		t.Fatalf("expected later weekly reset account rows to yield before the aggregate panel in a short viewport")
+	}
+}
+
+func TestMultiAccountViewOrdersUnknownResetsLast(t *testing.T) {
+	m := seededMultiAccountModel()
+	m.width = 120
+	m.height = 40
+	m.summary.Accounts[0].SecondaryWindow.SecondsUntilReset = nil
+	m.summary.Accounts[1].SecondaryWindow.SecondsUntilReset = nil
+	m.summary.Accounts[1].SecondaryWindow.ResetsAt = nil
+
+	out := m.View()
+	bravoIndex := strings.Index(out, "five-hour window [bravo]")
+	meIndex := strings.Index(out, "five-hour window [me]")
+	alphaIndex := strings.Index(out, "five-hour window [alpha]")
+	if bravoIndex < 0 || meIndex < 0 || alphaIndex < 0 {
+		t.Fatalf("expected all account rows, got:\n%s", out)
+	}
+	if !(alphaIndex < meIndex && meIndex < bravoIndex) {
+		t.Fatalf("expected account with unknown weekly reset to render last, got:\n%s", out)
 	}
 }
 
