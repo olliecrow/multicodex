@@ -33,6 +33,19 @@ func TestSelectBestAccountTreatsExactThresholdAsNotEligible(t *testing.T) {
 	}
 }
 
+func TestSelectBestAccountSkipsKnownWeeklyExhaustedAccounts(t *testing.T) {
+	selected, err := selectBestAccountFromResults([]accountFetchResult{
+		testAccountFetchResult("weekly-exhausted-sooner-reset", 0, 100, 1*time.Hour),
+		testAccountFetchResult("weekly-available-later-reset", 0, 73, 48*time.Hour),
+	}, 40)
+	if err != nil {
+		t.Fatalf("selectBestAccountFromResults: %v", err)
+	}
+	if selected.Account.Label != "weekly-available-later-reset" {
+		t.Fatalf("expected weekly-available-later-reset, got %q", selected.Account.Label)
+	}
+}
+
 func TestSelectBestAccountUsesKnownWeeklyResetBeforeUnknownWeeklyReset(t *testing.T) {
 	selected, err := selectBestAccountFromResults([]accountFetchResult{
 		{
