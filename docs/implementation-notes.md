@@ -16,6 +16,7 @@
 - `~/multicodex/config.json` for profile metadata.
 - `~/multicodex/profiles/<name>/` for profile-scoped state.
 - `~/multicodex/profiles/<name>/codex-home/config.toml` defaults to a symlink to the default Codex config so profile runs inherit current global settings.
+- `~/multicodex/profiles/<name>/codex-home/skills/` fills in missing top-level entries from the default Codex skills tree while keeping manual profile overrides.
 - `~/multicodex/backups/default-auth.backup` for the latest saved non-multicodex-managed default auth restore state.
 - `~/multicodex/heartbeat.lock` for non-overlapping heartbeat runs by default.
 - `~/multicodex/monitor/accounts.json` for optional monitor-owned account overrides.
@@ -25,6 +26,7 @@
 ## Verification strategy
 - Unit tests for config parsing and profile validation.
 - Unit tests for environment and command wrapper behavior.
+- Unit tests for interactive CLI handoff into direct `codex` execution.
 - Unit tests for exact file-store config parsing and runtime isolation re-checks after shared-config drift.
 - Unit tests for heartbeat success, failure, timeout, locking, retries, and read-only exec behavior.
 - Imported and preserved monitor tests for account discovery, source fetching, observed-token aggregation, and TUI layout stability.

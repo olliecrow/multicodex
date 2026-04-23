@@ -6,7 +6,14 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"syscall"
 )
+
+var execLookPath = exec.LookPath
+var syscallExec = syscall.Exec
+var isInteractiveTerminalAttached = func() bool {
+	return fileIsTerminal(os.Stdin) && fileIsTerminal(os.Stdout) && fileIsTerminal(os.Stderr)
+}
 
 func RunCodexLogin(codexHome string, extraArgs []string) error {
 	return runCommandWithEnv("codex", append([]string{"login"}, extraArgs...), withProfileEnv(os.Environ(), codexHome, ""), "codex login failed")
@@ -39,6 +46,18 @@ func RunWithProfile(codexHome, profile, bin string, args []string) error {
 	return runCommandWithEnv(bin, args, withProfileEnv(os.Environ(), codexHome, profile), fmt.Sprintf("command failed: %s", strings.Join(append([]string{bin}, args...), " ")))
 }
 
+func RunInteractiveWithProfile(codexHome, profile, bin string, args []string) error {
+	env := withProfileEnv(os.Environ(), codexHome, profile)
+	if isInteractiveTerminalAttached() {
+		path, err := execLookPath(bin)
+		if err != nil {
+			return fmt.Errorf("find command %s: %w", bin, err)
+		}
+		return syscallExec(path, append([]string{bin}, args...), env)
+	}
+	return runCommandWithEnv(bin, args, env, fmt.Sprintf("command failed: %s", strings.Join(append([]string{bin}, args...), " ")))
+}
+
 func runCommandWithEnv(bin string, args []string, env []string, exitMessage string) error {
 	cmd := exec.Command(bin, args...)
 	cmd.Stdin = os.Stdin
@@ -54,6 +73,17 @@ func runCommandWithEnv(bin string, args []string, env []string, exitMessage stri
 		return fmt.Errorf("run command %s: %w", bin, err)
 	}
 	return nil
+}
+
+func fileIsTerminal(f *os.File) bool {
+	if f == nil {
+		return false
+	}
+	info, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return info.Mode()&os.ModeCharDevice != 0
 }
 
 func withProfileEnv(base []string, codexHome, profile string) []string {
