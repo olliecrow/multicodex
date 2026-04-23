@@ -7,6 +7,7 @@
 - `multicodex login-all`
 - `multicodex use <name>`
 - `multicodex app <name>`
+- `multicodex cli <name> [codex args...]`
 - `multicodex run <name> -- <command...>`
 - `multicodex exec [codex exec args]`
 - `multicodex switch-global <name> [--force]`
@@ -65,6 +66,13 @@
 - Re-checks file-backed auth isolation before launching the app.
 - Accepts installed app bundles in `/Applications/Codex.app`, `/System/Volumes/Data/Applications/Codex.app`, or `~/Applications/Codex.app`.
 - `MULTICODEX_APP_PATH` can override the app bundle path when needed.
+
+`multicodex cli <name> [codex args...]`
+- Runs the interactive Codex CLI in the selected profile context.
+- Uses the same default args as the local `c` alias: `--search --dangerously-bypass-approvals-and-sandbox -m gpt-5.4 -c model_reasoning_effort=high`.
+- Appends any extra args after the profile name.
+- Re-checks file-backed auth isolation before launching Codex.
+- Leaves the shared global auth pointer untouched.
 
 `multicodex run <name> -- <command...>`
 - Executes one command with profile-scoped context.

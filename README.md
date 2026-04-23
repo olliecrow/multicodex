@@ -6,7 +6,7 @@ It keeps accounts isolated in named local profiles. You log in once per profile,
 
 By default, each profile reuses your global Codex `config.toml`, so normal Codex settings changes continue to apply across all multicodex profiles. A profile can still opt into its own config by replacing its profile-local `config.toml`.
 
-Profile login still requires file-backed auth. If your shared global Codex config does not set `cli_auth_credentials_store = "file"`, `multicodex login` will fail with a setup error until you either enable file-backed auth globally or create a per-profile override. The same preflight is re-checked before profile-scoped Codex execution (`multicodex exec`, `multicodex heartbeat`, direct `multicodex run ... -- codex ...`, and `multicodex switch-global` unless you explicitly force it), so later edits to the shared config cannot silently weaken isolation.
+Profile login still requires file-backed auth. If your shared global Codex config does not set `cli_auth_credentials_store = "file"`, `multicodex login` will fail with a setup error until you either enable file-backed auth globally or create a per-profile override. The same preflight is re-checked before profile-scoped Codex execution (`multicodex cli`, `multicodex exec`, `multicodex app`, `multicodex heartbeat`, direct `multicodex run ... -- codex ...`, and `multicodex switch-global` unless you explicitly force it), so later edits to the shared config cannot silently weaken isolation.
 
 Most commands only change the current terminal context. `multicodex app` and `multicodex switch-global` are the two commands that also update the shared default Codex auth pointer on purpose.
 
@@ -105,6 +105,7 @@ multicodex login <name> [codex login args]
 multicodex login-all
 multicodex use <name> [--shell]
 multicodex app <name>
+multicodex cli <name> [codex args...]
 multicodex run <name> -- <command...>
 multicodex exec [codex exec args]
 multicodex switch-global <name> [--force]
@@ -147,6 +148,15 @@ multicodex app work
 ```
 
 `multicodex app` is for macOS. It first switches the shared default auth pointer to that profile, then launches `Codex.app` with the shared default `CODEX_HOME` and a stable per-profile app-data folder under `~/Library/Application Support/Codex-multicodex/<profile>`. That keeps one shared sidebar state while avoiding one giant shared Electron app-data folder across every app window. `multicodex` exits after handing the launch off to macOS; it does not keep a helper process running. Already-open app windows usually keep the account they started with, but that split is best-effort rather than a hard lock because Codex can reload auth later in some flows.
+
+Run the normal interactive Codex CLI with one profile.
+
+```bash
+multicodex cli personal
+multicodex cli work "check this repo"
+```
+
+`multicodex cli <name>` is the profile-scoped version of the local `c` alias. It runs `codex --search --dangerously-bypass-approvals-and-sandbox -m gpt-5.4 -c model_reasoning_effort=high` with that profile's `CODEX_HOME`, then appends any extra args you pass after the profile name. It does not change the shared global account.
 
 Run `codex exec` on the best available logged-in profile automatically.
 

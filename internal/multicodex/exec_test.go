@@ -339,7 +339,7 @@ func newExecTestApp(t *testing.T) (*App, string) {
 		t.Fatalf("mkdir fake bin: %v", err)
 	}
 	logPath := filepath.Join(root, "codex.log")
-	script := "#!/usr/bin/env bash\nset -euo pipefail\nprofile=\"${MULTICODEX_ACTIVE_PROFILE:-}\"\nprintf 'profile=%s\\nargs=%s\\n' \"$profile\" \"$*\" > " + shellQuote(logPath) + "\n"
+	script := "#!/usr/bin/env bash\nset -euo pipefail\nprofile=\"${MULTICODEX_ACTIVE_PROFILE:-}\"\nprintf 'profile=%s\\ncodex_home=%s\\nargs=%s\\n' \"$profile\" \"${CODEX_HOME:-}\" \"$*\" > " + shellQuote(logPath) + "\n"
 	if err := os.WriteFile(filepath.Join(fakeBin, "codex"), []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake codex: %v", err)
 	}

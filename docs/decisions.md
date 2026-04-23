@@ -287,6 +287,13 @@ Trade-offs: There is less branch isolation by default, so targeted staging, smal
 Enforcement: Agents may use the repository's default branch for normal personal-repo work unless the user requests a separate branch or the task clearly benefits from one.
 References: `AGENTS.md`, `docs/workflows.md`, `README.md`
 
+Decision: `multicodex cli <profile>` mirrors the owner's local interactive `c` alias.
+Context: The owner uses `c` as a fast interactive Codex CLI shortcut and wants the same behavior bound to any Multicodex profile without changing the `c` alias.
+Rationale: A first-class command is shorter and less error-prone than repeating `multicodex run <profile> -- codex ...` with the full option list every time.
+Trade-offs: The command intentionally uses powerful defaults: search enabled, `gpt-5.4`, high reasoning, and no sandbox or approval prompts. This matches the requested local workflow but should be clear in help and docs.
+Enforcement: `multicodex cli <profile> [codex args...]` runs `codex --search --dangerously-bypass-approvals-and-sandbox -m gpt-5.4 -c model_reasoning_effort=high` in the selected profile context, then appends extra user args. Tests cover args, profile env, help, and auth-isolation preflight.
+References: `internal/multicodex/cli.go`, `internal/multicodex/cli_test.go`, `README.md`, `docs/command-spec.md`
+
 Decision: This public repository keeps always-on public-readiness and safety/privacy/security discipline.
 Context: The repository is currently public on GitHub and the user wants public personal repositories to continue following stronger public-surface safety, security, privacy, and publication standards during normal maintenance work.
 Rationale: Public repositories have an external audience and external blast radius, so public-readiness hygiene should remain active continuously rather than only during one-off release work.
