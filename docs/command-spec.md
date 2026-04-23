@@ -124,6 +124,7 @@
 - Prefers account definitions from multicodex profile config and monitor-owned account overrides.
 - Always includes the default Codex home as a candidate account home before broader filesystem discovery.
 - Shows account labels instead of raw email addresses in the TUI when labels are available.
+- Orders TUI account rows by weekly reset time, from first to reset at the top to last at the bottom; accounts with unknown weekly reset times come last.
 - Keeps tracked timestamps in UTC internally while rendering user-facing TUI timestamps in local time without seconds.
 - Continues to support legacy monitor account-file locations as a compatibility fallback.
 - Uses read-only filesystem auto-discovery under the home directory, scanning for `.codex*`, `.codex`, and `codex-home` paths up to depth 5 before filtering transient/cache locations and requiring usage signals.

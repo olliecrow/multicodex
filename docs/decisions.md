@@ -189,6 +189,13 @@ Trade-offs: Duplicate or missing account labels can still make the display ambig
 Enforcement: `internal/monitor/tui/model.go` renders window titles and account summaries from labels first, keeps active-account matching keyed off stable identity fields, and formats user-facing timestamps in local time without seconds; `internal/monitor/tui/model_test.go` asserts label-first titles and local-time header/reset formatting.
 References: `internal/monitor/tui/model.go`, `internal/monitor/tui/model_test.go`, `README.md`, `docs/command-spec.md`
 
+Decision: Sort monitor TUI account cards by weekly reset.
+Context: The monitor can show several subscription accounts at once, and the user wants the card order to answer which weekly subscription window resets first.
+Rationale: Weekly reset order matches the main account-selection question better than five-hour reset order or active-account-first order. The order updates on each successful monitor refresh because the TUI sorts from the latest fetched window data.
+Trade-offs: The active account no longer stays pinned at the top in multi-account mode, and accounts without a known weekly reset appear last even if their five-hour window resets sooner.
+Enforcement: `internal/monitor/tui/model.go` sorts multi-account rows by the secondary weekly window reset, with unknown weekly reset times last and account name as the tie-breaker. `internal/monitor/tui/model_test.go` asserts weekly ordering, short-viewport retention of the earliest weekly reset row, and unknown-weekly-reset-last behavior.
+References: `internal/monitor/tui/model.go`, `internal/monitor/tui/model_test.go`, `README.md`, `docs/command-spec.md`
+
 Decision: Add `multicodex exec` as an auto-routing wrapper around `codex exec`.
 Context: Users often want the convenience of `codex exec` without manually choosing which logged-in subscription account currently has the most weekly headroom.
 Rationale: A dedicated `multicodex exec` command preserves a simple, familiar interface while keeping account-selection policy explicit and local to multicodex.
