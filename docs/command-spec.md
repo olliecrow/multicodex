@@ -85,6 +85,7 @@
 - Automatically selects among configured multicodex profiles.
 - Re-checks file-backed auth isolation before launching `codex exec`.
 - Treats profiles whose five-hour usage window is strictly below 40% as eligible to route work to.
+- Excludes profiles whose weekly window is known to be exhausted, so an account at 100% weekly usage is not selected while other usable profiles exist.
 - Among eligible profiles, picks the one whose weekly reset is soonest.
 - When eligible profiles do not expose a weekly reset time, picks randomly among those eligible profiles.
 - When no profile is eligible, picks a random accessible profile for that call.
