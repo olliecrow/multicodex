@@ -22,6 +22,7 @@ var commandSummaries = []struct {
 	{Name: "login-all", Summary: "run login for every known profile"},
 	{Name: "use <name> [--shell]", Summary: "switch profile in current terminal context"},
 	{Name: "app <name>", Summary: "launch a new Codex Mac app instance for one profile"},
+	{Name: "cli <name> [codex args...]", Summary: "run the interactive Codex CLI with one profile"},
 	{Name: "run <name> -- <command...>", Summary: "run one command in profile context"},
 	{Name: "exec [codex exec args]", Summary: "run codex exec on the best available profile"},
 	{Name: "switch-global <name> [--force]", Summary: "switch default global codex auth to profile"},
@@ -84,6 +85,14 @@ var commandHelpByName = map[string]commandHelp{
 		Examples: []string{
 			"multicodex app personal",
 			"multicodex app work",
+		},
+	},
+	"cli": {
+		Usage:       "multicodex cli <name> [codex args...]",
+		Description: "Run the interactive Codex CLI with the selected profile. This uses the same default args as the local c alias: search on, gpt-5.4, high reasoning, and no sandbox or approval prompts.",
+		Examples: []string{
+			"multicodex cli personal",
+			`multicodex cli work "check this repo"`,
 		},
 	},
 	"run": {
@@ -219,6 +228,7 @@ func printHelp() {
 	fmt.Println("  multicodex add personal")
 	fmt.Println(`  eval "$(multicodex use personal)"`)
 	fmt.Println("  multicodex app personal")
+	fmt.Println("  multicodex cli personal")
 	fmt.Println("  multicodex monitor")
 	fmt.Println("  multicodex heartbeat")
 	fmt.Println(`  eval "$(multicodex completion zsh)"`)
