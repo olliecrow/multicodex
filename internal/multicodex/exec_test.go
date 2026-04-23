@@ -191,6 +191,56 @@ func TestCmdExecSelectsBestProfileUsingDefaultSelector(t *testing.T) {
 	}
 }
 
+func TestCmdExecSkipsWeeklyExhaustedProfileUsingDefaultSelector(t *testing.T) {
+	app, logPath, root := newExecSelectionTestApp(t)
+	createExecProfiles(t, app, "alpha", "beta", "gamma")
+	writeExecSelectionProfileData(t, root, "alpha", 0, 100, 1*time.Hour)
+	writeExecSelectionProfileData(t, root, "beta", 0, 85, 2*time.Hour)
+	writeExecSelectionProfileData(t, root, "gamma", 50, 10, 30*time.Minute)
+
+	metadataPath := filepath.Join(t.TempDir(), "selected-profile.json")
+	t.Setenv(envSelectedProfilePath, metadataPath)
+
+	if err := app.Run([]string{"exec", "--skip-git-repo-check", "hello"}); err != nil {
+		t.Fatalf("exec failed: %v", err)
+	}
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	log := string(data)
+	if !strings.Contains(log, "profile=beta") {
+		t.Fatalf("expected beta profile from default selector, got %q", log)
+	}
+
+	metadata, err := os.ReadFile(metadataPath)
+	if err != nil {
+		t.Fatalf("read metadata: %v", err)
+	}
+	var payload struct {
+		Profile              string `json:"profile"`
+		SelectionSource      string `json:"selection_source"`
+		PrimaryUsedPercent   *int   `json:"primary_used_percent"`
+		SecondaryUsedPercent *int   `json:"secondary_used_percent"`
+	}
+	if err := json.Unmarshal(metadata, &payload); err != nil {
+		t.Fatalf("unmarshal metadata: %v", err)
+	}
+	if payload.Profile != "beta" {
+		t.Fatalf("expected selected profile beta, got %q", payload.Profile)
+	}
+	if payload.SelectionSource != "usage_selector" {
+		t.Fatalf("expected selection source usage_selector, got %q", payload.SelectionSource)
+	}
+	if payload.PrimaryUsedPercent == nil || *payload.PrimaryUsedPercent != 0 {
+		t.Fatalf("expected primary_used_percent 0, got %v", payload.PrimaryUsedPercent)
+	}
+	if payload.SecondaryUsedPercent == nil || *payload.SecondaryUsedPercent != 85 {
+		t.Fatalf("expected secondary_used_percent 85, got %v", payload.SecondaryUsedPercent)
+	}
+}
+
 func TestSelectExecProfileFallsBackToRandomProfileWhenSelectionFails(t *testing.T) {
 	app := newTestAppForCLI(t)
 	createExecProfiles(t, app, "alpha", "beta")
