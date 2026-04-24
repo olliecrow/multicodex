@@ -9,7 +9,7 @@ func defaultInteractiveCodexArgs() []string {
 		"--search",
 		"--dangerously-bypass-approvals-and-sandbox",
 		"-m",
-		"gpt-5.4",
+		"gpt-5.5",
 		"-c",
 		"model_reasoning_effort=high",
 	}
