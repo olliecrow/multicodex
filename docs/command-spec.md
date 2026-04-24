@@ -71,7 +71,7 @@
 
 `multicodex cli <name> [codex args...]`
 - Runs the interactive Codex CLI in the selected profile context.
-- Uses the same default args as the local `c` alias: `--search --dangerously-bypass-approvals-and-sandbox -m gpt-5.5 -c model_reasoning_effort=high`.
+- Uses the same default args as the local `c` alias: `--search --dangerously-bypass-approvals-and-sandbox -m gpt-5.5 -c model_reasoning_effort=medium`.
 - Appends any extra args after the profile name.
 - When stdin, stdout, and stderr are real terminals, replaces the multicodex process with `codex` so the interactive session behaves like a normal direct Codex launch.
 - Re-checks file-backed auth isolation before launching Codex.
