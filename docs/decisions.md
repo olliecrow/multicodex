@@ -297,8 +297,8 @@ References: `AGENTS.md`, `docs/workflows.md`, `README.md`
 Decision: `multicodex cli <profile>` mirrors the owner's local interactive `c` alias.
 Context: The owner uses `c` as a fast interactive Codex CLI shortcut and wants the same behavior bound to any Multicodex profile without changing the `c` alias.
 Rationale: A first-class command is shorter and less error-prone than repeating `multicodex run <profile> -- codex ...` with the full option list every time.
-Trade-offs: The command intentionally uses powerful defaults: search enabled, `gpt-5.4`, high reasoning, and no sandbox or approval prompts. This matches the requested local workflow but should be clear in help and docs.
-Enforcement: `multicodex cli <profile> [codex args...]` runs `codex --search --dangerously-bypass-approvals-and-sandbox -m gpt-5.4 -c model_reasoning_effort=high` in the selected profile context, then appends extra user args. In real interactive terminals it hands off directly into `codex` so the final live process matches a normal Codex CLI session more closely. Tests cover args, profile env, the interactive handoff path, help, and auth-isolation preflight.
+Trade-offs: The command intentionally uses powerful defaults: search enabled, `gpt-5.5`, high reasoning, and no sandbox or approval prompts. This matches the requested local workflow but should be clear in help and docs.
+Enforcement: `multicodex cli <profile> [codex args...]` runs `codex --search --dangerously-bypass-approvals-and-sandbox -m gpt-5.5 -c model_reasoning_effort=high` in the selected profile context, then appends extra user args. In real interactive terminals it hands off directly into `codex` so the final live process matches a normal Codex CLI session more closely. Tests cover args, profile env, the interactive handoff path, help, and auth-isolation preflight.
 References: `internal/multicodex/cli.go`, `internal/multicodex/cli_test.go`, `README.md`, `docs/command-spec.md`
 
 Decision: Profile homes inherit missing top-level skills from the shared default Codex skills tree.

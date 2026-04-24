@@ -158,7 +158,7 @@ multicodex cli personal
 multicodex cli work "check this repo"
 ```
 
-`multicodex cli <name>` is the profile-scoped version of the local `c` alias. It runs `codex --search --dangerously-bypass-approvals-and-sandbox -m gpt-5.4 -c model_reasoning_effort=high` with that profile's `CODEX_HOME`, then appends any extra args you pass after the profile name. It does not change the shared global account.
+`multicodex cli <name>` is the profile-scoped version of the local `c` alias. It runs `codex --search --dangerously-bypass-approvals-and-sandbox -m gpt-5.5 -c model_reasoning_effort=high` with that profile's `CODEX_HOME`, then appends any extra args you pass after the profile name. It does not change the shared global account.
 When launched from a real interactive terminal, `multicodex cli` hands off directly into `codex` so the live process behaves like a normal Codex CLI session instead of staying wrapped under a long-lived multicodex parent process.
 
 Run `codex exec` on the best available logged-in profile automatically.
