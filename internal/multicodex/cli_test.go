@@ -28,7 +28,7 @@ func TestCmdCLIRunsInteractiveCodexWithProfileDefaults(t *testing.T) {
 	if !strings.Contains(log, "codex_home="+wantCodexHome) {
 		t.Fatalf("expected crowoy CODEX_HOME in log, got %q", log)
 	}
-	wantArgs := "--search --dangerously-bypass-approvals-and-sandbox -m gpt-5.4 -c model_reasoning_effort=high check this repo"
+	wantArgs := "--search --dangerously-bypass-approvals-and-sandbox -m gpt-5.5 -c model_reasoning_effort=high check this repo"
 	if !strings.Contains(log, "args="+wantArgs) {
 		t.Fatalf("expected cli args %q in log, got %q", wantArgs, log)
 	}

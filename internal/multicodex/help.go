@@ -89,7 +89,7 @@ var commandHelpByName = map[string]commandHelp{
 	},
 	"cli": {
 		Usage:       "multicodex cli <name> [codex args...]",
-		Description: "Run the interactive Codex CLI with the selected profile. This uses the same default args as the local c alias: search on, gpt-5.4, high reasoning, and no sandbox or approval prompts.",
+		Description: "Run the interactive Codex CLI with the selected profile. This uses the same default args as the local c alias: search on, gpt-5.5, high reasoning, and no sandbox or approval prompts.",
 		Examples: []string{
 			"multicodex cli personal",
 			`multicodex cli work "check this repo"`,
