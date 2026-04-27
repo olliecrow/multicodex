@@ -270,7 +270,7 @@ Decision: Observed token estimates add local session usage across same-account h
 Context: The monitor's observed token totals come from per-home session logs, and the same account can be used through more than one Codex home such as `~/.codex` and a multicodex profile home.
 Rationale: Taking the maximum observed total for one account identity drops real local usage from the smaller home, while summing the per-home estimates matches what the monitor is actually measuring: local session-log activity across the discovered homes.
 Trade-offs: If someone manually duplicates the same session logs into more than one home, the observed estimate can overcount, but normal multicodex homes keep separate session stores and the old maximum rule could undercount normal real usage.
-Enforcement: Summary-level observed token estimates add same-identity home totals instead of taking the maximum; the TUI labels these values as token estimates and shows `partial` directly when some home estimates are missing.
+Enforcement: Summary-level observed token estimates add same-identity home totals instead of taking the maximum; the TUI shows the weekly total as a token estimate and shows `partial` directly when some home estimates are missing.
 References: `internal/monitor/usage/fetcher.go`, `internal/monitor/usage/fetcher_test.go`, `internal/monitor/tui/model.go`, `internal/monitor/tui/model_test.go`, `README.md`, `docs/command-spec.md`
 
 Decision: Prefer a plain-English re-login warning when monitor fetches fail because a profile token expired.
@@ -307,6 +307,20 @@ Rationale: Filling in only missing top-level entries keeps shared skills availab
 Trade-offs: Profile homes now depend a bit more on the shared default skills tree for inherited skills, but manual profile-local top-level overrides still work.
 Enforcement: Profile creation and profile-directory repair both fill in missing top-level `skills` entries from the default Codex home while leaving existing profile entries untouched. Tests cover both missing-entry repair and manual-override preservation.
 References: `internal/multicodex/config.go`, `internal/multicodex/config_test.go`, `README.md`, `docs/command-spec.md`, `docs/implementation-notes.md`
+
+Decision: Route `multicodex exec` model-aware to Spark buckets when the model name requests Spark.
+Context: A subscription snapshot can include both default (`codex`) and Spark (`codex_bengalfox`/Spark-name) rate-limit windows, and Spark model names should prioritize Spark quota.
+Rationale: Using Spark windows for Spark model names gives better quota fit for model-appropriate routing without changing behavior for non-spark calls.
+Trade-offs: The Spark check is model-name-based (`contains "spark"`), so it can route only when the caller includes a Spark identifier in the model string; it also requires no additional user configuration.
+Enforcement: `internal/multicodex/exec.go` passes parsed model to `usage.SelectBestAccountForModel`; model parsing and selection tests assert parse flow and Spark fallback behavior when Spark windows are missing.
+References: `internal/multicodex/exec.go`, `internal/multicodex/exec_test.go`, `internal/monitor/usage/model.go`, `internal/monitor/usage/raw_types.go`, `internal/monitor/usage/select.go`, `internal/monitor/usage/select_test.go`, `docs/command-spec.md`
+
+Decision: Keep monitor window cards compact and show both default and Spark usage when available.
+Context: The user-facing monitor should stay one row per account, two cards per row, while still surfacing Spark bucket usage where present.
+Rationale: Adding an inline `used-spark` line inside the same card keeps Spark insight available without adding more cards, so row density and layout remain stable.
+Trade-offs: Window cards can show up to two compact usage lines (`used:` and `used-spark:`), which slightly increases per-panel height when Spark exists and should remain within viewport limits.
+Enforcement: `internal/monitor/tui/model.go` renders Spark as a second compact line in each affected card and omits a separate Spark card; tests assert one row per account and compact reset formatting.
+References: `internal/monitor/tui/model.go`, `internal/monitor/tui/model_test.go`, `internal/monitor/usage/model.go`, `docs/command-spec.md`, `docs/implementation-notes.md`
 
 Decision: This public repository keeps always-on public-readiness and safety/privacy/security discipline.
 Context: The repository is currently public on GitHub and the user wants public personal repositories to continue following stronger public-surface safety, security, privacy, and publication standards during normal maintenance work.

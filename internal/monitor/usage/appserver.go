@@ -102,7 +102,7 @@ func (s *AppServerSource) Fetch(ctx context.Context) (*Summary, error) {
 		warnings = append(warnings, fmt.Sprintf("account identity unavailable: %v", err))
 	}
 
-	return normalizeSummary(s.Name(), result.RateLimits, additional, identity, warnings)
+	return normalizeSummary(s.Name(), result.RateLimits, result.RateLimitsByLimitID, additional, identity, warnings)
 }
 
 func (s *AppServerSource) Close() error {

@@ -19,7 +19,7 @@ func TestCmdExecRunsCodexExecWithSelectedProfile(t *testing.T) {
 	createExecProfiles(t, app, "alpha", "beta")
 
 	originalSelector := defaultExecAccountSelector
-	defaultExecAccountSelector = func(context.Context, []usage.MonitorAccount, int) (usage.SelectedAccount, error) {
+	defaultExecAccountSelector = func(context.Context, []usage.MonitorAccount, int, string) (usage.SelectedAccount, error) {
 		return usage.SelectedAccount{
 			Account:              usage.MonitorAccount{Label: "beta"},
 			PrimaryUsedPercent:   15,
@@ -50,7 +50,7 @@ func TestCmdExecWritesSelectedProfileMetadata(t *testing.T) {
 	createExecProfiles(t, app, "alpha", "beta")
 
 	originalSelector := defaultExecAccountSelector
-	defaultExecAccountSelector = func(context.Context, []usage.MonitorAccount, int) (usage.SelectedAccount, error) {
+	defaultExecAccountSelector = func(context.Context, []usage.MonitorAccount, int, string) (usage.SelectedAccount, error) {
 		return usage.SelectedAccount{
 			Account:              usage.MonitorAccount{Label: "beta"},
 			PrimaryUsedPercent:   15,
@@ -119,7 +119,7 @@ func TestCmdExecFailsWhenSharedConfigDoesNotUseFileStore(t *testing.T) {
 	writeDefaultConfig(t, app, "model = \"global\"\n")
 
 	originalSelector := defaultExecAccountSelector
-	defaultExecAccountSelector = func(context.Context, []usage.MonitorAccount, int) (usage.SelectedAccount, error) {
+	defaultExecAccountSelector = func(context.Context, []usage.MonitorAccount, int, string) (usage.SelectedAccount, error) {
 		return usage.SelectedAccount{Account: usage.MonitorAccount{Label: "alpha"}}, nil
 	}
 	defer func() { defaultExecAccountSelector = originalSelector }()
@@ -164,6 +164,60 @@ func TestExecArgsAreHelpRequest(t *testing.T) {
 				t.Fatalf("execArgsAreHelpRequest(%v) = %v, want %v", tc.args, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestParseModelFromExecArgs(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "long-flag separate", args: []string{"--model", "gpt-5-codex-spark"}, want: "gpt-5-codex-spark"},
+		{name: "long-flag equals", args: []string{"--model=gpt-5-codex-spark"}, want: "gpt-5-codex-spark"},
+		{name: "short flag", args: []string{"-m", "gpt-5-codex-spark"}, want: "gpt-5-codex-spark"},
+		{name: "missing", args: []string{"hello", "world"}, want: ""},
+		{name: "short not model", args: []string{"-m"}, want: ""},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			got := parseModelFromExecArgs(tc.args)
+			if got != tc.want {
+				t.Fatalf("parseModelFromExecArgs(%v) = %q, want %q", tc.args, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSelectExecProfilePassesModelToSelector(t *testing.T) {
+	app := newTestAppForCLI(t)
+	createExecProfiles(t, app, "alpha")
+
+	cfg, err := app.loadConfigIfExists()
+	if err != nil {
+		t.Fatalf("loadConfigIfExists: %v", err)
+	}
+
+	model := "gpt-5-codex-spark"
+	calledWith := ""
+	selected, err := app.selectExecProfile(cfg, func(_ context.Context, _ []usage.MonitorAccount, _ int, selectedModel string) (usage.SelectedAccount, error) {
+		calledWith = selectedModel
+		return usage.SelectedAccount{
+			Account:              usage.MonitorAccount{Label: "alpha"},
+			PrimaryUsedPercent:   10,
+			SecondaryUsedPercent: 20,
+		}, nil
+	}, model)
+	if err != nil {
+		t.Fatalf("selectExecProfile: %v", err)
+	}
+	if selected.Name != "alpha" {
+		t.Fatalf("expected selected profile alpha, got %q", selected.Name)
+	}
+	if calledWith != model {
+		t.Fatalf("expected selector called with %q model, got %q", model, calledWith)
 	}
 }
 
@@ -259,9 +313,9 @@ func TestSelectExecProfileFallsBackToRandomProfileWhenSelectionFails(t *testing.
 	}
 	defer func() { chooseRandomProfileName = originalChooser }()
 
-	selected, err := app.selectExecProfile(cfg, func(context.Context, []usage.MonitorAccount, int) (usage.SelectedAccount, error) {
+	selected, err := app.selectExecProfile(cfg, func(context.Context, []usage.MonitorAccount, int, string) (usage.SelectedAccount, error) {
 		return usage.SelectedAccount{}, errors.New("boom")
-	})
+	}, "")
 	if err != nil {
 		t.Fatalf("selectExecProfile: %v", err)
 	}
@@ -291,9 +345,9 @@ func TestSelectExecProfileFallsBackToOnlyProfileWhenSelectionFails(t *testing.T)
 	}
 	defer func() { chooseRandomProfileName = originalChooser }()
 
-	selected, err := app.selectExecProfile(cfg, func(context.Context, []usage.MonitorAccount, int) (usage.SelectedAccount, error) {
+	selected, err := app.selectExecProfile(cfg, func(context.Context, []usage.MonitorAccount, int, string) (usage.SelectedAccount, error) {
 		return usage.SelectedAccount{}, errors.New("boom")
-	})
+	}, "")
 	if err != nil {
 		t.Fatalf("selectExecProfile: %v", err)
 	}
@@ -310,7 +364,7 @@ func TestCmdExecFallsBackToRandomProfileWhenUsageSelectionFails(t *testing.T) {
 	createExecProfiles(t, app, "alpha", "beta")
 
 	originalSelector := defaultExecAccountSelector
-	defaultExecAccountSelector = func(context.Context, []usage.MonitorAccount, int) (usage.SelectedAccount, error) {
+	defaultExecAccountSelector = func(context.Context, []usage.MonitorAccount, int, string) (usage.SelectedAccount, error) {
 		return usage.SelectedAccount{}, errors.New("boom")
 	}
 	defer func() { defaultExecAccountSelector = originalSelector }()
@@ -347,13 +401,13 @@ func TestSelectExecProfilePersistsUsageSelectionMetadata(t *testing.T) {
 		t.Fatalf("loadConfigIfExists: %v", err)
 	}
 
-	selected, err := app.selectExecProfile(cfg, func(context.Context, []usage.MonitorAccount, int) (usage.SelectedAccount, error) {
+	selected, err := app.selectExecProfile(cfg, func(context.Context, []usage.MonitorAccount, int, string) (usage.SelectedAccount, error) {
 		return usage.SelectedAccount{
 			Account:              usage.MonitorAccount{Label: "beta"},
 			PrimaryUsedPercent:   39,
 			SecondaryUsedPercent: 7,
 		}, nil
-	})
+	}, "")
 	if err != nil {
 		t.Fatalf("selectExecProfile: %v", err)
 	}

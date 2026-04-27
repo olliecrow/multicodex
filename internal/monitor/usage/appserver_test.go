@@ -79,4 +79,3 @@ func TestRefreshAuthStateErrorAfterKnownFingerprintReturnsWarning(t *testing.T) 
 		t.Fatalf("expected session reset on auth-state error")
 	}
 }
-

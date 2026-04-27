@@ -20,7 +20,7 @@ const (
 	envSelectedProfilePath         = "MULTICODEX_SELECTED_PROFILE_PATH"
 )
 
-type execAccountSelector func(context.Context, []usage.MonitorAccount, int) (usage.SelectedAccount, error)
+type execAccountSelector func(context.Context, []usage.MonitorAccount, int, string) (usage.SelectedAccount, error)
 
 type execSelectionMetadata struct {
 	Profile              string `json:"profile"`
@@ -35,8 +35,8 @@ type execSelection struct {
 	Metadata execSelectionMetadata
 }
 
-var defaultExecAccountSelector execAccountSelector = func(ctx context.Context, accounts []usage.MonitorAccount, maxPrimaryUsedPercent int) (usage.SelectedAccount, error) {
-	return usage.SelectBestAccount(ctx, accounts, maxPrimaryUsedPercent)
+var defaultExecAccountSelector execAccountSelector = func(ctx context.Context, accounts []usage.MonitorAccount, maxPrimaryUsedPercent int, model string) (usage.SelectedAccount, error) {
+	return usage.SelectBestAccountForModel(ctx, accounts, maxPrimaryUsedPercent, model)
 }
 
 var chooseRandomProfileName = func(names []string) string {
@@ -58,13 +58,14 @@ func (a *App) cmdExec(args []string) error {
 	if execArgsAreHelpRequest(args) {
 		return RunCommand("codex", append([]string{"exec"}, args...))
 	}
+	model := parseModelFromExecArgs(args)
 
 	cfg, err := a.loadOrInitConfig()
 	if err != nil {
 		return err
 	}
 
-	selected, err := a.selectExecProfile(cfg, defaultExecAccountSelector)
+	selected, err := a.selectExecProfile(cfg, defaultExecAccountSelector, model)
 	if err != nil {
 		return err
 	}
@@ -111,7 +112,7 @@ func execArgsAreHelpRequest(args []string) bool {
 	return args[0] == "help"
 }
 
-func (a *App) selectExecProfile(cfg *Config, selector execAccountSelector) (execSelection, error) {
+func (a *App) selectExecProfile(cfg *Config, selector execAccountSelector, model string) (execSelection, error) {
 	if len(cfg.Profiles) == 0 {
 		return execSelection{}, &ExitError{Code: 2, Message: "no profiles configured. add one with: multicodex add <name>"}
 	}
@@ -130,7 +131,7 @@ func (a *App) selectExecProfile(cfg *Config, selector execAccountSelector) (exec
 		ctx, cancel := context.WithTimeout(context.Background(), execSelectionTimeout)
 		defer cancel()
 
-		selected, err := selector(ctx, accounts, execSelectionPrimaryUsageLimit)
+		selected, err := selector(ctx, accounts, execSelectionPrimaryUsageLimit, model)
 		if err == nil {
 			if name, profile, ok := lookupSelectedExecProfile(cfg, selected); ok {
 				metadata := execSelectionMetadata{
@@ -153,6 +154,28 @@ func (a *App) selectExecProfile(cfg *Config, selector execAccountSelector) (exec
 			SelectionSource: "random_profile_fallback",
 		},
 	}, nil
+}
+
+func parseModelFromExecArgs(args []string) string {
+	for i := 0; i < len(args); i++ {
+		arg := strings.TrimSpace(args[i])
+		if arg == "" {
+			continue
+		}
+		switch {
+		case arg == "--model":
+			if i+1 < len(args) {
+				return strings.TrimSpace(args[i+1])
+			}
+		case strings.HasPrefix(arg, "--model="):
+			return strings.TrimSpace(strings.TrimPrefix(arg, "--model="))
+		case arg == "-m":
+			if i+1 < len(args) {
+				return strings.TrimSpace(args[i+1])
+			}
+		}
+	}
+	return ""
 }
 
 func intPtr(v int) *int {

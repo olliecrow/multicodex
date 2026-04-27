@@ -199,6 +199,134 @@ func TestSelectBestAccountErrorsWhenNoAccountsAccessible(t *testing.T) {
 	}
 }
 
+func TestSelectBestAccountForModelUsesSparkWindowForModelSelection(t *testing.T) {
+	originalChooser := chooseRandomResultIndex
+	calls := 0
+	chooseRandomResultIndex = func(candidates []int) int {
+		calls++
+		if len(candidates) == 0 {
+			if calls > 1 {
+				t.Fatalf("unexpected second empty candidate set")
+			}
+			return -1
+		}
+		if len(candidates) != 1 {
+			t.Fatalf("expected spark-specific eligible candidate set to have 1 candidate, got %d", len(candidates))
+		}
+		return candidates[0]
+	}
+	defer func() { chooseRandomResultIndex = originalChooser }()
+
+	results := []accountFetchResult{
+		testAccountFetchResultWithRateLimits("alpha", 10, 10, map[string]RateLimitWindow{
+			"codex": {
+				PrimaryWindow:   WindowSummary{UsedPercent: 90},
+				SecondaryWindow: WindowSummary{UsedPercent: 10, SecondsUntilReset: testInt64Ptr(30 * 60)},
+			},
+			"codex_bengalfox": {
+				PrimaryWindow:   WindowSummary{UsedPercent: 15},
+				SecondaryWindow: WindowSummary{UsedPercent: unavailableUsedPercent},
+			},
+		}),
+		testAccountFetchResultWithRateLimits("beta", 20, 20, map[string]RateLimitWindow{
+			"codex": {
+				PrimaryWindow:   WindowSummary{UsedPercent: 20},
+				SecondaryWindow: WindowSummary{UsedPercent: unavailableUsedPercent},
+			},
+			"codex_bengalfox": {
+				PrimaryWindow:   WindowSummary{UsedPercent: 45},
+				SecondaryWindow: WindowSummary{UsedPercent: unavailableUsedPercent},
+			},
+		}),
+	}
+	if p, s := selectWindowsForModel(results[0].account, "gpt-5-codex-spark"); p.UsedPercent != 15 || s.UsedPercent != unavailableUsedPercent {
+		t.Fatalf("expected alpha spark windows to be {15, unavailable}, got {%d,%d}", p.UsedPercent, s.UsedPercent)
+	}
+	if p, s := selectWindowsForModel(results[1].account, "gpt-5-codex-spark"); p.UsedPercent != 45 || s.UsedPercent != unavailableUsedPercent {
+		t.Fatalf("expected beta spark windows to be {45, unavailable}, got {%d,%d}", p.UsedPercent, s.UsedPercent)
+	}
+
+	selected, err := selectBestAccountFromResultsForModel(results, 40, "gpt-5-codex-spark")
+	if err != nil {
+		t.Fatalf("selectBestAccountFromResultsForModel: %v", err)
+	}
+	if selected.Account.Label != "alpha" {
+		t.Fatalf("expected alpha (lower spark primary usage), got %q", selected.Account.Label)
+	}
+}
+
+func TestSelectBestAccountForModelFallsBackToDefaultWindowWhenModelMissing(t *testing.T) {
+	selected, err := selectBestAccountFromResultsForModel([]accountFetchResult{
+		testAccountFetchResultWithRateLimits("alpha", 50, 10, map[string]RateLimitWindow{
+			"codex": {
+				PrimaryWindow:   WindowSummary{UsedPercent: 50},
+				SecondaryWindow: WindowSummary{UsedPercent: 10, SecondsUntilReset: testInt64Ptr(30 * 60)},
+			},
+			"codex_bengalfox": {
+				PrimaryWindow:   WindowSummary{UsedPercent: 90},
+				SecondaryWindow: WindowSummary{UsedPercent: 10, SecondsUntilReset: testInt64Ptr(30 * 60)},
+			},
+		}),
+		testAccountFetchResultWithRateLimits("beta", 10, 20, map[string]RateLimitWindow{
+			"codex": {
+				PrimaryWindow:   WindowSummary{UsedPercent: 10},
+				SecondaryWindow: WindowSummary{UsedPercent: 10, SecondsUntilReset: testInt64Ptr(40 * 60)},
+			},
+			"codex_bengalfox": {
+				PrimaryWindow:   WindowSummary{UsedPercent: 80},
+				SecondaryWindow: WindowSummary{UsedPercent: 10, SecondsUntilReset: testInt64Ptr(40 * 60)},
+			},
+		}),
+	}, 40, "gpt-4")
+	if err != nil {
+		t.Fatalf("selectBestAccountFromResultsForModel: %v", err)
+	}
+	if selected.Account.Label != "beta" {
+		t.Fatalf("expected beta (lower default primary usage), got %q", selected.Account.Label)
+	}
+}
+
+func TestSelectBestAccountForModelFallsBackToPrimaryWhenSparkBucketMissing(t *testing.T) {
+	selected, err := selectBestAccountFromResultsForModel([]accountFetchResult{
+		{
+			codexHome: "/alpha",
+			account: AccountSummary{
+				Label:           "alpha",
+				PrimaryWindow:   WindowSummary{UsedPercent: 10},
+				SecondaryWindow: WindowSummary{UsedPercent: 100},
+				RateLimitWindows: map[string]RateLimitWindow{
+					"codex_other": {
+						PrimaryWindow:   WindowSummary{UsedPercent: 99},
+						SecondaryWindow: WindowSummary{UsedPercent: unavailableUsedPercent},
+					},
+				},
+			},
+			snapshot: &Summary{},
+		},
+		{
+			codexHome: "/beta",
+			account: AccountSummary{
+				Label:           "beta",
+				PrimaryWindow:   WindowSummary{UsedPercent: 5},
+				SecondaryWindow: WindowSummary{UsedPercent: 10},
+				RateLimitWindows: map[string]RateLimitWindow{
+					"codex_other": {
+						PrimaryWindow:   WindowSummary{UsedPercent: 80},
+						SecondaryWindow: WindowSummary{UsedPercent: unavailableUsedPercent},
+					},
+				},
+			},
+			snapshot: &Summary{},
+		},
+	}, 40, "gpt-5-codex-spark")
+	if err != nil {
+		t.Fatalf("selectBestAccountFromResultsForModel: %v", err)
+	}
+	if selected.Account.Label != "beta" {
+		t.Fatalf("expected fallback-to-primary selection for spark model to choose beta, got %q", selected.Account.Label)
+	}
+}
+
 func testAccountFetchResult(label string, primaryUsed, secondaryUsed int, weeklyResetIn time.Duration) accountFetchResult {
 	account := AccountSummary{
 		Label:         label,
@@ -217,4 +345,33 @@ func testAccountFetchResult(label string, primaryUsed, secondaryUsed int, weekly
 		account:   account,
 		snapshot:  &Summary{},
 	}
+}
+
+func testAccountFetchResultWithRateLimits(label string, fallbackPrimaryUsed, fallbackSecondaryUsed int, windows map[string]RateLimitWindow) accountFetchResult {
+	account := AccountSummary{
+		Label:            label,
+		PrimaryWindow:    WindowSummary{UsedPercent: fallbackPrimaryUsed},
+		SecondaryWindow:  WindowSummary{UsedPercent: fallbackSecondaryUsed},
+		RateLimitWindows: windows,
+	}
+	if fallbackSecondaryUsed != unavailableUsedPercent {
+		seconds := int64(24 * time.Hour.Seconds())
+		account.SecondaryWindow.SecondsUntilReset = &seconds
+	}
+	for limitID, window := range windows {
+		if window.SecondaryWindow.UsedPercent != unavailableUsedPercent && window.SecondaryWindow.SecondsUntilReset == nil {
+			seconds := int64(30 * 60)
+			window.SecondaryWindow.SecondsUntilReset = &seconds
+			windows[limitID] = window
+		}
+	}
+	return accountFetchResult{
+		codexHome: "/" + label,
+		account:   account,
+		snapshot:  &Summary{},
+	}
+}
+
+func testInt64Ptr(v int64) *int64 {
+	return &v
 }
