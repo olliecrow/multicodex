@@ -5,6 +5,7 @@ import (
 	cryptorand "crypto/rand"
 	"fmt"
 	"math/big"
+	"strings"
 	"time"
 )
 
@@ -12,6 +13,12 @@ type SelectedAccount struct {
 	Account              MonitorAccount
 	PrimaryUsedPercent   int
 	SecondaryUsedPercent int
+}
+
+type accountWindowCandidate struct {
+	resultIndex          int
+	primaryUsedPercent   int
+	secondaryUsedPercent int
 }
 
 var chooseRandomResultIndex = func(candidates []int) int {
@@ -36,12 +43,20 @@ func NewSnapshotFetcherForAccounts(accounts []MonitorAccount) *Fetcher {
 }
 
 func SelectBestAccount(ctx context.Context, accounts []MonitorAccount, maxPrimaryUsedPercent int) (SelectedAccount, error) {
+	return SelectBestAccountForModel(ctx, accounts, maxPrimaryUsedPercent, "")
+}
+
+func SelectBestAccountForModel(ctx context.Context, accounts []MonitorAccount, maxPrimaryUsedPercent int, model string) (SelectedAccount, error) {
 	f := NewSnapshotFetcherForAccounts(accounts)
 	defer f.Close()
-	return f.SelectAccount(ctx, maxPrimaryUsedPercent)
+	return f.SelectAccountForModel(ctx, maxPrimaryUsedPercent, model)
 }
 
 func (f *Fetcher) SelectAccount(ctx context.Context, maxPrimaryUsedPercent int) (SelectedAccount, error) {
+	return f.SelectAccountForModel(ctx, maxPrimaryUsedPercent, "")
+}
+
+func (f *Fetcher) SelectAccountForModel(ctx context.Context, maxPrimaryUsedPercent int, model string) (SelectedAccount, error) {
 	if len(f.accounts) == 0 {
 		return SelectedAccount{}, fmt.Errorf("no accounts available")
 	}
@@ -50,43 +65,52 @@ func (f *Fetcher) SelectAccount(ctx context.Context, maxPrimaryUsedPercent int) 
 	f.refreshAccounts(now, false)
 
 	results := f.fetchAccountsConcurrent(ctx, now, activeHomeSet{})
-	return selectBestAccountFromResults(results, maxPrimaryUsedPercent)
+	return selectBestAccountFromResultsForModel(results, maxPrimaryUsedPercent, model)
 }
 
 func selectBestAccountFromResults(results []accountFetchResult, maxPrimaryUsedPercent int) (SelectedAccount, error) {
-	eligibleUnknownResetCandidates := []int{}
-	accessibleCandidates := []int{}
+	return selectBestAccountFromResultsForModel(results, maxPrimaryUsedPercent, "")
+}
+
+func selectBestAccountFromResultsForModel(results []accountFetchResult, maxPrimaryUsedPercent int, model string) (SelectedAccount, error) {
+	eligibleUnknownResetCandidates := []accountWindowCandidate{}
+	accessibleCandidates := []accountWindowCandidate{}
 	soonestEligibleResetSeconds := int64(0)
-	soonestEligibleCandidates := []int{}
+	soonestEligibleCandidates := []accountWindowCandidate{}
 
 	for i, result := range results {
 		if result.fetchErr != nil || result.snapshot == nil {
 			continue
 		}
 
-		accessibleCandidates = append(accessibleCandidates, i)
+		primaryWindow, secondaryWindow := selectWindowsForModel(result.account, model)
+		candidate := accountWindowCandidate{
+			resultIndex:          i,
+			primaryUsedPercent:   primaryWindow.UsedPercent,
+			secondaryUsedPercent: secondaryWindow.UsedPercent,
+		}
+		accessibleCandidates = append(accessibleCandidates, candidate)
 
-		primaryUsedPercent := result.account.PrimaryWindow.UsedPercent
-		if primaryUsedPercent >= maxPrimaryUsedPercent {
+		if primaryWindow.UsedPercent >= maxPrimaryUsedPercent {
 			continue
 		}
-		if weeklyWindowIsKnownExhausted(result.account.SecondaryWindow) {
+		if weeklyWindowIsKnownExhausted(secondaryWindow) {
 			continue
 		}
 
-		secondsUntilReset, ok := secondsUntilReset(result.account.SecondaryWindow)
+		secondsUntilReset, ok := secondsUntilReset(secondaryWindow)
 		if !ok {
-			eligibleUnknownResetCandidates = append(eligibleUnknownResetCandidates, i)
+			eligibleUnknownResetCandidates = append(eligibleUnknownResetCandidates, candidate)
 			continue
 		}
 
 		if len(soonestEligibleCandidates) == 0 || secondsUntilReset < soonestEligibleResetSeconds {
 			soonestEligibleResetSeconds = secondsUntilReset
-			soonestEligibleCandidates = []int{i}
+			soonestEligibleCandidates = []accountWindowCandidate{candidate}
 			continue
 		}
 		if secondsUntilReset == soonestEligibleResetSeconds {
-			soonestEligibleCandidates = append(soonestEligibleCandidates, i)
+			soonestEligibleCandidates = append(soonestEligibleCandidates, candidate)
 		}
 	}
 
@@ -103,21 +127,38 @@ func selectBestAccountFromResults(results []accountFetchResult, maxPrimaryUsedPe
 	return SelectedAccount{}, fmt.Errorf("no accessible accounts")
 }
 
+func selectWindowsForModel(account AccountSummary, model string) (WindowSummary, WindowSummary) {
+	if strings.TrimSpace(model) != "" {
+		if _, window, ok := account.RateLimitWindowForModel(model); ok {
+			return window.PrimaryWindow, window.SecondaryWindow
+		}
+	}
+	return account.PrimaryWindow, account.SecondaryWindow
+}
+
 func weeklyWindowIsKnownExhausted(win WindowSummary) bool {
 	return win.UsedPercent != unavailableUsedPercent && win.UsedPercent >= 100
 }
 
-func chooseSelectedAccount(results []accountFetchResult, candidates []int) (SelectedAccount, bool) {
-	chosenIndex := chooseRandomResultIndex(candidates)
-	if chosenIndex == -1 {
+func chooseSelectedAccount(results []accountFetchResult, candidates []accountWindowCandidate) (SelectedAccount, bool) {
+	candidateIndexes := make([]int, len(candidates))
+	for i := range candidates {
+		candidateIndexes[i] = i
+	}
+	chosenCandidateIndex := chooseRandomResultIndex(candidateIndexes)
+	if chosenCandidateIndex == -1 {
 		return SelectedAccount{}, false
 	}
 
-	chosen := results[chosenIndex]
+	chosen := candidates[chosenCandidateIndex]
+	chosenResult := results[chosen.resultIndex]
+	primaryUsedPercent := chosen.primaryUsedPercent
+	secondaryUsedPercent := chosen.secondaryUsedPercent
+
 	return SelectedAccount{
-		Account:              MonitorAccount{Label: chosen.account.Label, CodexHome: chosen.codexHome},
-		PrimaryUsedPercent:   chosen.account.PrimaryWindow.UsedPercent,
-		SecondaryUsedPercent: chosen.account.SecondaryWindow.UsedPercent,
+		Account:              MonitorAccount{Label: chosenResult.account.Label, CodexHome: chosenResult.codexHome},
+		PrimaryUsedPercent:   primaryUsedPercent,
+		SecondaryUsedPercent: secondaryUsedPercent,
 	}, true
 }
 
