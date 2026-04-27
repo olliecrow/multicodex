@@ -188,6 +188,7 @@ func (f *Fetcher) fetchMultiAccount(ctx context.Context) (*Summary, error) {
 		out.AccountEmail = activeSuccess.AccountEmail
 		out.AccountID = activeSuccess.AccountID
 		out.UserID = activeSuccess.UserID
+		out.RateLimitWindows = cloneRateLimitWindows(activeSuccess.RateLimitWindows)
 		out.WindowDataAvailable = true
 		out.PrimaryWindow = activeSuccess.PrimaryWindow
 		out.SecondaryWindow = activeSuccess.SecondaryWindow
@@ -657,6 +658,7 @@ func (f *Fetcher) fetchAccountResult(ctx context.Context, account accountFetcher
 		result.account.UserID = snapshot.UserID
 		result.account.PrimaryWindow = snapshot.PrimaryWindow
 		result.account.SecondaryWindow = snapshot.SecondaryWindow
+		result.account.RateLimitWindows = cloneRateLimitWindows(snapshot.RateLimitWindows)
 		result.account.AdditionalLimitCount = snapshot.AdditionalLimitCount
 		result.account.Warnings = append(result.account.Warnings, snapshot.Warnings...)
 		ts := snapshot.FetchedAt

@@ -258,44 +258,61 @@ func (m Model) renderBody() string {
 	}
 
 	contentWidth := max(20, m.width-4)
-	fiveHourTitle := "five-hour window"
-	weeklyTitle := "weekly window"
-	if accountName := summaryAccountDisplayName(m.summary); accountName != "" {
-		fiveHourTitle += " [" + accountName + "]"
-		weeklyTitle += " [" + accountName + "]"
-	} else if !m.summary.WindowDataAvailable {
-		fiveHourTitle += " [unavailable]"
-		weeklyTitle += " [unavailable]"
-	}
-	if m.showingStaleWindows {
-		fiveHourTitle += " [stale]"
-		weeklyTitle += " [stale]"
-	}
-
 	accountRows := m.accountWindowRows()
 	windowRows := make([]string, 0, max(1, len(accountRows)))
 	if len(accountRows) == 0 {
+		summaryRow := accountWindowRowForRateLimitBuckets(
+			summaryAccountDisplayName(m.summary),
+			m.summary.RateLimitWindows,
+			m.summary.PrimaryWindow,
+			m.summary.SecondaryWindow,
+			summaryWindowAvailable(m.summary.WindowDataAvailable, m.summary.PrimaryWindow),
+			summaryWindowAvailable(m.summary.WindowDataAvailable, m.summary.SecondaryWindow),
+		)
+		summaryTitle := windowTitle("five-hour window", "unavailable", summaryRow.name, "", m.showingStaleWindows)
+		summaryTitleWeekly := windowTitle("weekly window", "unavailable", summaryRow.name, "", m.showingStaleWindows)
+
 		windowRows = append(windowRows, m.renderWindowRow(
 			contentWidth,
-			windowPanelSpec{title: fiveHourTitle, window: m.summary.PrimaryWindow, available: summaryWindowAvailable(m.summary.WindowDataAvailable, m.summary.PrimaryWindow)},
-			windowPanelSpec{title: weeklyTitle, window: m.summary.SecondaryWindow, available: summaryWindowAvailable(m.summary.WindowDataAvailable, m.summary.SecondaryWindow)},
+			windowPanelSpec{
+				title:          summaryTitle,
+				window:         summaryRow.primaryWindow,
+				available:      summaryRow.primaryAvailable,
+				sparkWindow:    summaryRow.sparkPrimaryWindow,
+				sparkAvailable: summaryRow.sparkPrimaryAvailable,
+				showSparkUsage: summaryRow.hasSparkWindow,
+			},
+			windowPanelSpec{
+				title:          summaryTitleWeekly,
+				window:         summaryRow.secondaryWindow,
+				available:      summaryRow.secondaryAvailable,
+				sparkWindow:    summaryRow.sparkSecondaryWindow,
+				sparkAvailable: summaryRow.sparkSecondaryAvailable,
+				showSparkUsage: summaryRow.hasSparkWindow,
+			},
 		))
 	}
 	for _, row := range accountRows {
-		fiveHourTitle := "five-hour window"
-		weeklyTitle := "weekly window"
-		if row.name != "" {
-			fiveHourTitle += " [" + row.name + "]"
-			weeklyTitle += " [" + row.name + "]"
-		}
-		if m.showingStaleWindows {
-			fiveHourTitle += " [stale]"
-			weeklyTitle += " [stale]"
-		}
+		fiveHourTitle := windowTitle("five-hour window", "unavailable", row.name, "", m.showingStaleWindows)
+		weeklyTitle := windowTitle("weekly window", "unavailable", row.name, "", m.showingStaleWindows)
 		windowRows = append(windowRows, m.renderWindowRow(
 			contentWidth,
-			windowPanelSpec{title: fiveHourTitle, window: row.primaryWindow, available: row.primaryAvailable},
-			windowPanelSpec{title: weeklyTitle, window: row.secondaryWindow, available: row.secondaryAvailable},
+			windowPanelSpec{
+				title:          fiveHourTitle,
+				window:         row.primaryWindow,
+				available:      row.primaryAvailable,
+				sparkWindow:    row.sparkPrimaryWindow,
+				sparkAvailable: row.sparkPrimaryAvailable,
+				showSparkUsage: row.hasSparkWindow,
+			},
+			windowPanelSpec{
+				title:          weeklyTitle,
+				window:         row.secondaryWindow,
+				available:      row.secondaryAvailable,
+				sparkWindow:    row.sparkSecondaryWindow,
+				sparkAvailable: row.sparkSecondaryAvailable,
+				showSparkUsage: row.hasSparkWindow,
+			},
 		))
 	}
 	panelVerticalOverhead := verticalOverhead(m.styles.panel)
@@ -308,9 +325,6 @@ func (m Model) renderBody() string {
 	statusRows := statusRowsForLayout(m.height, windowsHeight, panelVerticalOverhead)
 	visibleStatusRows := min(4, statusRows)
 
-	metaLines = append(metaLines, m.renderAccountsLine(maxMetaWidth))
-	metaLines = append(metaLines, m.renderObservedHeaderLine("five-hour token estimate", m.summary.ObservedWindow5h, m.summary.ObservedTokens5h))
-	metaLines = append(metaLines, m.renderObservedBreakdownLinesFixed(m.summary.ObservedWindow5h, m.summary.ObservedTokens5h)...)
 	metaLines = append(metaLines, m.renderObservedHeaderLine("weekly token estimate", m.summary.ObservedWindowWeekly, m.summary.ObservedTokensWeekly))
 	metaLines = append(metaLines, m.renderObservedBreakdownLinesFixed(m.summary.ObservedWindowWeekly, m.summary.ObservedTokensWeekly)...)
 	metaLines = append(metaLines, m.renderStatusLinesFixed(visibleStatusRows)...)
@@ -334,34 +348,49 @@ func (m Model) renderWindowRow(contentWidth int, left, right windowPanelSpec) st
 		spacer := strings.Repeat(" ", spacerWidth)
 		leftPanelWidth = panelWidth
 		rightPanelWidth = panelWidth
-		leftPanel := m.renderWindowPanel(left.title, left.window, leftPanelWidth, left.available)
-		rightPanel := m.renderWindowPanel(right.title, right.window, rightPanelWidth, right.available)
+		leftPanel := m.renderWindowPanel(left.title, left.window, leftPanelWidth, left.available, left.sparkWindow, left.sparkAvailable, left.showSparkUsage)
+		rightPanel := m.renderWindowPanel(right.title, right.window, rightPanelWidth, right.available, right.sparkWindow, right.sparkAvailable, right.showSparkUsage)
 		return lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, spacer, rightPanel)
 	}
-	leftPanel := m.renderWindowPanel(left.title, left.window, leftPanelWidth, left.available)
-	rightPanel := m.renderWindowPanel(right.title, right.window, rightPanelWidth, right.available)
+	leftPanel := m.renderWindowPanel(left.title, left.window, leftPanelWidth, left.available, left.sparkWindow, left.sparkAvailable, left.showSparkUsage)
+	rightPanel := m.renderWindowPanel(right.title, right.window, rightPanelWidth, right.available, right.sparkWindow, right.sparkAvailable, right.showSparkUsage)
 	return lipgloss.JoinVertical(lipgloss.Left, leftPanel, "", rightPanel)
 }
 
-func (m Model) renderWindowPanel(title string, win usage.WindowSummary, maxWidth int, available bool) string {
+func (m Model) renderWindowPanel(title string, win usage.WindowSummary, maxWidth int, available bool, sparkWindow usage.WindowSummary, sparkAvailable bool, showSparkUsage bool) string {
+	width := max(4, maxWidth)
+	lines := []string{
+		m.styles.accent.Render(title),
+	}
 	if !available {
-		lines := []string{
-			m.styles.accent.Render(title),
-			m.styles.label.Render("used: ") + m.styles.bad.Render("unavailable"),
-			m.renderResetLine("unavailable", "unavailable"),
-		}
+		lines = append(lines, m.styles.label.Render("used: ")+m.styles.bad.Render("unavailable"))
+		lines = append(lines, m.renderResetLine("unavailable"))
 		for i := range lines {
-			lines[i] = ansi.Truncate(lines[i], max(4, maxWidth), "...")
+			lines[i] = ansi.Truncate(lines[i], width, "...")
 		}
 		return m.styles.panel.Width(max(20, maxWidth)).Render(strings.Join(lines, "\n"))
 	}
 
 	statusStyle := percentStyle(win.UsedPercent, m.styles)
 
-	reset := "unknown"
-	if win.ResetsAt != nil {
-		reset = m.formatDisplayTimestamp(*win.ResetsAt)
+	lines = append(lines, m.styles.label.Render("used: ")+statusStyle.Render(fmt.Sprintf("%d%%", win.UsedPercent))+m.renderResetLine(renderWindowResetRemaining(win)))
+	if showSparkUsage {
+		if sparkAvailable {
+			sparkRemaining := renderWindowResetRemaining(sparkWindow)
+			sparkStyle := percentStyle(sparkWindow.UsedPercent, m.styles)
+			lines = append(lines, m.styles.label.Render("used-spark: ")+sparkStyle.Render(fmt.Sprintf("%d%%", sparkWindow.UsedPercent))+m.renderResetLine(sparkRemaining))
+		} else {
+			lines = append(lines, m.styles.label.Render("used-spark: ")+m.styles.bad.Render("unavailable"))
+			lines = append(lines, m.renderResetLine("unavailable"))
+		}
 	}
+	for i := range lines {
+		lines[i] = ansi.Truncate(lines[i], width, "...")
+	}
+	return m.styles.panel.Width(max(20, maxWidth)).Render(strings.Join(lines, "\n"))
+}
+
+func renderWindowResetRemaining(win usage.WindowSummary) string {
 	remaining := "unknown"
 	if win.SecondsUntilReset != nil {
 		if *win.SecondsUntilReset <= 0 {
@@ -370,33 +399,14 @@ func (m Model) renderWindowPanel(title string, win usage.WindowSummary, maxWidth
 			remaining = humanDuration(time.Duration(*win.SecondsUntilReset) * time.Second)
 		}
 	}
-
-	lines := []string{
-		m.styles.accent.Render(title),
-		m.styles.label.Render("used: ") + statusStyle.Render(fmt.Sprintf("%d%%", win.UsedPercent)),
-		m.renderResetLine(reset, remaining),
-	}
-	for i := range lines {
-		lines[i] = ansi.Truncate(lines[i], max(4, maxWidth), "...")
-	}
-	return m.styles.panel.Width(max(20, maxWidth)).Render(strings.Join(lines, "\n"))
+	return remaining
 }
 
-func (m Model) renderResetLine(reset, remaining string) string {
-	return m.styles.label.Render("resets at: ") +
-		m.styles.value.Render(reset) +
-		m.styles.dim.Render(" ["+remaining+"]")
-}
-
-func (m Model) renderAccountsLine(maxWidth int) string {
-	detected := m.summary.TotalAccounts
-	if detected <= 0 {
-		detected = len(m.summary.Accounts)
-	}
-	identities := summarizeAccountIdentities(m.summary.Accounts)
-	value := fmt.Sprintf("%d detected [%s]", detected, strings.Join(identities, ", "))
-	line := m.styles.label.Render("accounts: ") + m.styles.value.Render(value)
-	return ansi.Truncate(line, maxWidth, "...")
+func (m Model) renderResetLine(remaining string) string {
+	return m.styles.label.Render(" [") +
+		m.styles.dim.Render("resets in ") +
+		m.styles.value.Render(remaining) +
+		m.styles.label.Render("]")
 }
 
 func (m Model) renderObservedHeaderLine(windowLabel string, win *usage.ObservedTokenBreakdown, fallbackTotal *int64) string {
@@ -434,44 +444,6 @@ func (m Model) observedHeaderState(win *usage.ObservedTokenBreakdown, fallbackTo
 	return state, style
 }
 
-func summarizeAccountIdentities(accounts []usage.AccountSummary) []string {
-	if len(accounts) == 0 {
-		return []string{"none"}
-	}
-	out := make([]string, 0, len(accounts))
-	seen := map[string]struct{}{}
-	for _, account := range accounts {
-		identityKey := accountIdentityKey(account.AccountEmail, account.AccountID, account.UserID)
-		if identityKey == "" {
-			if label := strings.TrimSpace(account.Label); label != "" {
-				identityKey = "label:" + strings.ToLower(label)
-			} else {
-				identityKey = "unidentified"
-			}
-		}
-		if _, ok := seen[identityKey]; ok {
-			continue
-		}
-		seen[identityKey] = struct{}{}
-
-		identity := strings.TrimSpace(account.Label)
-		if identity == "" {
-			if accountID := strings.TrimSpace(account.AccountID); accountID != "" {
-				identity = "account_id:" + accountID
-			} else if userID := strings.TrimSpace(account.UserID); userID != "" {
-				identity = "user_id:" + userID
-			} else {
-				identity = "unidentified"
-			}
-		}
-		out = append(out, identity)
-	}
-	if len(out) == 0 {
-		return []string{"none"}
-	}
-	return out
-}
-
 func summaryAccountDisplayName(summary *usage.Summary) string {
 	if summary == nil {
 		return ""
@@ -501,43 +473,68 @@ func displayNameFromParts(label, accountID, userID string) string {
 }
 
 type accountWindowRow struct {
-	name               string
-	primaryWindow      usage.WindowSummary
-	secondaryWindow    usage.WindowSummary
-	primaryAvailable   bool
-	secondaryAvailable bool
-	weeklyResetSeconds int64
-	weeklyResetKnown   bool
+	name                    string
+	primaryWindow           usage.WindowSummary
+	secondaryWindow         usage.WindowSummary
+	primaryAvailable        bool
+	secondaryAvailable      bool
+	sparkPrimaryWindow      usage.WindowSummary
+	sparkSecondaryWindow    usage.WindowSummary
+	hasSparkWindow          bool
+	sparkPrimaryAvailable   bool
+	sparkSecondaryAvailable bool
+	weeklyResetSeconds      int64
+	weeklyResetKnown        bool
 }
 
 func (m Model) accountWindowRows() []accountWindowRow {
-	if m.summary == nil || len(m.summary.Accounts) <= 1 {
+	if m.summary == nil {
 		return nil
 	}
+	if len(m.summary.Accounts) == 0 {
+		return []accountWindowRow{
+			accountWindowRowForRateLimitBuckets(
+				summaryAccountDisplayName(m.summary),
+				m.summary.RateLimitWindows,
+				m.summary.PrimaryWindow,
+				m.summary.SecondaryWindow,
+				summaryWindowAvailable(m.summary.WindowDataAvailable, m.summary.PrimaryWindow),
+				summaryWindowAvailable(m.summary.WindowDataAvailable, m.summary.SecondaryWindow),
+			),
+		}
+	}
+
 	activeIndex := activeAccountIndex(m.summary)
 	out := make([]accountWindowRow, 0, len(m.summary.Accounts))
 	for i, account := range m.summary.Accounts {
 		if i == activeIndex {
-			row := accountWindowRow{
-				name:               accountDisplayName(account),
-				primaryWindow:      m.summary.PrimaryWindow,
-				secondaryWindow:    m.summary.SecondaryWindow,
-				primaryAvailable:   summaryWindowAvailable(m.summary.WindowDataAvailable, m.summary.PrimaryWindow),
-				secondaryAvailable: summaryWindowAvailable(m.summary.WindowDataAvailable, m.summary.SecondaryWindow),
+			name := accountDisplayName(account)
+			if strings.TrimSpace(name) == "" {
+				name = summaryAccountDisplayName(m.summary)
 			}
-			row.weeklyResetSeconds, row.weeklyResetKnown = m.windowResetSeconds(row.secondaryWindow)
-			out = append(out, row)
+			windowRows := accountWindowRowForRateLimitBuckets(
+				name,
+				m.summary.RateLimitWindows,
+				m.summary.PrimaryWindow,
+				m.summary.SecondaryWindow,
+				summaryWindowAvailable(m.summary.WindowDataAvailable, m.summary.PrimaryWindow),
+				summaryWindowAvailable(m.summary.WindowDataAvailable, m.summary.SecondaryWindow),
+			)
+			out = append(out, windowRows)
 			continue
 		}
-		row := accountWindowRow{
-			name:               accountDisplayName(account),
-			primaryWindow:      account.PrimaryWindow,
-			secondaryWindow:    account.SecondaryWindow,
-			primaryAvailable:   accountWindowAvailable(account, account.PrimaryWindow),
-			secondaryAvailable: accountWindowAvailable(account, account.SecondaryWindow),
-		}
-		row.weeklyResetSeconds, row.weeklyResetKnown = m.windowResetSeconds(row.secondaryWindow)
-		out = append(out, row)
+		windowRows := accountWindowRowForRateLimitBuckets(
+			accountDisplayName(account),
+			account.RateLimitWindows,
+			account.PrimaryWindow,
+			account.SecondaryWindow,
+			accountWindowAvailable(account, account.PrimaryWindow),
+			accountWindowAvailable(account, account.SecondaryWindow),
+		)
+		out = append(out, windowRows)
+	}
+	for i := range out {
+		out[i].weeklyResetSeconds, out[i].weeklyResetKnown = m.windowResetSeconds(out[i].secondaryWindow)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].weeklyResetKnown != out[j].weeklyResetKnown {
@@ -546,9 +543,84 @@ func (m Model) accountWindowRows() []accountWindowRow {
 		if out[i].weeklyResetSeconds != out[j].weeklyResetSeconds {
 			return out[i].weeklyResetSeconds < out[j].weeklyResetSeconds
 		}
-		return strings.ToLower(out[i].name) < strings.ToLower(out[j].name)
+		if strings.ToLower(out[i].name) != strings.ToLower(out[j].name) {
+			return strings.ToLower(out[i].name) < strings.ToLower(out[j].name)
+		}
+		return false
 	})
 	return out
+}
+
+func windowTitle(baseTitle, unavailableFallback, accountName, windowLabel string, stale bool) string {
+	title := baseTitle
+	if strings.TrimSpace(accountName) != "" {
+		title += " [" + accountName + "]"
+	} else if unavailableFallback != "" {
+		title += " [" + unavailableFallback + "]"
+	}
+	if label := strings.TrimSpace(windowLabel); label != "" {
+		title += " [" + label + "]"
+	}
+	if stale {
+		title += " [stale]"
+	}
+	return title
+}
+
+func accountWindowRowForRateLimitBuckets(name string, windows map[string]usage.RateLimitWindow, fallbackPrimary usage.WindowSummary, fallbackSecondary usage.WindowSummary, primaryAvailable bool, secondaryAvailable bool) accountWindowRow {
+	row := accountWindowRow{
+		name:               name,
+		primaryWindow:      fallbackPrimary,
+		secondaryWindow:    fallbackSecondary,
+		primaryAvailable:   primaryAvailable && windowSummaryAvailable(fallbackPrimary),
+		secondaryAvailable: secondaryAvailable && windowSummaryAvailable(fallbackSecondary),
+	}
+
+	if _, limit, ok := selectRateLimitWindow(windows, isDefaultRateLimitID); ok {
+		row.primaryWindow = limit.PrimaryWindow
+		row.secondaryWindow = limit.SecondaryWindow
+		row.primaryAvailable = primaryAvailable && windowSummaryAvailable(limit.PrimaryWindow)
+		row.secondaryAvailable = secondaryAvailable && windowSummaryAvailable(limit.SecondaryWindow)
+	}
+
+	if _, sparkLimit, ok := selectRateLimitWindow(windows, isSparkLimitBucket); ok {
+		row.hasSparkWindow = true
+		row.sparkPrimaryWindow = sparkLimit.PrimaryWindow
+		row.sparkSecondaryWindow = sparkLimit.SecondaryWindow
+		row.sparkPrimaryAvailable = primaryAvailable && windowSummaryAvailable(sparkLimit.PrimaryWindow)
+		row.sparkSecondaryAvailable = secondaryAvailable && windowSummaryAvailable(sparkLimit.SecondaryWindow)
+	}
+	return row
+}
+
+func selectRateLimitWindow(windows map[string]usage.RateLimitWindow, match func(string, usage.RateLimitWindow) bool) (string, usage.RateLimitWindow, bool) {
+	if len(windows) == 0 {
+		return "", usage.RateLimitWindow{}, false
+	}
+	ids := make([]string, 0, len(windows))
+	for id := range windows {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		window := windows[id]
+		if match(id, window) {
+			return id, window, true
+		}
+	}
+	return "", usage.RateLimitWindow{}, false
+}
+
+func isDefaultRateLimitID(limitID string, _ usage.RateLimitWindow) bool {
+	return strings.EqualFold(strings.TrimSpace(limitID), "codex")
+}
+
+func isSparkLimitBucket(limitID string, window usage.RateLimitWindow) bool {
+	normalizedID := strings.ToLower(strings.TrimSpace(limitID))
+	if strings.Contains(normalizedID, "spark") || strings.Contains(normalizedID, "bengalfox") {
+		return true
+	}
+	return strings.Contains(strings.ToLower(strings.TrimSpace(window.LimitName)), "spark")
 }
 
 func (m Model) windowResetSeconds(win usage.WindowSummary) (int64, bool) {
@@ -671,9 +743,12 @@ type statusLine struct {
 }
 
 type windowPanelSpec struct {
-	title     string
-	window    usage.WindowSummary
-	available bool
+	title          string
+	window         usage.WindowSummary
+	available      bool
+	sparkWindow    usage.WindowSummary
+	sparkAvailable bool
+	showSparkUsage bool
 }
 
 func (m Model) renderStatusLinesFixed(rows int) []string {
@@ -853,6 +928,7 @@ func mergeStaleWindowData(current, cached *usage.Summary) *usage.Summary {
 	out.WindowAccountLabel = cached.WindowAccountLabel
 	out.AdditionalLimitCount = cached.AdditionalLimitCount
 	out.Accounts = cloneAccountSummaries(cached.Accounts)
+	out.RateLimitWindows = cloneRateLimitWindows(cached.RateLimitWindows)
 	out.FetchedAt = cached.FetchedAt
 	if out.TotalAccounts == 0 {
 		out.TotalAccounts = cached.TotalAccounts
@@ -866,6 +942,7 @@ func cloneSummary(summary *usage.Summary) *usage.Summary {
 	}
 	out := *summary
 	out.Accounts = cloneAccountSummaries(summary.Accounts)
+	out.RateLimitWindows = cloneRateLimitWindows(summary.RateLimitWindows)
 	out.Warnings = append([]string(nil), summary.Warnings...)
 	if summary.ObservedWindow5h != nil {
 		clone := *summary.ObservedWindow5h
@@ -910,8 +987,40 @@ func cloneAccountSummaries(in []usage.AccountSummary) []usage.AccountSummary {
 			clone := *in[i].ObservedTokensWeekly
 			out[i].ObservedTokensWeekly = &clone
 		}
+		out[i].RateLimitWindows = cloneRateLimitWindows(in[i].RateLimitWindows)
 	}
 	return out
+}
+
+func cloneRateLimitWindows(in map[string]usage.RateLimitWindow) map[string]usage.RateLimitWindow {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]usage.RateLimitWindow, len(in))
+	for id, window := range in {
+		out[id] = cloneRateLimitWindow(window)
+	}
+	return out
+}
+
+func cloneRateLimitWindow(window usage.RateLimitWindow) usage.RateLimitWindow {
+	cloned := window
+	cloned.PrimaryWindow = cloneWindowSummary(window.PrimaryWindow)
+	cloned.SecondaryWindow = cloneWindowSummary(window.SecondaryWindow)
+	return cloned
+}
+
+func cloneWindowSummary(win usage.WindowSummary) usage.WindowSummary {
+	cloned := win
+	if win.ResetsAt != nil {
+		resetsAt := *win.ResetsAt
+		cloned.ResetsAt = &resetsAt
+	}
+	if win.SecondsUntilReset != nil {
+		secondsUntilReset := *win.SecondsUntilReset
+		cloned.SecondsUntilReset = &secondsUntilReset
+	}
+	return cloned
 }
 
 func staleWindowAge(now time.Time, summary *usage.Summary) string {
@@ -935,8 +1044,8 @@ func statusRowsForLayout(viewportHeight, windowsBlockHeight, panelVerticalOverhe
 }
 
 func observedMetaBaseLineCount() int {
-	// accounts line + two observed headers + two fixed 5-line breakdown blocks.
-	return 1 + 1 + 5 + 1 + 5
+	// Weekly observed header + fixed 5-line breakdown block.
+	return 1 + 5
 }
 
 func percentStyle(percent int, styles styles) lipgloss.Style {
@@ -1104,18 +1213,22 @@ func humanDuration(d time.Duration) string {
 	if d < 0 {
 		d = 0
 	}
-	d = d.Round(time.Second)
+	d = d.Truncate(time.Minute)
 	if d < time.Second {
-		return "<1s"
+		return "<1m"
 	}
 	if d < time.Minute {
-		return d.String()
+		return "<1m"
 	}
 	if d < time.Hour {
-		return fmt.Sprintf("%dm%ds", int(d.Minutes()), int(d.Seconds())%60)
+		return fmt.Sprintf("%dm", int(d.Minutes()))
 	}
 	if d < 24*time.Hour {
-		return fmt.Sprintf("%dh%dm", int(d.Hours()), int(d.Minutes())%60)
+		hours := int(d.Hours())
+		if hours == 0 {
+			return fmt.Sprintf("%dm", int(d.Minutes()))
+		}
+		return fmt.Sprintf("%dh%dm", hours, int(d.Minutes())%60)
 	}
 	return fmt.Sprintf("%dd%dh", int(d.Hours())/24, int(d.Hours())%24)
 }

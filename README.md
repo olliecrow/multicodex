@@ -168,6 +168,7 @@ multicodex exec -s read-only "Summarize the README in 3 bullets."
 ```
 
 `multicodex exec` first keeps profiles whose five-hour window is below 40% used and whose weekly window is not known to be exhausted. From those eligible profiles, it picks the one whose weekly reset is soonest. If eligible profiles do not expose a weekly reset time, it picks randomly among those eligible profiles. If no profile is eligible, it picks a random accessible profile for that call. If usage data is unavailable for every profile, it falls back to a random configured profile.
+For explicit Spark models (`--model`/`-m` containing `spark`), `multicodex exec` prefers Spark buckets when present and falls back to default `codex` windows per account when Spark data is not available.
 For help requests such as `multicodex exec --help`, it delegates directly to `codex exec` and does not require any profiles to be configured.
 
 Switch system default account used by default Codex context.
@@ -238,6 +239,7 @@ For periodic refresh, add this command to your cron schedule, for example:
 Monitor live subscription usage across your configured and discovered accounts.
 The TUI identifies accounts by configured account label and renders user-facing timestamps in local time without seconds.
 It orders account rows by weekly reset time, from first to reset at the top to last at the bottom.
+Each window card renders usage as compact lines such as `used: 12% [resets in 3h4m]`; when Spark data is present it adds `used-spark: 8% [resets in 3h4m]` in the same card instead of adding another card.
 It defaults both the refresh interval and fetch timeout to 60 seconds.
 
 ```bash
@@ -269,7 +271,7 @@ When a refresh loses official window data for every account at once, the TUI kee
 When a profile login has expired, the monitor prefers a short diagnostics warning that tells you to sign in again instead of only showing a long raw fetch error.
 Some accounts only expose one official usage window. When that happens, the monitor keeps the account visible, shows the window that is present, and marks the missing window as unavailable instead of treating the whole account as failed.
 
-Observed token totals shown by the monitor are local estimates derived from session logs. Treat them as advisory and separate from the official five-hour and weekly windows. The TUI labels them as token estimates and can show partial results when some account-home estimates are unavailable.
+Observed token totals shown by the monitor are local estimates derived from session logs. Treat them as advisory and separate from the official five-hour and weekly windows. The TUI shows the weekly local estimate, labels it as a token estimate, and can show partial results when some account-home estimates are unavailable.
 
 Example manual monitor account file:
 

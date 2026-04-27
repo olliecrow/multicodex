@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -99,11 +100,18 @@ func (s *OAuthSource) Fetch(ctx context.Context) (*Summary, error) {
 			ResetsAt:           toInt64Ptr(payload.RateLimit.SecondaryWindow.ResetAt),
 		},
 	}
+	rateLimitsByLimitID := map[string]rateLimitSnapshotRaw{
+		snapshot.LimitID: snapshot,
+	}
+	for id, window := range buildRateLimitWindowsFromOAuthAdditionalLimits(payload.AdditionalRateLimits) {
+		rateLimitsByLimitID[id] = window
+	}
 
 	return normalizeSummary(
 		s.Name(),
 		snapshot,
-		len(payload.AdditionalRateLimits),
+		rateLimitsByLimitID,
+		len(rateLimitsByLimitID)-1,
 		&identityInfo{
 			Email:     strings.TrimSpace(payload.Email),
 			AccountID: strings.TrimSpace(payload.AccountID),
@@ -216,4 +224,40 @@ func toInt64Ptr(v int) *int64 {
 	}
 	out := int64(v)
 	return &out
+}
+
+func buildRateLimitWindowsFromOAuthAdditionalLimits(additionalLimits []oauthAdditionalRateLimit) map[string]rateLimitSnapshotRaw {
+	if len(additionalLimits) == 0 {
+		return nil
+	}
+
+	windowByLimit := map[string]rateLimitSnapshotRaw{}
+	for i, additional := range additionalLimits {
+		if additional.RateLimit == nil || additional.RateLimit.PrimaryWindow == nil || additional.RateLimit.SecondaryWindow == nil {
+			continue
+		}
+
+		limitName := strings.TrimSpace(additional.LimitName)
+		if limitName == "" {
+			limitName = "additional-" + strconv.Itoa(i)
+		}
+		windowByLimit[limitName] = rateLimitSnapshotRaw{
+			LimitID:   limitName,
+			LimitName: &additional.LimitName,
+			Primary: &rateLimitWindowRaw{
+				UsedPercent:        additional.RateLimit.PrimaryWindow.UsedPercent,
+				WindowDurationMins: toMins(additional.RateLimit.PrimaryWindow.LimitWindowSeconds),
+				ResetsAt:           toInt64Ptr(additional.RateLimit.PrimaryWindow.ResetAt),
+			},
+			Secondary: &rateLimitWindowRaw{
+				UsedPercent:        additional.RateLimit.SecondaryWindow.UsedPercent,
+				WindowDurationMins: toMins(additional.RateLimit.SecondaryWindow.LimitWindowSeconds),
+				ResetsAt:           toInt64Ptr(additional.RateLimit.SecondaryWindow.ResetAt),
+			},
+		}
+	}
+	if len(windowByLimit) == 0 {
+		return nil
+	}
+	return windowByLimit
 }

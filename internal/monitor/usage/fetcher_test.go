@@ -672,6 +672,231 @@ func TestFetcherUsesActiveHomeIdentityForCurrentAccount(t *testing.T) {
 	}
 }
 
+func TestFetcherClonesRateLimitWindowsForActiveAndAccountRows(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("CODEX_HOME", "/a")
+
+	baseWindows := map[string]RateLimitWindow{
+		"codex": {
+			LimitID: "codex",
+			PrimaryWindow: WindowSummary{
+				UsedPercent: 10,
+			},
+			SecondaryWindow: WindowSummary{
+				UsedPercent: 20,
+			},
+		},
+		"codex_bengalfox": {
+			LimitID:   "codex_bengalfox",
+			LimitName: "Spark",
+			PrimaryWindow: WindowSummary{
+				UsedPercent: 40,
+			},
+			SecondaryWindow: WindowSummary{
+				UsedPercent: 30,
+			},
+		},
+	}
+
+	outSummary := &Summary{
+		Source:               "app-server",
+		PlanType:             "pro",
+		AccountEmail:         "a@example.com",
+		WindowDataAvailable:  true,
+		PrimaryWindow:        WindowSummary{UsedPercent: 10},
+		SecondaryWindow:      WindowSummary{UsedPercent: 20},
+		AdditionalLimitCount: 1,
+		RateLimitWindows:     baseWindows,
+		ObservedTokensStatus: observedTokensStatusUnavailable,
+		WindowAccountLabel:   "a",
+		FetchedAt:            time.Now().UTC(),
+	}
+
+	f := &Fetcher{
+		accounts: []accountFetcher{
+			{
+				account:  MonitorAccount{Label: "a", CodexHome: "/a"},
+				primary:  &fakeSource{name: "primary-a", out: outSummary},
+				fallback: &fakeSource{name: "fallback-a"},
+			},
+		},
+	}
+
+	out, err := f.Fetch(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.RateLimitWindows == nil {
+		t.Fatalf("expected top-level rate-limit windows")
+	}
+	if got := len(out.RateLimitWindows); got != 2 {
+		t.Fatalf("expected 2 rate-limit windows, got %d", got)
+	}
+	if out.Accounts[0].RateLimitWindows == nil {
+		t.Fatalf("expected account row rate-limit windows")
+	}
+	if got := len(out.Accounts[0].RateLimitWindows); got != 2 {
+		t.Fatalf("expected 2 account rate-limit windows, got %d", got)
+	}
+	if out.RateLimitWindows["codex_bengalfox"].PrimaryWindow.UsedPercent != 40 {
+		t.Fatalf("expected top-level codex_bengalfox usage preserved")
+	}
+	if out.Accounts[0].RateLimitWindows["codex_bengalfox"].PrimaryWindow.UsedPercent != 40 {
+		t.Fatalf("expected account row codex_bengalfox usage preserved")
+	}
+	if out.AdditionalLimitCount != 1 {
+		t.Fatalf("expected additional limit count to remain 1, got %d", out.AdditionalLimitCount)
+	}
+
+	mutated := baseWindows["codex_bengalfox"]
+	mutated.PrimaryWindow.UsedPercent = 99
+	baseWindows["codex_bengalfox"] = mutated
+	mutatedSecondary := outSummary.RateLimitWindows["codex_bengalfox"]
+	mutatedSecondary.PrimaryWindow.UsedPercent = 88
+	outSummary.RateLimitWindows["codex_bengalfox"] = mutatedSecondary
+
+	if out.RateLimitWindows["codex_bengalfox"].PrimaryWindow.UsedPercent != 40 {
+		t.Fatalf("expected top-level snapshot clone to be isolated from source mutation")
+	}
+	if out.Accounts[0].RateLimitWindows["codex_bengalfox"].PrimaryWindow.UsedPercent != 40 {
+		t.Fatalf("expected account row snapshot clone to be isolated from source mutation")
+	}
+}
+
+func TestFetcherKeepsPerLimitWindowsDistinctForActiveAndNonActiveAccounts(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("CODEX_HOME", "/a")
+
+	activeSummary := &Summary{
+		Source:               "app-server",
+		PlanType:             "pro",
+		AccountEmail:         "a@example.com",
+		WindowDataAvailable:  true,
+		PrimaryWindow:        WindowSummary{UsedPercent: 10},
+		SecondaryWindow:      WindowSummary{UsedPercent: 20},
+		AdditionalLimitCount: 1,
+		RateLimitWindows: map[string]RateLimitWindow{
+			"codex": {
+				LimitID:       "codex",
+				PrimaryWindow: WindowSummary{UsedPercent: 10},
+				SecondaryWindow: WindowSummary{
+					UsedPercent: 20,
+				},
+			},
+			"codex_bengalfox": {
+				LimitID:   "codex_bengalfox",
+				LimitName: "spark",
+				PrimaryWindow: WindowSummary{
+					UsedPercent: 30,
+				},
+				SecondaryWindow: WindowSummary{
+					UsedPercent: 40,
+				},
+			},
+		},
+		FetchedAt: time.Now().UTC(),
+	}
+	inactiveSummary := &Summary{
+		Source:               "app-server",
+		PlanType:             "pro",
+		AccountEmail:         "b@example.com",
+		WindowDataAvailable:  true,
+		PrimaryWindow:        WindowSummary{UsedPercent: 60},
+		SecondaryWindow:      WindowSummary{UsedPercent: 70},
+		AdditionalLimitCount: 1,
+		RateLimitWindows: map[string]RateLimitWindow{
+			"codex": {
+				LimitID:       "codex",
+				PrimaryWindow: WindowSummary{UsedPercent: 60},
+				SecondaryWindow: WindowSummary{
+					UsedPercent: 70,
+				},
+			},
+			"codex_bengalfox": {
+				LimitID:   "codex_bengalfox",
+				LimitName: "spark",
+				PrimaryWindow: WindowSummary{
+					UsedPercent: 80,
+				},
+				SecondaryWindow: WindowSummary{
+					UsedPercent: 90,
+				},
+			},
+		},
+		FetchedAt: time.Now().UTC(),
+	}
+
+	f := &Fetcher{
+		accounts: []accountFetcher{
+			{
+				account:  MonitorAccount{Label: "a", CodexHome: "/a"},
+				primary:  &fakeSource{name: "primary-a", out: activeSummary},
+				fallback: &fakeSource{name: "fallback-a"},
+			},
+			{
+				account:  MonitorAccount{Label: "b", CodexHome: "/b"},
+				primary:  &fakeSource{name: "primary-b", out: inactiveSummary},
+				fallback: &fakeSource{name: "fallback-b"},
+			},
+		},
+	}
+
+	out, err := f.Fetch(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.TotalAccounts != 2 || out.SuccessfulAccounts != 2 {
+		t.Fatalf("expected 2/2 accounts, got %d/%d", out.SuccessfulAccounts, out.TotalAccounts)
+	}
+	if out.RateLimitWindows["codex_bengalfox"].PrimaryWindow.UsedPercent != 30 {
+		t.Fatalf("expected top-level spark usage from active account")
+	}
+	if len(out.Accounts) < 2 {
+		t.Fatalf("expected at least 2 account rows")
+	}
+
+	var activeRow, inactiveRow AccountSummary
+	for _, account := range out.Accounts {
+		switch account.Label {
+		case "a":
+			activeRow = account
+		case "b":
+			inactiveRow = account
+		}
+	}
+	if activeRow.Label == "" || inactiveRow.Label == "" {
+		t.Fatalf("expected both account rows to be present")
+	}
+	if len(activeRow.RateLimitWindows) != 2 {
+		t.Fatalf("expected active account map to include both windows, got %d", len(activeRow.RateLimitWindows))
+	}
+	if activeRow.RateLimitWindows["codex_bengalfox"].PrimaryWindow.UsedPercent != 30 {
+		t.Fatalf("expected active account spark usage to stay account-specific")
+	}
+	if inactiveRow.RateLimitWindows["codex_bengalfox"].PrimaryWindow.UsedPercent != 80 {
+		t.Fatalf("expected inactive account spark usage to stay account-specific")
+	}
+
+	activeSparkWindow := activeSummary.RateLimitWindows["codex_bengalfox"]
+	activeSparkWindow.PrimaryWindow.UsedPercent = 99
+	activeSummary.RateLimitWindows["codex_bengalfox"] = activeSparkWindow
+	inactiveSparkWindow := inactiveSummary.RateLimitWindows["codex_bengalfox"]
+	inactiveSparkWindow.PrimaryWindow.UsedPercent = 88
+	inactiveSummary.RateLimitWindows["codex_bengalfox"] = inactiveSparkWindow
+
+	if out.RateLimitWindows["codex_bengalfox"].PrimaryWindow.UsedPercent != 30 {
+		t.Fatalf("expected top-level clone to ignore source mutation")
+	}
+	if activeRow.RateLimitWindows["codex_bengalfox"].PrimaryWindow.UsedPercent != 30 {
+		t.Fatalf("expected active account clone to ignore source mutation")
+	}
+	if inactiveRow.RateLimitWindows["codex_bengalfox"].PrimaryWindow.UsedPercent != 80 {
+		t.Fatalf("expected inactive account clone to ignore source mutation")
+	}
+}
+
 func TestFetcherMarksWindowUnavailableWhenActiveFetchFails(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)

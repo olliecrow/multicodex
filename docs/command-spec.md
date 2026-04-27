@@ -87,6 +87,9 @@
 - For help requests (`--help`, `-h`, or `help`), delegates directly to `codex exec` and does not require profiles to be configured.
 - Automatically selects among configured multicodex profiles.
 - Re-checks file-backed auth isolation before launching `codex exec`.
+- Parses model selection arguments (`--model`, `--model=`, and `-m`) for routing.
+- If the model contains `spark` (case-insensitive), each profile selects its Spark bucket when available.
+- If Spark is requested but a profile has no Spark bucket, that profile falls back to its default Codex windows for routing.
 - Treats profiles whose five-hour usage window is strictly below 40% as eligible to route work to.
 - Excludes profiles whose weekly window is known to be exhausted, so an account at 100% weekly usage is not selected while other usable profiles exist.
 - Among eligible profiles, picks the one whose weekly reset is soonest.
@@ -123,6 +126,8 @@
 - Defaults both the poll interval and the per-poll fetch timeout to 60 seconds.
 - Prefers account definitions from multicodex profile config and monitor-owned account overrides.
 - Always includes the default Codex home as a candidate account home before broader filesystem discovery.
+- Renders compact usage lines in each window card, for example `used: 12% [resets in 3h4m]`.
+- When Spark data is present for an account, the same panel also shows `used-spark: 8% [resets in 3h4m]` and keeps one row per account in the two-column layout.
 - Shows account labels instead of raw email addresses in the TUI when labels are available.
 - Orders TUI account rows by weekly reset time, from first to reset at the top to last at the bottom; accounts with unknown weekly reset times come last.
 - Keeps tracked timestamps in UTC internally while rendering user-facing TUI timestamps in local time without seconds.
@@ -130,7 +135,7 @@
 - Uses read-only filesystem auto-discovery under the home directory, scanning for `.codex*`, `.codex`, and `codex-home` paths up to depth 5 before filtering transient/cache locations and requiring usage signals.
 - When fallback is available, keeps most of a long fetch timeout for the primary source and reserves at most 10 seconds for fallback so slow refreshes are less likely to end as false `unavailable` window cards.
 - Treats observed-token totals as local estimates derived from session logs rather than official provider counters.
-- Labels observed-token sections as token estimates in the TUI and shows `partial` when some home estimates are missing.
+- Shows the weekly observed-token total as a token estimate in the TUI and shows `partial` when some home estimates are missing.
 - Remains read-only with respect to Codex account state.
 
 `multicodex monitor help`
