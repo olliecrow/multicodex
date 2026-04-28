@@ -175,6 +175,7 @@ func TestParseModelFromExecArgs(t *testing.T) {
 	}{
 		{name: "long-flag separate", args: []string{"--model", "gpt-5-codex-spark"}, want: "gpt-5-codex-spark"},
 		{name: "long-flag equals", args: []string{"--model=gpt-5-codex-spark"}, want: "gpt-5-codex-spark"},
+		{name: "short-flag equals", args: []string{"-m=gpt-5-codex-spark"}, want: "gpt-5-codex-spark"},
 		{name: "short flag", args: []string{"-m", "gpt-5-codex-spark"}, want: "gpt-5-codex-spark"},
 		{name: "missing", args: []string{"hello", "world"}, want: ""},
 		{name: "short not model", args: []string{"-m"}, want: ""},
@@ -295,6 +296,23 @@ func TestCmdExecSkipsWeeklyExhaustedProfileUsingDefaultSelector(t *testing.T) {
 	}
 }
 
+func TestCmdExecSparkModelDoesNotFallbackWhenSparkWindowMissing(t *testing.T) {
+	app, logPath, root := newExecSelectionTestApp(t)
+	createExecProfiles(t, app, "alpha")
+	writeExecSelectionProfileData(t, root, "alpha", 10, 20, 1*time.Hour)
+
+	err := app.Run([]string{"exec", "-m=gpt-5-codex-spark", "--skip-git-repo-check", "hello"})
+	if err == nil {
+		t.Fatalf("expected spark exec to fail without spark usage window")
+	}
+	if !strings.Contains(err.Error(), "no model-specific rate-limit windows") {
+		t.Fatalf("expected missing spark window error, got %v", err)
+	}
+	if _, statErr := os.Stat(logPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("expected codex exec not to be invoked, stat err=%v", statErr)
+	}
+}
+
 func TestSelectExecProfileFallsBackToRandomProfileWhenSelectionFails(t *testing.T) {
 	app := newTestAppForCLI(t)
 	createExecProfiles(t, app, "alpha", "beta")
@@ -356,6 +374,23 @@ func TestSelectExecProfileFallsBackToOnlyProfileWhenSelectionFails(t *testing.T)
 	}
 	if selected.Metadata.SelectionSource != "random_profile_fallback" {
 		t.Fatalf("expected random fallback selection source, got %q", selected.Metadata.SelectionSource)
+	}
+}
+
+func TestSelectExecProfileReturnsErrorForSparkModelWhenNoModelWindowAvailable(t *testing.T) {
+	app := newTestAppForCLI(t)
+	createExecProfiles(t, app, "alpha")
+
+	cfg, err := app.loadConfigIfExists()
+	if err != nil {
+		t.Fatalf("loadConfigIfExists: %v", err)
+	}
+
+	selected, err := app.selectExecProfile(cfg, func(context.Context, []usage.MonitorAccount, int, string) (usage.SelectedAccount, error) {
+		return usage.SelectedAccount{}, errors.New("usage selection failed")
+	}, "gpt-5-codex-spark")
+	if err == nil {
+		t.Fatalf("expected error for spark model, got profile %q", selected.Name)
 	}
 }
 

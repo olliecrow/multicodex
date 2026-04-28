@@ -239,10 +239,12 @@ func TestSelectBestAccountForModelUsesSparkWindowForModelSelection(t *testing.T)
 			},
 		}),
 	}
-	if p, s := selectWindowsForModel(results[0].account, "gpt-5-codex-spark"); p.UsedPercent != 15 || s.UsedPercent != unavailableUsedPercent {
+	p, s, _ := selectWindowsForModel(results[0].account, "gpt-5-codex-spark")
+	if p.UsedPercent != 15 || s.UsedPercent != unavailableUsedPercent {
 		t.Fatalf("expected alpha spark windows to be {15, unavailable}, got {%d,%d}", p.UsedPercent, s.UsedPercent)
 	}
-	if p, s := selectWindowsForModel(results[1].account, "gpt-5-codex-spark"); p.UsedPercent != 45 || s.UsedPercent != unavailableUsedPercent {
+	p, s, _ = selectWindowsForModel(results[1].account, "gpt-5-codex-spark")
+	if p.UsedPercent != 45 || s.UsedPercent != unavailableUsedPercent {
 		t.Fatalf("expected beta spark windows to be {45, unavailable}, got {%d,%d}", p.UsedPercent, s.UsedPercent)
 	}
 
@@ -286,8 +288,8 @@ func TestSelectBestAccountForModelFallsBackToDefaultWindowWhenModelMissing(t *te
 	}
 }
 
-func TestSelectBestAccountForModelFallsBackToPrimaryWhenSparkBucketMissing(t *testing.T) {
-	selected, err := selectBestAccountFromResultsForModel([]accountFetchResult{
+func TestSelectBestAccountForModelErrorsWhenSparkBucketMissing(t *testing.T) {
+	_, err := selectBestAccountFromResultsForModel([]accountFetchResult{
 		{
 			codexHome: "/alpha",
 			account: AccountSummary{
@@ -319,11 +321,36 @@ func TestSelectBestAccountForModelFallsBackToPrimaryWhenSparkBucketMissing(t *te
 			snapshot: &Summary{},
 		},
 	}, 40, "gpt-5-codex-spark")
-	if err != nil {
-		t.Fatalf("selectBestAccountFromResultsForModel: %v", err)
+	if err == nil {
+		t.Fatalf("expected no model-specific window when requested model uses spark, got nil")
 	}
-	if selected.Account.Label != "beta" {
-		t.Fatalf("expected fallback-to-primary selection for spark model to choose beta, got %q", selected.Account.Label)
+}
+
+func TestSelectBestAccountForModelErrorsWhenSparkBucketsAreBlocked(t *testing.T) {
+	_, err := selectBestAccountFromResultsForModel([]accountFetchResult{
+		testAccountFetchResultWithRateLimits("alpha", 10, 10, map[string]RateLimitWindow{
+			"codex": {
+				PrimaryWindow:   WindowSummary{UsedPercent: 10},
+				SecondaryWindow: WindowSummary{UsedPercent: 10, SecondsUntilReset: testInt64Ptr(18 * 60 * 60)},
+			},
+			"codex_bengalfox": {
+				PrimaryWindow:   WindowSummary{UsedPercent: 100},
+				SecondaryWindow: WindowSummary{UsedPercent: 60, SecondsUntilReset: testInt64Ptr(6 * 24 * 60 * 60)},
+			},
+		}),
+		testAccountFetchResultWithRateLimits("beta", 10, 10, map[string]RateLimitWindow{
+			"codex": {
+				PrimaryWindow:   WindowSummary{UsedPercent: 10},
+				SecondaryWindow: WindowSummary{UsedPercent: 10, SecondsUntilReset: testInt64Ptr(18 * 60 * 60)},
+			},
+			"codex_bengalfox": {
+				PrimaryWindow:   WindowSummary{UsedPercent: 55},
+				SecondaryWindow: WindowSummary{UsedPercent: 40, SecondsUntilReset: testInt64Ptr(6 * 24 * 60 * 60)},
+			},
+		}),
+	}, 40, "gpt-5-codex-spark")
+	if err == nil {
+		t.Fatalf("expected all-model-window selection to fail with no eligible spark candidate, got nil")
 	}
 }
 

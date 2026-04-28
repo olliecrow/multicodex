@@ -72,18 +72,6 @@ type RateLimitWindow struct {
 	SecondaryWindow WindowSummary `json:"secondary_window"`
 }
 
-func (w RateLimitWindow) displayName() string {
-	trimmedName := strings.TrimSpace(w.LimitName)
-	if trimmedName != "" {
-		return trimmedName
-	}
-	trimmedID := strings.TrimSpace(w.LimitID)
-	if trimmedID != "" {
-		return trimmedID
-	}
-	return ""
-}
-
 func (s *Summary) RateLimitWindowForModel(model string) (string, RateLimitWindow, bool) {
 	if s == nil || len(s.RateLimitWindows) == 0 {
 		return "", RateLimitWindow{}, false
@@ -107,14 +95,6 @@ func (s *AccountSummary) RateLimitWindowForModel(model string) (string, RateLimi
 	return id, s.RateLimitWindows[id], true
 }
 
-func (s *Summary) RateLimitWindowIDs() []string {
-	return sortedRateLimitWindowKeys(s.RateLimitWindows)
-}
-
-func (s *AccountSummary) RateLimitWindowIDs() []string {
-	return sortedRateLimitWindowKeys(s.RateLimitWindows)
-}
-
 func selectRateLimitWindowID(windows map[string]RateLimitWindow, model string) (string, bool) {
 	if len(windows) == 0 {
 		return "", false
@@ -126,6 +106,9 @@ func selectRateLimitWindowID(windows map[string]RateLimitWindow, model string) (
 	})
 	if isSpark && sparkID != "" {
 		return sparkID, true
+	}
+	if isSpark {
+		return "", false
 	}
 
 	if _, ok := windows[defaultRateLimitID]; ok {

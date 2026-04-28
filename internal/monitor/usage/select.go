@@ -73,23 +73,32 @@ func selectBestAccountFromResults(results []accountFetchResult, maxPrimaryUsedPe
 }
 
 func selectBestAccountFromResultsForModel(results []accountFetchResult, maxPrimaryUsedPercent int, model string) (SelectedAccount, error) {
+	modelIsSpark := isSparkModel(model)
 	eligibleUnknownResetCandidates := []accountWindowCandidate{}
 	accessibleCandidates := []accountWindowCandidate{}
 	soonestEligibleResetSeconds := int64(0)
 	soonestEligibleCandidates := []accountWindowCandidate{}
+	hadModelWindow := false
 
 	for i, result := range results {
 		if result.fetchErr != nil || result.snapshot == nil {
 			continue
 		}
 
-		primaryWindow, secondaryWindow := selectWindowsForModel(result.account, model)
+		primaryWindow, secondaryWindow, hasModelWindow := selectWindowsForModel(result.account, model)
+		if hasModelWindow {
+			hadModelWindow = true
+		}
+
 		candidate := accountWindowCandidate{
 			resultIndex:          i,
 			primaryUsedPercent:   primaryWindow.UsedPercent,
 			secondaryUsedPercent: secondaryWindow.UsedPercent,
 		}
 		accessibleCandidates = append(accessibleCandidates, candidate)
+		if modelIsSpark && !hasModelWindow {
+			continue
+		}
 
 		if primaryWindow.UsedPercent >= maxPrimaryUsedPercent {
 			continue
@@ -120,6 +129,12 @@ func selectBestAccountFromResultsForModel(results []accountFetchResult, maxPrima
 	if selected, ok := chooseSelectedAccount(results, eligibleUnknownResetCandidates); ok {
 		return selected, nil
 	}
+	if modelIsSpark && !hadModelWindow {
+		return SelectedAccount{}, fmt.Errorf("no model-specific rate-limit windows available for requested model %q", model)
+	}
+	if modelIsSpark && hadModelWindow {
+		return SelectedAccount{}, fmt.Errorf("no model-eligible accounts available for requested model %q", model)
+	}
 	if selected, ok := chooseSelectedAccount(results, accessibleCandidates); ok {
 		return selected, nil
 	}
@@ -127,13 +142,14 @@ func selectBestAccountFromResultsForModel(results []accountFetchResult, maxPrima
 	return SelectedAccount{}, fmt.Errorf("no accessible accounts")
 }
 
-func selectWindowsForModel(account AccountSummary, model string) (WindowSummary, WindowSummary) {
-	if strings.TrimSpace(model) != "" {
+func selectWindowsForModel(account AccountSummary, model string) (WindowSummary, WindowSummary, bool) {
+	model = strings.TrimSpace(model)
+	if model != "" {
 		if _, window, ok := account.RateLimitWindowForModel(model); ok {
-			return window.PrimaryWindow, window.SecondaryWindow
+			return window.PrimaryWindow, window.SecondaryWindow, true
 		}
 	}
-	return account.PrimaryWindow, account.SecondaryWindow
+	return account.PrimaryWindow, account.SecondaryWindow, false
 }
 
 func weeklyWindowIsKnownExhausted(win WindowSummary) bool {

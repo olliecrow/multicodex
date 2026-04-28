@@ -168,7 +168,7 @@ multicodex exec -s read-only "Summarize the README in 3 bullets."
 ```
 
 `multicodex exec` first keeps profiles whose five-hour window is below 40% used and whose weekly window is not known to be exhausted. From those eligible profiles, it picks the one whose weekly reset is soonest. If eligible profiles do not expose a weekly reset time, it picks randomly among those eligible profiles. If no profile is eligible, it picks a random accessible profile for that call. If usage data is unavailable for every profile, it falls back to a random configured profile.
-For explicit Spark models (`--model`/`-m` containing `spark`), `multicodex exec` prefers Spark buckets when present and falls back to default `codex` windows per account when Spark data is not available.
+For explicit Spark models (`--model`/`-m` containing `spark`), `multicodex exec` uses Spark buckets for routing and fails rather than falling back to a random/default Codex account when Spark data is not available.
 For help requests such as `multicodex exec --help`, it delegates directly to `codex exec` and does not require any profiles to be configured.
 
 Switch system default account used by default Codex context.
