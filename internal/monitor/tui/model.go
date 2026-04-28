@@ -259,39 +259,7 @@ func (m Model) renderBody() string {
 
 	contentWidth := max(20, m.width-4)
 	accountRows := m.accountWindowRows()
-	windowRows := make([]string, 0, max(1, len(accountRows)))
-	if len(accountRows) == 0 {
-		summaryRow := accountWindowRowForRateLimitBuckets(
-			summaryAccountDisplayName(m.summary),
-			m.summary.RateLimitWindows,
-			m.summary.PrimaryWindow,
-			m.summary.SecondaryWindow,
-			summaryWindowAvailable(m.summary.WindowDataAvailable, m.summary.PrimaryWindow),
-			summaryWindowAvailable(m.summary.WindowDataAvailable, m.summary.SecondaryWindow),
-		)
-		summaryTitle := windowTitle("five-hour window", "unavailable", summaryRow.name, m.showingStaleWindows)
-		summaryTitleWeekly := windowTitle("weekly window", "unavailable", summaryRow.name, m.showingStaleWindows)
-
-		windowRows = append(windowRows, m.renderWindowRow(
-			contentWidth,
-			windowPanelSpec{
-				title:          summaryTitle,
-				window:         summaryRow.primaryWindow,
-				available:      summaryRow.primaryAvailable,
-				sparkWindow:    summaryRow.sparkPrimaryWindow,
-				sparkAvailable: summaryRow.sparkPrimaryAvailable,
-				showSparkUsage: summaryRow.hasSparkWindow,
-			},
-			windowPanelSpec{
-				title:          summaryTitleWeekly,
-				window:         summaryRow.secondaryWindow,
-				available:      summaryRow.secondaryAvailable,
-				sparkWindow:    summaryRow.sparkSecondaryWindow,
-				sparkAvailable: summaryRow.sparkSecondaryAvailable,
-				showSparkUsage: summaryRow.hasSparkWindow,
-			},
-		))
-	}
+	windowRows := make([]string, 0, len(accountRows))
 	for _, row := range accountRows {
 		fiveHourTitle := windowTitle("five-hour window", "unavailable", row.name, m.showingStaleWindows)
 		weeklyTitle := windowTitle("weekly window", "unavailable", row.name, m.showingStaleWindows)

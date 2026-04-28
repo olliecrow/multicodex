@@ -233,7 +233,7 @@ func buildRateLimitWindowsFromOAuthAdditionalLimits(additionalLimits []oauthAddi
 
 	windowByLimit := map[string]rateLimitSnapshotRaw{}
 	for i, additional := range additionalLimits {
-		if additional.RateLimit == nil || additional.RateLimit.PrimaryWindow == nil || additional.RateLimit.SecondaryWindow == nil {
+		if additional.RateLimit == nil || additional.RateLimit.PrimaryWindow == nil {
 			continue
 		}
 
@@ -249,11 +249,15 @@ func buildRateLimitWindowsFromOAuthAdditionalLimits(additionalLimits []oauthAddi
 				WindowDurationMins: toMins(additional.RateLimit.PrimaryWindow.LimitWindowSeconds),
 				ResetsAt:           toInt64Ptr(additional.RateLimit.PrimaryWindow.ResetAt),
 			},
-			Secondary: &rateLimitWindowRaw{
+		}
+		if additional.RateLimit.SecondaryWindow != nil {
+			window := windowByLimit[limitName]
+			window.Secondary = &rateLimitWindowRaw{
 				UsedPercent:        additional.RateLimit.SecondaryWindow.UsedPercent,
 				WindowDurationMins: toMins(additional.RateLimit.SecondaryWindow.LimitWindowSeconds),
 				ResetsAt:           toInt64Ptr(additional.RateLimit.SecondaryWindow.ResetAt),
-			},
+			}
+			windowByLimit[limitName] = window
 		}
 	}
 	if len(windowByLimit) == 0 {
