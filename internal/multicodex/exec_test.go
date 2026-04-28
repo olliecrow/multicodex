@@ -153,6 +153,7 @@ func TestExecArgsAreHelpRequest(t *testing.T) {
 		{name: "short help flag", args: []string{"-h"}, want: true},
 		{name: "help subcommand", args: []string{"help"}, want: true},
 		{name: "help after other args", args: []string{"--model", "gpt-5", "--help"}, want: true},
+		{name: "help after terminator is prompt text", args: []string{"--", "--help"}, want: false},
 		{name: "normal exec", args: []string{"prompt"}, want: false},
 	}
 
@@ -177,6 +178,7 @@ func TestParseModelFromExecArgs(t *testing.T) {
 		{name: "long-flag equals", args: []string{"--model=gpt-5-codex-spark"}, want: "gpt-5-codex-spark"},
 		{name: "short-flag equals", args: []string{"-m=gpt-5-codex-spark"}, want: "gpt-5-codex-spark"},
 		{name: "short flag", args: []string{"-m", "gpt-5-codex-spark"}, want: "gpt-5-codex-spark"},
+		{name: "flag after terminator is prompt text", args: []string{"--", "-m", "gpt-5-codex-spark"}, want: ""},
 		{name: "missing", args: []string{"hello", "world"}, want: ""},
 		{name: "short not model", args: []string{"-m"}, want: ""},
 	}
@@ -310,6 +312,40 @@ func TestCmdExecSparkModelDoesNotFallbackWhenSparkWindowMissing(t *testing.T) {
 	}
 	if _, statErr := os.Stat(logPath); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("expected codex exec not to be invoked, stat err=%v", statErr)
+	}
+}
+
+func TestCmdExecTreatsFlagsAfterTerminatorAsPromptText(t *testing.T) {
+	app, logPath := newExecTestApp(t)
+	createExecProfiles(t, app, "alpha")
+
+	originalSelector := defaultExecAccountSelector
+	defaultExecAccountSelector = func(_ context.Context, _ []usage.MonitorAccount, _ int, model string) (usage.SelectedAccount, error) {
+		if model != "" {
+			t.Fatalf("expected args after -- not to be parsed as model, got %q", model)
+		}
+		return usage.SelectedAccount{
+			Account:              usage.MonitorAccount{Label: "alpha"},
+			PrimaryUsedPercent:   15,
+			SecondaryUsedPercent: 10,
+		}, nil
+	}
+	defer func() { defaultExecAccountSelector = originalSelector }()
+
+	if err := app.Run([]string{"exec", "--", "-m=gpt-5-codex-spark", "--help"}); err != nil {
+		t.Fatalf("exec failed: %v", err)
+	}
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	log := string(data)
+	if !strings.Contains(log, "profile=alpha") {
+		t.Fatalf("expected alpha profile in log, got %q", log)
+	}
+	if !strings.Contains(log, "args=exec -- -m=gpt-5-codex-spark --help") {
+		t.Fatalf("expected args after -- to pass through unchanged, got %q", log)
 	}
 }
 

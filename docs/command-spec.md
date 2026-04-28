@@ -1,11 +1,11 @@
 # Command Specification
 
-## Initial command set
+## Command set
 - `multicodex init`
 - `multicodex add <name>`
-- `multicodex login <name>`
+- `multicodex login <name> [codex login args]`
 - `multicodex login-all`
-- `multicodex use <name>`
+- `multicodex use <name> [--shell]`
 - `multicodex app <name>`
 - `multicodex cli <name> [codex args...]`
 - `multicodex run <name> -- <command...>`
@@ -41,8 +41,9 @@
 - Leaves any manual top-level profile skill override in place.
 - Leaves a manual per-profile `config.toml` override intact when present.
 
-`multicodex login <name>`
+`multicodex login <name> [codex login args]`
 - Runs official `codex login` in the profile context.
+- Passes any extra login args through to `codex login`.
 - Avoids printing sensitive output.
 - Requires the effective profile config to enable `cli_auth_credentials_store = "file"` so profile auth remains isolated.
 
@@ -50,7 +51,7 @@
 - Iterates through known profiles and invokes profile-scoped login.
 - Summarizes success and failure per profile.
 
-`multicodex use <name>`
+`multicodex use <name> [--shell]`
 - Local scope only.
 - Emits shell env instructions or starts a subshell bound to that profile.
 - Leaves global default untouched.

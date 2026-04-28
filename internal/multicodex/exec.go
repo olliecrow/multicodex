@@ -104,6 +104,9 @@ func execArgsAreHelpRequest(args []string) bool {
 		return false
 	}
 	for _, arg := range args {
+		if arg == "--" {
+			break
+		}
 		switch arg {
 		case "-h", "--help":
 			return true
@@ -163,6 +166,9 @@ func parseModelFromExecArgs(args []string) string {
 		arg := strings.TrimSpace(args[i])
 		if arg == "" {
 			continue
+		}
+		if arg == "--" {
+			break
 		}
 		switch {
 		case arg == "--model":

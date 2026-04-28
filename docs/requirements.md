@@ -41,4 +41,4 @@
 ## Constraints
 - No third-party credential services.
 - Do not execute untrusted third-party code while researching.
-- Default private project posture until explicit approval to make public.
+- Keep this public repository safe for public readers, and keep new repositories private until explicit approval to make them public.
