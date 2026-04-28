@@ -152,10 +152,6 @@ func isSparkLimitBucket(limitID, limitName string) bool {
 	return strings.Contains(strings.ToLower(strings.TrimSpace(limitName)), "spark")
 }
 
-func isDefaultRateLimitID(limitID string) bool {
-	return strings.EqualFold(strings.TrimSpace(limitID), defaultRateLimitID)
-}
-
 type DoctorCheck struct {
 	Name    string `json:"name"`
 	OK      bool   `json:"ok"`

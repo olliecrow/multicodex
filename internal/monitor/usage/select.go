@@ -42,18 +42,10 @@ func NewSnapshotFetcherForAccounts(accounts []MonitorAccount) *Fetcher {
 	return f
 }
 
-func SelectBestAccount(ctx context.Context, accounts []MonitorAccount, maxPrimaryUsedPercent int) (SelectedAccount, error) {
-	return SelectBestAccountForModel(ctx, accounts, maxPrimaryUsedPercent, "")
-}
-
 func SelectBestAccountForModel(ctx context.Context, accounts []MonitorAccount, maxPrimaryUsedPercent int, model string) (SelectedAccount, error) {
 	f := NewSnapshotFetcherForAccounts(accounts)
 	defer f.Close()
 	return f.SelectAccountForModel(ctx, maxPrimaryUsedPercent, model)
-}
-
-func (f *Fetcher) SelectAccount(ctx context.Context, maxPrimaryUsedPercent int) (SelectedAccount, error) {
-	return f.SelectAccountForModel(ctx, maxPrimaryUsedPercent, "")
 }
 
 func (f *Fetcher) SelectAccountForModel(ctx context.Context, maxPrimaryUsedPercent int, model string) (SelectedAccount, error) {
@@ -66,10 +58,6 @@ func (f *Fetcher) SelectAccountForModel(ctx context.Context, maxPrimaryUsedPerce
 
 	results := f.fetchAccountsConcurrent(ctx, now, activeHomeSet{})
 	return selectBestAccountFromResultsForModel(results, maxPrimaryUsedPercent, model)
-}
-
-func selectBestAccountFromResults(results []accountFetchResult, maxPrimaryUsedPercent int) (SelectedAccount, error) {
-	return selectBestAccountFromResultsForModel(results, maxPrimaryUsedPercent, "")
 }
 
 func selectBestAccountFromResultsForModel(results []accountFetchResult, maxPrimaryUsedPercent int, model string) (SelectedAccount, error) {

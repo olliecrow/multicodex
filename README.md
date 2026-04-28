@@ -250,12 +250,14 @@ multicodex monitor doctor
 multicodex monitor completion
 ```
 
-Monitor account resolution order:
+Monitor account candidates come from:
 - explicit account file under `~/multicodex/monitor/accounts.json`
 - configured multicodex profiles from `~/multicodex/config.json`
-- active `CODEX_HOME`
-- default Codex home at `~/.codex`
+- the default Codex home, respecting `CODEX_HOME` when it is set
+- the active `CODEX_HOME`
 - compatible Codex homes discovered from the local filesystem
+
+When the same Codex home is found more than once, labels and source details prefer the explicit monitor account file, then configured multicodex profiles, then the default Codex home, then the active `CODEX_HOME`, then auto-discovery. TUI row ordering is separate from discovery precedence: rows are ordered by weekly reset time, not by account source.
 
 Filesystem discovery is read-only but intentionally broad: it scans your home directory for `.codex*`, `.codex`, and `codex-home` directories up to depth 5, then filters known transient/cache locations and requires real usage signals before including a home.
 
