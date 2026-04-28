@@ -67,7 +67,7 @@ Decision: Allow account-like profile names with `@`.
 Context: Users may naturally use account identifiers such as email-like names for profiles.
 Rationale: Better usability with minimal additional risk because path-unsafe separators remain disallowed.
 Trade-offs: Slightly broader allowed character set.
-Enforcement: Validation regex and tests.
+Enforcement: Validation allows account-like names but rejects empty names, path separators, unsupported punctuation, and dot-only names such as `.` and `..`.
 References: `internal/multicodex/validate.go`, `internal/multicodex/validate_test.go`
 
 Decision: `status` should extract account email from local profile auth when CLI output does not include it.
@@ -165,7 +165,7 @@ Decision: Fold subscription usage monitoring into multicodex under a namespaced 
 Context: Users choose between multiple Codex accounts based on both account isolation and remaining subscription headroom, so keeping switching and monitoring in separate products created an avoidable split workflow.
 Rationale: One product with a dedicated `monitor` namespace matches the real user workflow while keeping usage visibility clearly separated from mutating account-management commands.
 Trade-offs: The repo and CLI gain more code and dependencies, so the monitor must stay modular and avoid bloating the root command surface.
-Enforcement: The integrated monitor lives under `internal/monitor/`; the primary user entrypoint is `multicodex monitor`; monitor account discovery prefers multicodex profiles and `~/multicodex/monitor/accounts.json`, with legacy monitor account-file paths retained as compatibility fallbacks.
+Enforcement: The integrated monitor lives under `internal/monitor/`; the primary user entrypoint is `multicodex monitor`; monitor account candidates come from monitor-owned account overrides, multicodex profiles, the default Codex home, the active `CODEX_HOME`, and read-only filesystem discovery. When the same Codex home appears more than once, labels and source details prefer monitor-owned overrides, then multicodex profiles, then the default home, then active `CODEX_HOME`, then auto-discovery. Legacy monitor account-file paths remain compatibility fallbacks.
 References: `internal/multicodex/monitor.go`, `internal/monitor/usage/accounts.go`, `internal/monitor/tui/model.go`, `README.md`, `docs/command-spec.md`, `docs/implementation-notes.md`
 
 Decision: Preserve standalone monitor command habits where they materially reduce migration friction.

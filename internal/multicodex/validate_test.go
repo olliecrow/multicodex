@@ -16,7 +16,7 @@ func TestValidateProfileName(t *testing.T) {
 		})
 	}
 
-	invalid := []string{"", "bad name", "bad/name", "bad$name"}
+	invalid := []string{"", ".", "..", "bad name", "bad/name", "bad$name"}
 	for _, name := range invalid {
 		name := name
 		t.Run("invalid_"+name, func(t *testing.T) {

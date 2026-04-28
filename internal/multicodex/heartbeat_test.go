@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -382,7 +383,7 @@ func newHeartbeatTestApp(t *testing.T, cfg fakeCodexScript) *App {
 		script.WriteString(shellQuote(st.output))
 		script.WriteString("\n")
 		script.WriteString("      exit ")
-		script.WriteString(intToString(st.exitCode))
+		script.WriteString(strconv.Itoa(st.exitCode))
 		script.WriteString("\n")
 		script.WriteString("      ;;\n")
 	}
@@ -391,7 +392,7 @@ func newHeartbeatTestApp(t *testing.T, cfg fakeCodexScript) *App {
 	script.WriteString(shellQuote(loginDefault.output))
 	script.WriteString("\n")
 	script.WriteString("      exit ")
-	script.WriteString(intToString(loginDefault.exitCode))
+	script.WriteString(strconv.Itoa(loginDefault.exitCode))
 	script.WriteString("\n")
 	script.WriteString("      ;;\n")
 	script.WriteString("  esac\n")
@@ -406,7 +407,7 @@ func newHeartbeatTestApp(t *testing.T, cfg fakeCodexScript) *App {
 		script.WriteString(shellQuote(st.output))
 		script.WriteString("\n")
 		script.WriteString("      exit ")
-		script.WriteString(intToString(st.exitCode))
+		script.WriteString(strconv.Itoa(st.exitCode))
 		script.WriteString("\n")
 		script.WriteString("      ;;\n")
 	}
@@ -415,7 +416,7 @@ func newHeartbeatTestApp(t *testing.T, cfg fakeCodexScript) *App {
 	script.WriteString(shellQuote(execDefault.output))
 	script.WriteString("\n")
 	script.WriteString("      exit ")
-	script.WriteString(intToString(execDefault.exitCode))
+	script.WriteString(strconv.Itoa(execDefault.exitCode))
 	script.WriteString("\n")
 	script.WriteString("      ;;\n")
 	script.WriteString("  esac\n")
@@ -440,36 +441,10 @@ func newHeartbeatTestApp(t *testing.T, cfg fakeCodexScript) *App {
 func createHeartbeatProfiles(t *testing.T, app *App, names ...string) {
 	t.Helper()
 
-	if err := app.store.EnsureBaseDirs(); err != nil {
-		t.Fatalf("ensure base dirs: %v", err)
-	}
-	cfg := DefaultConfig()
-	for _, name := range names {
-		profileHome := filepath.Join(app.store.paths.ProfilesDir, name, "codex-home")
-		if err := os.MkdirAll(profileHome, 0o700); err != nil {
-			t.Fatalf("create profile home: %v", err)
-		}
-		cfg.Profiles[name] = Profile{Name: name, CodexHome: profileHome}
-	}
-	if err := app.store.Save(cfg); err != nil {
-		t.Fatalf("save config: %v", err)
-	}
+	createTestProfiles(t, app, names...)
 }
 
 func shellQuote(s string) string {
 	s = strings.ReplaceAll(s, `'`, `'\''`)
 	return "'" + s + "'"
-}
-
-func intToString(v int) string {
-	switch v {
-	case 0:
-		return "0"
-	case 1:
-		return "1"
-	case 2:
-		return "2"
-	default:
-		return "1"
-	}
 }

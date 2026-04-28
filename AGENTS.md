@@ -29,7 +29,7 @@
 ## Operating defaults
 - Keep changes minimal, explicit, and security first.
 - Never commit credentials, tokens, local auth files, or machine-specific private paths.
-- Treat this project as private by default until explicit user approval to make it public.
+- This repository is public. Treat new repositories as private by default until Ollie explicitly approves making them public.
 
 ## Dictation-Aware Input Handling
 - The user often dictates prompts, so minor transcription errors and homophone substitutions are expected.
