@@ -207,4 +207,22 @@ func TestNormalizeSummaryAllowsSparkSelectionByLimitIDAndLimitName(t *testing.T)
 	}
 }
 
+func TestRateLimitWindowForModelDoesNotFallbackToCodexForSparkModel(t *testing.T) {
+	summary := &Summary{
+		RateLimitWindows: map[string]RateLimitWindow{
+			"codex": {
+				LimitID:       "codex",
+				PrimaryWindow: WindowSummary{UsedPercent: 12},
+			},
+		},
+	}
+
+	if _, _, ok := summary.RateLimitWindowForModel("gpt-5-codex-spark"); ok {
+		t.Fatalf("expected spark model lookup not to use default codex window")
+	}
+	if _, window, ok := summary.RateLimitWindowForModel("gpt-5-codex"); !ok || window.PrimaryWindow.UsedPercent != 12 {
+		t.Fatalf("expected non-spark model lookup to use default codex window")
+	}
+}
+
 func intPtr(v int) *int { return &v }

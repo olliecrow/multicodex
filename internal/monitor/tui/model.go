@@ -269,8 +269,8 @@ func (m Model) renderBody() string {
 			summaryWindowAvailable(m.summary.WindowDataAvailable, m.summary.PrimaryWindow),
 			summaryWindowAvailable(m.summary.WindowDataAvailable, m.summary.SecondaryWindow),
 		)
-		summaryTitle := windowTitle("five-hour window", "unavailable", summaryRow.name, "", m.showingStaleWindows)
-		summaryTitleWeekly := windowTitle("weekly window", "unavailable", summaryRow.name, "", m.showingStaleWindows)
+		summaryTitle := windowTitle("five-hour window", "unavailable", summaryRow.name, m.showingStaleWindows)
+		summaryTitleWeekly := windowTitle("weekly window", "unavailable", summaryRow.name, m.showingStaleWindows)
 
 		windowRows = append(windowRows, m.renderWindowRow(
 			contentWidth,
@@ -293,8 +293,8 @@ func (m Model) renderBody() string {
 		))
 	}
 	for _, row := range accountRows {
-		fiveHourTitle := windowTitle("five-hour window", "unavailable", row.name, "", m.showingStaleWindows)
-		weeklyTitle := windowTitle("weekly window", "unavailable", row.name, "", m.showingStaleWindows)
+		fiveHourTitle := windowTitle("five-hour window", "unavailable", row.name, m.showingStaleWindows)
+		weeklyTitle := windowTitle("weekly window", "unavailable", row.name, m.showingStaleWindows)
 		windowRows = append(windowRows, m.renderWindowRow(
 			contentWidth,
 			windowPanelSpec{
@@ -551,15 +551,12 @@ func (m Model) accountWindowRows() []accountWindowRow {
 	return out
 }
 
-func windowTitle(baseTitle, unavailableFallback, accountName, windowLabel string, stale bool) string {
+func windowTitle(baseTitle, unavailableFallback, accountName string, stale bool) string {
 	title := baseTitle
 	if strings.TrimSpace(accountName) != "" {
 		title += " [" + accountName + "]"
 	} else if unavailableFallback != "" {
 		title += " [" + unavailableFallback + "]"
-	}
-	if label := strings.TrimSpace(windowLabel); label != "" {
-		title += " [" + label + "]"
 	}
 	if stale {
 		title += " [stale]"

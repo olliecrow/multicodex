@@ -142,6 +142,8 @@ func (a *App) selectExecProfile(cfg *Config, selector execAccountSelector, model
 				}
 				return execSelection{Name: name, Profile: profile, Metadata: metadata}, nil
 			}
+		} else if strings.Contains(strings.ToLower(strings.TrimSpace(model)), "spark") {
+			return execSelection{}, err
 		}
 	}
 
@@ -173,6 +175,8 @@ func parseModelFromExecArgs(args []string) string {
 			if i+1 < len(args) {
 				return strings.TrimSpace(args[i+1])
 			}
+		case strings.HasPrefix(arg, "-m="):
+			return strings.TrimSpace(strings.TrimPrefix(arg, "-m="))
 		}
 	}
 	return ""

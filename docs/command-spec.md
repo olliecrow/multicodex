@@ -89,7 +89,7 @@
 - Re-checks file-backed auth isolation before launching `codex exec`.
 - Parses model selection arguments (`--model`, `--model=`, and `-m`) for routing.
 - If the model contains `spark` (case-insensitive), each profile selects its Spark bucket when available.
-- If Spark is requested but a profile has no Spark bucket, that profile falls back to its default Codex windows for routing.
+- If Spark is requested but no eligible Spark bucket is available, exec returns the usage-selection error instead of falling back to a random/default Codex account.
 - Treats profiles whose five-hour usage window is strictly below 40% as eligible to route work to.
 - Excludes profiles whose weekly window is known to be exhausted, so an account at 100% weekly usage is not selected while other usable profiles exist.
 - Among eligible profiles, picks the one whose weekly reset is soonest.

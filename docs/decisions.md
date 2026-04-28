@@ -310,9 +310,9 @@ References: `internal/multicodex/config.go`, `internal/multicodex/config_test.go
 
 Decision: Route `multicodex exec` model-aware to Spark buckets when the model name requests Spark.
 Context: A subscription snapshot can include both default (`codex`) and Spark (`codex_bengalfox`/Spark-name) rate-limit windows, and Spark model names should prioritize Spark quota.
-Rationale: Using Spark windows for Spark model names gives better quota fit for model-appropriate routing without changing behavior for non-spark calls.
-Trade-offs: The Spark check is model-name-based (`contains "spark"`), so it can route only when the caller includes a Spark identifier in the model string; it also requires no additional user configuration.
-Enforcement: `internal/multicodex/exec.go` passes parsed model to `usage.SelectBestAccountForModel`; model parsing and selection tests assert parse flow and Spark fallback behavior when Spark windows are missing.
+Rationale: Using Spark windows for Spark model names gives better quota fit for model-appropriate routing, and failing when Spark data is missing avoids silently sending Spark work to an account selected by default Codex quota.
+Trade-offs: The Spark check is model-name-based (`contains "spark"`), so it can route only when the caller includes a Spark identifier in the model string; Spark calls may fail when usage data does not expose Spark windows instead of falling back randomly.
+Enforcement: `internal/multicodex/exec.go` passes parsed model to `usage.SelectBestAccountForModel`; model parsing and selection tests assert parse flow and strict Spark behavior when Spark windows are missing or exhausted.
 References: `internal/multicodex/exec.go`, `internal/multicodex/exec_test.go`, `internal/monitor/usage/model.go`, `internal/monitor/usage/raw_types.go`, `internal/monitor/usage/select.go`, `internal/monitor/usage/select_test.go`, `docs/command-spec.md`
 
 Decision: Keep monitor window cards compact and show both default and Spark usage when available.
