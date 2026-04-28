@@ -35,12 +35,6 @@ func (a *App) cmdApp(args []string) error {
 	if err := ensureProfileCodexExecutionReady(a.store.paths, profile); err != nil {
 		return err
 	}
-	if err := a.store.SwitchGlobalAuthToProfile(cfg, profile); err != nil {
-		return err
-	}
-	if err := a.store.Save(cfg); err != nil {
-		return err
-	}
 
 	appPath, err := findCodexAppPath()
 	if err != nil {
@@ -52,6 +46,12 @@ func (a *App) cmdApp(args []string) error {
 	}
 	if err := os.MkdirAll(appUserDataDir, 0o700); err != nil {
 		return fmt.Errorf("create app data dir: %w", err)
+	}
+	if err := a.store.SwitchGlobalAuthToProfile(cfg, profile); err != nil {
+		return err
+	}
+	if err := a.store.Save(cfg); err != nil {
+		return err
 	}
 
 	fmt.Printf("launching Codex app for profile %q with shared sidebar state and profile app data\n", name)

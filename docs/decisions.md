@@ -65,10 +65,10 @@ References: `internal/multicodex/doctor.go`, `internal/multicodex/dry_run.go`, `
 
 Decision: Allow account-like profile names with `@`.
 Context: Users may naturally use account identifiers such as email-like names for profiles.
-Rationale: Better usability with minimal additional risk because path-unsafe separators remain disallowed.
+Rationale: Better usability with minimal additional risk because path-unsafe separators remain disallowed and stored profile keys are checked again when config is loaded.
 Trade-offs: Slightly broader allowed character set.
-Enforcement: Validation allows account-like names but rejects empty names, path separators, unsupported punctuation, and dot-only names such as `.` and `..`.
-References: `internal/multicodex/validate.go`, `internal/multicodex/validate_test.go`
+Enforcement: Validation allows account-like names but rejects empty names, path separators, unsupported punctuation, and dot-only names such as `.` and `..`; config loading rejects invalid stored profile keys before commands use them.
+References: `internal/multicodex/validate.go`, `internal/multicodex/validate_test.go`, `internal/multicodex/config.go`, `internal/multicodex/config_test.go`
 
 Decision: `status` should extract account email from local profile auth when CLI output does not include it.
 Context: `codex login status` does not always print account email, which made status output less useful.
@@ -91,12 +91,12 @@ Trade-offs: Slightly more checks and warnings in doctor output.
 Enforcement: Doctor checks for path isolation, ignore coverage, and tracked sensitive files; tests cover helper logic.
 References: `internal/multicodex/doctor.go`, `internal/multicodex/doctor_test.go`, `internal/multicodex/security.go`, `internal/multicodex/security_test.go`
 
-Decision: Normalize path comparisons for leak guards using symlink-aware canonicalization.
+Decision: Normalize configured paths and path comparisons before using them.
 Context: On macOS, equivalent paths may appear as `/var/...` and `/private/var/...`, causing false negatives in subpath checks.
-Rationale: Canonicalizing through existing parent symlinks avoids bypasses and ensures path isolation checks are reliable.
+Rationale: Expanding `~`, converting relative configured homes to absolute paths, and canonicalizing through existing parent symlinks avoids bypasses and keeps core commands, monitor code, and leak guards from disagreeing about the same location.
 Trade-offs: Slightly more path-resolution logic.
-Enforcement: Canonical path helper plus subpath tests with symlink aliases.
-References: `internal/multicodex/doctor.go`, `internal/multicodex/doctor_test.go`
+Enforcement: Core path resolution normalizes `MULTICODEX_HOME` and `MULTICODEX_DEFAULT_CODEX_HOME`; canonical path helpers cover leak guards; tests cover `~`, relative paths, and symlink aliases.
+References: `internal/multicodex/paths.go`, `internal/multicodex/paths_test.go`, `internal/multicodex/doctor.go`, `internal/multicodex/doctor_test.go`
 
 Decision: Bound profile status latency with per-call timeout and parallel profile checks.
 Context: Battle tests showed `status` and `doctor` could become slow with multiple profiles or hanging `codex login status` calls.
@@ -205,9 +205,9 @@ References: `internal/multicodex/exec.go`, `internal/multicodex/exec_test.go`, `
 
 Decision: Launch Codex Desktop with shared `CODEX_HOME` state and one app-data folder per profile.
 Context: Users want more than one Codex Mac app window at the same time, with one shared left-side project list and the ability to choose which profile each new app window starts with.
-Rationale: On macOS, `open -n -a` can launch separate `Codex.app` processes, and the launched app process keeps the shell environment, including `CODEX_HOME`. Later investigation showed Codex keeps sidebar and thread state under `CODEX_HOME`, while sharing one large Electron app-data folder across every app window appears to contribute to lag. Switching the shared global auth pointer first, then launching the app with the shared default `CODEX_HOME` and one stable app-data folder per profile, keeps one shared sidebar while reducing cross-profile Electron app-data contention and avoiding a new temp folder on every launch.
+Rationale: On macOS, `open -n -a` can launch separate `Codex.app` processes, and the launched app process keeps the shell environment, including `CODEX_HOME`. Later investigation showed Codex keeps sidebar and thread state under `CODEX_HOME`, while sharing one large Electron app-data folder across every app window appears to contribute to lag. Checking launch prerequisites first, then switching the shared global auth pointer and launching the app with the shared default `CODEX_HOME` and one stable app-data folder per profile, keeps one shared sidebar while reducing cross-profile Electron app-data contention and avoiding auth changes when launch cannot proceed.
 Trade-offs: This command is macOS-only, depends on an installed `Codex.app`, and separate app processes can still consume usage independently at the same time. Account split is best-effort rather than a hard wall because Codex caches auth on startup but can reload auth later in some flows. App-level cache and window state are now separated per profile instead of being shared across every app window.
-Enforcement: `multicodex app <name>` is macOS-only, switches the shared default auth pointer to the selected profile, launches `Codex.app` via `open -n -a` with the shared default `CODEX_HOME`, passes `--user-data-dir=~/Library/Application Support/Codex-multicodex/<profile>`, reuses that same folder on later launches for the same profile, exits after handing the launch off to macOS instead of keeping a helper daemon running, and reuses the same file-backed-auth isolation checks as `switch-global`.
+Enforcement: `multicodex app <name>` is macOS-only, verifies the profile, `Codex.app`, and app-data directory before switching the shared default auth pointer to the selected profile, launches `Codex.app` via `open -n -a` with the shared default `CODEX_HOME`, passes `--user-data-dir=~/Library/Application Support/Codex-multicodex/<profile>`, reuses that same folder on later launches for the same profile, exits after handing the launch off to macOS instead of keeping a helper daemon running, and reuses the same file-backed-auth isolation checks as `switch-global`.
 References: `internal/multicodex/app_launch.go`, `internal/multicodex/app_launch_test.go`, `internal/multicodex/help.go`, `internal/multicodex/completion.go`, `README.md`, `docs/command-spec.md`
 
 Decision: Parse `cli_auth_credentials_store` by exact key instead of substring matching.

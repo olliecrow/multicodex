@@ -107,6 +107,43 @@ func TestCmdAppUnknownProfile(t *testing.T) {
 	}
 }
 
+func TestCmdAppDoesNotSwitchGlobalAuthBeforeLaunchPrerequisites(t *testing.T) {
+	app, _, appPath := newAppLaunchTestApp(t)
+	createExecProfiles(t, app, "alpha")
+	alphaHome := filepath.Join(app.store.paths.ProfilesDir, "alpha", "codex-home")
+	if err := os.WriteFile(filepath.Join(alphaHome, "auth.json"), []byte(`{"tokens":{"access_token":"x"}}`), 0o600); err != nil {
+		t.Fatalf("write profile auth: %v", err)
+	}
+	if err := os.WriteFile(app.store.paths.DefaultAuthPath, []byte("default-auth"), 0o600); err != nil {
+		t.Fatalf("write default auth: %v", err)
+	}
+	if err := os.RemoveAll(appPath); err != nil {
+		t.Fatalf("remove fake app: %v", err)
+	}
+
+	originalGOOS := desktopAppGOOS
+	desktopAppGOOS = "darwin"
+	defer func() { desktopAppGOOS = originalGOOS }()
+
+	t.Setenv(envCodexAppPath, appPath)
+
+	err := app.Run([]string{"app", "alpha"})
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("expected ExitError, got %T (%v)", err, err)
+	}
+	if got, err := os.ReadFile(app.store.paths.DefaultAuthPath); err != nil || string(got) != "default-auth" {
+		t.Fatalf("expected default auth to remain unchanged, got %q err=%v", got, err)
+	}
+	cfg, err := app.store.Load()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.Global.CurrentProfile != "" {
+		t.Fatalf("expected current profile to remain empty, got %q", cfg.Global.CurrentProfile)
+	}
+}
+
 func TestCmdAppUsesHelpUsage(t *testing.T) {
 	app := newTestAppForCLI(t)
 
