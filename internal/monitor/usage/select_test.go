@@ -7,13 +7,13 @@ import (
 )
 
 func TestSelectBestAccountPrefersSoonestWeeklyResetAmongEligibleAccounts(t *testing.T) {
-	selected, err := selectBestAccountFromResults([]accountFetchResult{
+	selected, err := selectBestAccountFromResultsForModel([]accountFetchResult{
 		testAccountFetchResult("later-reset", 10, 40, 80*time.Hour),
 		testAccountFetchResult("sooner-reset", 20, 70, 36*time.Hour),
 		testAccountFetchResult("not-eligible", 80, 1, 12*time.Hour),
-	}, 40)
+	}, 40, "")
 	if err != nil {
-		t.Fatalf("selectBestAccountFromResults: %v", err)
+		t.Fatalf("selectBestAccountFromResultsForModel: %v", err)
 	}
 	if selected.Account.Label != "sooner-reset" {
 		t.Fatalf("expected sooner-reset, got %q", selected.Account.Label)
@@ -21,12 +21,12 @@ func TestSelectBestAccountPrefersSoonestWeeklyResetAmongEligibleAccounts(t *test
 }
 
 func TestSelectBestAccountTreatsExactThresholdAsNotEligible(t *testing.T) {
-	selected, err := selectBestAccountFromResults([]accountFetchResult{
+	selected, err := selectBestAccountFromResultsForModel([]accountFetchResult{
 		testAccountFetchResult("at-threshold", 40, 10, 1*time.Hour),
 		testAccountFetchResult("eligible", 39, 90, 48*time.Hour),
-	}, 40)
+	}, 40, "")
 	if err != nil {
-		t.Fatalf("selectBestAccountFromResults: %v", err)
+		t.Fatalf("selectBestAccountFromResultsForModel: %v", err)
 	}
 	if selected.Account.Label != "eligible" {
 		t.Fatalf("expected eligible, got %q", selected.Account.Label)
@@ -34,12 +34,12 @@ func TestSelectBestAccountTreatsExactThresholdAsNotEligible(t *testing.T) {
 }
 
 func TestSelectBestAccountSkipsKnownWeeklyExhaustedAccounts(t *testing.T) {
-	selected, err := selectBestAccountFromResults([]accountFetchResult{
+	selected, err := selectBestAccountFromResultsForModel([]accountFetchResult{
 		testAccountFetchResult("weekly-exhausted-sooner-reset", 0, 100, 1*time.Hour),
 		testAccountFetchResult("weekly-available-later-reset", 0, 73, 48*time.Hour),
-	}, 40)
+	}, 40, "")
 	if err != nil {
-		t.Fatalf("selectBestAccountFromResults: %v", err)
+		t.Fatalf("selectBestAccountFromResultsForModel: %v", err)
 	}
 	if selected.Account.Label != "weekly-available-later-reset" {
 		t.Fatalf("expected weekly-available-later-reset, got %q", selected.Account.Label)
@@ -47,7 +47,7 @@ func TestSelectBestAccountSkipsKnownWeeklyExhaustedAccounts(t *testing.T) {
 }
 
 func TestSelectBestAccountUsesKnownWeeklyResetBeforeUnknownWeeklyReset(t *testing.T) {
-	selected, err := selectBestAccountFromResults([]accountFetchResult{
+	selected, err := selectBestAccountFromResultsForModel([]accountFetchResult{
 		{
 			codexHome: "/unknown",
 			account: AccountSummary{
@@ -58,9 +58,9 @@ func TestSelectBestAccountUsesKnownWeeklyResetBeforeUnknownWeeklyReset(t *testin
 			snapshot: &Summary{},
 		},
 		testAccountFetchResult("known", 20, 30, 96*time.Hour),
-	}, 40)
+	}, 40, "")
 	if err != nil {
-		t.Fatalf("selectBestAccountFromResults: %v", err)
+		t.Fatalf("selectBestAccountFromResultsForModel: %v", err)
 	}
 	if selected.Account.Label != "known" {
 		t.Fatalf("expected known, got %q", selected.Account.Label)
@@ -80,7 +80,7 @@ func TestSelectBestAccountChoosesRandomEligibleAccountWhenAllEligibleWeeklyReset
 	}
 	defer func() { chooseRandomResultIndex = originalChooser }()
 
-	selected, err := selectBestAccountFromResults([]accountFetchResult{
+	selected, err := selectBestAccountFromResultsForModel([]accountFetchResult{
 		{
 			codexHome: "/alpha",
 			account: AccountSummary{
@@ -99,9 +99,9 @@ func TestSelectBestAccountChoosesRandomEligibleAccountWhenAllEligibleWeeklyReset
 			},
 			snapshot: &Summary{},
 		},
-	}, 40)
+	}, 40, "")
 	if err != nil {
-		t.Fatalf("selectBestAccountFromResults: %v", err)
+		t.Fatalf("selectBestAccountFromResultsForModel: %v", err)
 	}
 	if selected.Account.Label != "beta" {
 		t.Fatalf("expected beta, got %q", selected.Account.Label)
@@ -121,13 +121,13 @@ func TestSelectBestAccountChoosesRandomAccessibleAccountWhenNoAccountIsEligible(
 	}
 	defer func() { chooseRandomResultIndex = originalChooser }()
 
-	selected, err := selectBestAccountFromResults([]accountFetchResult{
+	selected, err := selectBestAccountFromResultsForModel([]accountFetchResult{
 		testAccountFetchResult("alpha", 65, 40, 12*time.Hour),
 		testAccountFetchResult("beta", 65, 20, 48*time.Hour),
 		testAccountFetchResult("gamma", 70, 5, 6*time.Hour),
-	}, 40)
+	}, 40, "")
 	if err != nil {
-		t.Fatalf("selectBestAccountFromResults: %v", err)
+		t.Fatalf("selectBestAccountFromResultsForModel: %v", err)
 	}
 	if selected.Account.Label != "gamma" {
 		t.Fatalf("expected gamma, got %q", selected.Account.Label)
@@ -144,13 +144,13 @@ func TestSelectBestAccountChoosesRandomAmongMatchingSoonestEligibleAccounts(t *t
 	}
 	defer func() { chooseRandomResultIndex = originalChooser }()
 
-	selected, err := selectBestAccountFromResults([]accountFetchResult{
+	selected, err := selectBestAccountFromResultsForModel([]accountFetchResult{
 		testAccountFetchResult("alpha", 10, 40, 12*time.Hour),
 		testAccountFetchResult("beta", 20, 41, 12*time.Hour),
 		testAccountFetchResult("gamma", 30, 42, 80*time.Hour),
-	}, 40)
+	}, 40, "")
 	if err != nil {
-		t.Fatalf("selectBestAccountFromResults: %v", err)
+		t.Fatalf("selectBestAccountFromResultsForModel: %v", err)
 	}
 	if selected.Account.Label != "beta" {
 		t.Fatalf("expected beta, got %q", selected.Account.Label)
@@ -170,16 +170,16 @@ func TestSelectBestAccountUsesRandomAccessibleFallbackWhenOnlyInaccessibleResult
 	}
 	defer func() { chooseRandomResultIndex = originalChooser }()
 
-	selected, err := selectBestAccountFromResults([]accountFetchResult{
+	selected, err := selectBestAccountFromResultsForModel([]accountFetchResult{
 		{
 			codexHome: "/broken",
 			account:   AccountSummary{Label: "broken"},
 			fetchErr:  errors.New("boom"),
 		},
 		testAccountFetchResult("working", 85, 10, 2*time.Hour),
-	}, 40)
+	}, 40, "")
 	if err != nil {
-		t.Fatalf("selectBestAccountFromResults: %v", err)
+		t.Fatalf("selectBestAccountFromResultsForModel: %v", err)
 	}
 	if selected.Account.Label != "working" {
 		t.Fatalf("expected working, got %q", selected.Account.Label)
@@ -187,13 +187,13 @@ func TestSelectBestAccountUsesRandomAccessibleFallbackWhenOnlyInaccessibleResult
 }
 
 func TestSelectBestAccountErrorsWhenNoAccountsAccessible(t *testing.T) {
-	_, err := selectBestAccountFromResults([]accountFetchResult{
+	_, err := selectBestAccountFromResultsForModel([]accountFetchResult{
 		{
 			codexHome: "/alpha",
 			account:   AccountSummary{Label: "alpha"},
 			fetchErr:  errors.New("boom"),
 		},
-	}, 40)
+	}, 40, "")
 	if err == nil {
 		t.Fatalf("expected error when all accounts fail")
 	}
