@@ -42,6 +42,29 @@ func TestStoreSaveAndLoad(t *testing.T) {
 	}
 }
 
+func TestStoreLoadRejectsInvalidProfileNames(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("MULTICODEX_HOME", filepath.Join(root, "multicodex"))
+	t.Setenv("MULTICODEX_DEFAULT_CODEX_HOME", filepath.Join(root, "codex-default"))
+
+	paths, err := ResolvePaths()
+	if err != nil {
+		t.Fatalf("ResolvePaths: %v", err)
+	}
+	store := NewStore(paths)
+	if err := store.EnsureBaseDirs(); err != nil {
+		t.Fatalf("EnsureBaseDirs: %v", err)
+	}
+	raw := `{"version":1,"profiles":{"../escape":{"name":"../escape","codex_home":"/tmp/escape"}}}`
+	if err := os.WriteFile(paths.ConfigPath, []byte(raw+"\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	if _, err := store.Load(); err == nil {
+		t.Fatalf("expected invalid stored profile name to be rejected")
+	}
+}
+
 func TestCreateProfileLinksProfileConfigToDefaultConfig(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("MULTICODEX_HOME", filepath.Join(root, "multicodex"))

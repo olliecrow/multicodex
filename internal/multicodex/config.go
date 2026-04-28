@@ -77,6 +77,11 @@ func (s *Store) Load() (*Config, error) {
 	if cfg.Profiles == nil {
 		cfg.Profiles = map[string]Profile{}
 	}
+	for name := range cfg.Profiles {
+		if err := ValidateProfileName(name); err != nil {
+			return nil, fmt.Errorf("invalid stored profile name %q: %w", name, err)
+		}
+	}
 	if cfg.Version == 0 {
 		cfg.Version = configVersion
 	}
@@ -104,6 +109,9 @@ func (s *Store) Save(cfg *Config) error {
 }
 
 func (s *Store) CreateProfile(name string) (Profile, error) {
+	if err := ValidateProfileName(name); err != nil {
+		return Profile{}, err
+	}
 	if err := s.EnsureBaseDirs(); err != nil {
 		return Profile{}, err
 	}
