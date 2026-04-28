@@ -41,7 +41,7 @@ func TestNormalizeSummaryBuildsRateLimitWindowsFromPrimaryAndAdditionalLimits(t 
 		},
 	}, map[string]rateLimitSnapshotRaw{
 		"codex_bengalfox": {
-			LimitName: func() *string { v := "Spark"; return &v }(),
+			LimitName: stringPtr("Spark"),
 			Primary: &rateLimitWindowRaw{
 				UsedPercent:        45,
 				WindowDurationMins: intPtr(300),
@@ -78,7 +78,7 @@ func TestNormalizeSummaryMergesPrimaryAndAdditionalLimitWindowData(t *testing.T)
 			Secondary: nil,
 		},
 		"  codex_bengalfox  ": {
-			LimitName: func() *string { v := "Spark"; return &v }(),
+			LimitName: stringPtr("Spark"),
 			Primary: &rateLimitWindowRaw{
 				UsedPercent:        55,
 				WindowDurationMins: intPtr(300),
@@ -138,11 +138,11 @@ func TestNormalizeSummarySkipsInvalidRateLimitWindowEntries(t *testing.T) {
 		},
 	}, map[string]rateLimitSnapshotRaw{
 		"": {
-			LimitName: func() *string { v := "blank-id"; return &v }(),
+			LimitName: stringPtr("blank-id"),
 			Primary:   &rateLimitWindowRaw{UsedPercent: 40},
 		},
 		"codex_bengalfox": {
-			LimitName: func() *string { v := "Spark"; return &v }(),
+			LimitName: stringPtr("Spark"),
 			Primary:   nil,
 		},
 	}, 0, nil, nil)
@@ -172,7 +172,7 @@ func TestNormalizeSummaryAllowsSparkSelectionByLimitIDAndLimitName(t *testing.T)
 		},
 	}, map[string]rateLimitSnapshotRaw{
 		"codex_bengalfox": {
-			LimitName: func() *string { v := "Spark Burst"; return &v }(),
+			LimitName: stringPtr("Spark Burst"),
 			Primary: &rateLimitWindowRaw{
 				UsedPercent:        55,
 				WindowDurationMins: intPtr(300),
@@ -183,7 +183,7 @@ func TestNormalizeSummaryAllowsSparkSelectionByLimitIDAndLimitName(t *testing.T)
 			},
 		},
 		"  another-window  ": {
-			LimitName: func() *string { v := "fast"; return &v }(),
+			LimitName: stringPtr("fast"),
 			Primary: &rateLimitWindowRaw{
 				UsedPercent: 80,
 			},
@@ -226,3 +226,5 @@ func TestRateLimitWindowForModelDoesNotFallbackToCodexForSparkModel(t *testing.T
 }
 
 func intPtr(v int) *int { return &v }
+
+func stringPtr(v string) *string { return &v }

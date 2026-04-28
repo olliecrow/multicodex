@@ -623,6 +623,12 @@ exit 1
 func createExecProfiles(t *testing.T, app *App, names ...string) {
 	t.Helper()
 
+	createTestProfiles(t, app, names...)
+}
+
+func createTestProfiles(t *testing.T, app *App, names ...string) {
+	t.Helper()
+
 	if err := app.store.EnsureBaseDirs(); err != nil {
 		t.Fatalf("EnsureBaseDirs: %v", err)
 	}
