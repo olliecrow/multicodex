@@ -82,9 +82,6 @@ func (s *OAuthSource) Fetch(ctx context.Context) (*Summary, error) {
 	if payload.RateLimit.PrimaryWindow == nil {
 		return nil, errors.New("oauth response missing primary_window")
 	}
-	if payload.RateLimit.SecondaryWindow == nil {
-		return nil, errors.New("oauth response missing secondary_window")
-	}
 
 	snapshot := rateLimitSnapshotRaw{
 		LimitID:  "codex",
@@ -94,11 +91,13 @@ func (s *OAuthSource) Fetch(ctx context.Context) (*Summary, error) {
 			WindowDurationMins: toMins(payload.RateLimit.PrimaryWindow.LimitWindowSeconds),
 			ResetsAt:           toInt64Ptr(payload.RateLimit.PrimaryWindow.ResetAt),
 		},
-		Secondary: &rateLimitWindowRaw{
+	}
+	if payload.RateLimit.SecondaryWindow != nil {
+		snapshot.Secondary = &rateLimitWindowRaw{
 			UsedPercent:        payload.RateLimit.SecondaryWindow.UsedPercent,
 			WindowDurationMins: toMins(payload.RateLimit.SecondaryWindow.LimitWindowSeconds),
 			ResetsAt:           toInt64Ptr(payload.RateLimit.SecondaryWindow.ResetAt),
-		},
+		}
 	}
 	rateLimitsByLimitID := map[string]rateLimitSnapshotRaw{
 		snapshot.LimitID: snapshot,

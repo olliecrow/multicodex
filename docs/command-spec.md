@@ -125,8 +125,8 @@
 - Runs a live terminal UI for Codex subscription usage across compatible local accounts.
 - Defaults to the integrated monitor UI when no monitor subcommand is provided.
 - Defaults both the poll interval and the per-poll fetch timeout to 60 seconds.
-- Prefers account definitions from multicodex profile config and monitor-owned account overrides.
-- Always includes the default Codex home as a candidate account home before broader filesystem discovery.
+- Builds account candidates from monitor-owned account overrides, multicodex profile config, the default Codex home, the active `CODEX_HOME`, and broader filesystem discovery.
+- When the same Codex home appears more than once, labels and source details prefer monitor-owned account overrides, then multicodex profiles, then the default Codex home, then the active `CODEX_HOME`, then auto-discovery.
 - Renders compact usage lines in each window card, for example `used: 12% [resets in 3h4m]`.
 - When Spark data is present for an account, the same panel also shows `used-spark: 8% [resets in 3h4m]` and keeps one row per account in the two-column layout.
 - Shows account labels instead of raw email addresses in the TUI when labels are available.
