@@ -27,13 +27,19 @@ func ResolvePaths() (Paths, error) {
 
 	defaultMulticodexHome := filepath.Join(home, "multicodex")
 	legacyMulticodexHome := filepath.Join(home, ".multicodex")
-	defaultCodexHome := os.Getenv("MULTICODEX_DEFAULT_CODEX_HOME")
+	defaultCodexHome, err := resolveConfiguredPath(os.Getenv("MULTICODEX_DEFAULT_CODEX_HOME"), home)
+	if err != nil {
+		return Paths{}, fmt.Errorf("resolve MULTICODEX_DEFAULT_CODEX_HOME: %w", err)
+	}
 	if defaultCodexHome == "" {
 		defaultCodexHome = filepath.Join(home, ".codex")
 	}
 	defaultAuthPath := filepath.Join(defaultCodexHome, "auth.json")
 
-	multicodexHome := os.Getenv("MULTICODEX_HOME")
+	multicodexHome, err := resolveConfiguredPath(os.Getenv("MULTICODEX_HOME"), home)
+	if err != nil {
+		return Paths{}, fmt.Errorf("resolve MULTICODEX_HOME: %w", err)
+	}
 	if multicodexHome == "" {
 		multicodexHome = defaultMulticodexHome
 		if err := migrateLegacyMulticodexHome(legacyMulticodexHome, multicodexHome); err != nil {
@@ -55,6 +61,26 @@ func ResolvePaths() (Paths, error) {
 		DefaultCodexHome: defaultCodexHome,
 		DefaultAuthPath:  defaultAuthPath,
 	}, nil
+}
+
+func resolveConfiguredPath(value, home string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", nil
+	}
+	if value == "~" {
+		value = home
+	} else if strings.HasPrefix(value, "~/") {
+		value = filepath.Join(home, value[2:])
+	}
+	if filepath.IsAbs(value) {
+		return filepath.Clean(value), nil
+	}
+	absolute, err := filepath.Abs(value)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Clean(absolute), nil
 }
 
 func migrateLegacyMulticodexHome(legacyPath, newPath string) error {
