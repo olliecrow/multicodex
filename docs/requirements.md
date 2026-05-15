@@ -7,7 +7,7 @@
 - User can log in to one or all configured profiles.
 - Default behavior must not alter the system default Codex session.
 - User can switch account for current terminal only.
-- User can explicitly switch global default Codex account.
+- Multicodex does not switch, restore, or manage the default Codex account.
 - Status view shows status for all configured profiles.
 - User can view live subscription usage across compatible local accounts from the same CLI.
 - User can run a fire-and-forget keepalive heartbeat across logged-in profiles.
@@ -21,7 +21,7 @@
 - Simple command names.
 - Predictable behavior.
 - Clear output showing what changed and what did not change.
-- Safe defaults with explicit commands for global effects.
+- Safe defaults with no multicodex commands for global auth effects.
 
 ## Technical requirements
 - Implementation language: Go.
@@ -35,7 +35,7 @@
 ## Compatibility requirements
 - Compatible with official Codex CLI login flows.
 - No dependence on API-key-only mode for core workflow.
-- Preserve compatibility with Codex app and regular CLI behavior.
+- Preserve regular Codex CLI behavior.
 - Profile-scoped multicodex runs should inherit current global Codex config by default unless the user explicitly creates a per-profile override.
 
 ## Constraints

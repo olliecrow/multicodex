@@ -6,8 +6,7 @@ Core idea:
 - Keep each account isolated in its own local profile context.
 - Keep persistent multicodex state in one canonical home-level directory (`~/multicodex`) by default.
 - Default to local terminal switching only.
-- Support an explicit global switch command when the user wants system-wide default behavior changed.
-- Touch the minimum files needed to switch auth context.
+- Do not manage the system default Codex auth account.
 - Show live subscription usage across compatible local accounts from the same product.
 - Provide non-mutating `doctor` and `dry-run` helpers for safe setup and operation preview.
 - Provide an optional `heartbeat` command for simple periodic keepalive checks across logged-in profiles.

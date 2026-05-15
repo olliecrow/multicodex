@@ -43,10 +43,10 @@ Enforcement: Build and test pipeline will run Go tooling only.
 References: `docs/requirements.md`, `docs/security-and-privacy.md`
 
 Decision: Keep account switching local-first and minimal-touch.
-Context: User wants local shell switching by default and careful handling of global defaults.
+Context: User wants local shell switching by default and careful handling of the default Codex account.
 Rationale: Minimize side effects and reduce risk to unrelated Codex state.
 Trade-offs: More explicit commands, less hidden magic.
-Enforcement: `multicodex use` only changes current shell context. `multicodex switch-global` is explicit.
+Enforcement: `multicodex use`, `multicodex cli`, `multicodex exec`, and profile-scoped `run` keep routing local to profile context.
 References: `docs/requirements.md`, `docs/command-spec.md`
 
 Decision: Never handle raw secrets directly in multicodex internals unless unavoidable.
@@ -76,13 +76,6 @@ Rationale: Reading email claim from local `id_token` gives consistent user-facin
 Trade-offs: Additional local parsing logic for JWT payload.
 Enforcement: Status helper and unit tests.
 References: `internal/multicodex/status.go`, `internal/multicodex/status_test.go`
-
-Decision: Restoring global default auth from file backup must replace symlink with a regular file.
-Context: Battle tests found restore could leave `~/.codex/auth.json` as a symlink while only changing target content.
-Rationale: Restore should return file shape and contents to original state, not only payload bytes.
-Trade-offs: One additional remove step before write.
-Enforcement: Restore path update and test asserting regular-file restoration.
-References: `internal/multicodex/switch_global.go`, `internal/multicodex/switch_global_test.go`
 
 Decision: Add doctor leak guards and auth-permission normalization.
 Context: Users need confidence that auth details are handled safely and do not get committed.
@@ -142,20 +135,20 @@ References: `cmd/multicodex/main.go`, `internal/multicodex/`, `README.md`, `docs
 
 Decision: Prefer targeted multicodex state ignore patterns over broad `multicodex/` path ignores.
 Context: After introducing `internal/multicodex`, a broad `multicodex/` ignore rule risked masking source directories and weakening review safety.
-Rationale: Explicit patterns for `config.json`, `profiles/`, and `backups/` retain secret-safety goals without accidentally hiding tracked source files.
+Rationale: Explicit patterns for `config.json` and `profiles/` retain secret-safety goals without accidentally hiding tracked source files.
 Trade-offs: Slightly longer ignore patterns and doctor guidance.
 Enforcement: `.gitignore` uses targeted patterns; doctor missing-pattern checks accept legacy `.multicodex/` or targeted `multicodex` state patterns; tests assert coverage.
 References: `.gitignore`, `internal/multicodex/doctor.go`, `internal/multicodex/doctor_test.go`, `docs/security-and-privacy.md`
 
-Decision: Verify newly added profiles with a real read-only Codex request and a follow-up default-profile check.
-Context: `codex login status` proves auth is present, but it does not prove the profile can complete an actual request or that profile-scoped execution left the default/global profile untouched.
-Rationale: A small read-only `codex exec` smoke test catches broken profile wiring and accidental global-switch regressions with minimal risk.
+Decision: Verify newly added profiles with a real read-only Codex request and a follow-up default-account check.
+Context: `codex login status` proves auth is present, but it does not prove the profile can complete an actual request or that profile-scoped execution left the default Codex account untouched.
+Rationale: A small read-only `codex exec` smoke test catches broken profile wiring and account-routing regressions with minimal risk.
 Trade-offs: Uses a small amount of real model usage during verification.
-Enforcement: For manual profile verification, run `multicodex run <name> -- codex exec -s read-only -C <repo> ...` and confirm `multicodex status` reports the same global default before and after the test.
+Enforcement: For manual profile verification, run `multicodex run <name> -- codex exec -s read-only -C <repo> ...` and confirm the normal default Codex account was not changed by multicodex.
 References: `README.md`, `docs/implementation-notes.md`, `docs/command-spec.md`
 
 Decision: Make heartbeat cron-safe with local locking, bounded retries, and read-only execution.
-Context: Scheduled keepalive runs should not overlap, should tolerate transient failures, and should never need to mutate the current workspace or the global default Codex account.
+Context: Scheduled keepalive runs should not overlap, should tolerate transient failures, and should never need to mutate the current workspace or the default Codex account.
 Rationale: A local OS lock avoids duplicate overlapping work, one retry with linear backoff handles short-lived provider hiccups, and forcing `codex exec` into read-only mode reduces accidental side effects during automated refresh runs.
 Trade-offs: Slightly more heartbeat code and a small delay before final failure when retries are used.
 Enforcement: `multicodex heartbeat` acquires a non-blocking lock under multicodex home, retries failed profile heartbeats, runs `codex exec` with `--sandbox read-only`, and keeps all auth routing profile-scoped via `CODEX_HOME`.
@@ -203,46 +196,25 @@ Trade-offs: Selection is still best-effort snapshot routing, so simultaneous lau
 Enforcement: `multicodex exec` forwards all arguments directly to `codex exec`, bypasses profile selection for help requests, treats configured profiles below 40% five-hour usage as eligible only when their weekly window is not known to be exhausted, picks the eligible profile whose weekly reset is soonest, falls back to a random eligible profile when the weekly reset is unknown for all eligible profiles, falls back to a random accessible profile when none are eligible, and uses a random configured profile when usage data is unavailable for every profile.
 References: `internal/multicodex/exec.go`, `internal/multicodex/exec_test.go`, `internal/monitor/usage/select.go`, `internal/monitor/usage/select_test.go`, `README.md`, `docs/command-spec.md`
 
-Decision: Launch Codex Desktop with shared `CODEX_HOME` state and one app-data folder per profile.
-Context: Users want more than one Codex Mac app window at the same time, with one shared left-side project list and the ability to choose which profile each new app window starts with.
-Rationale: On macOS, `open -n -a` can launch separate `Codex.app` processes, and the launched app process keeps the shell environment, including `CODEX_HOME`. Later investigation showed Codex keeps sidebar and thread state under `CODEX_HOME`, while sharing one large Electron app-data folder across every app window appears to contribute to lag. Checking launch prerequisites first, then switching the shared global auth pointer and launching the app with the shared default `CODEX_HOME`, no active profile marker, and one stable app-data folder per profile keeps one shared sidebar while reducing cross-profile Electron app-data contention and avoiding auth changes when launch cannot proceed.
-Trade-offs: This command is macOS-only, depends on an installed `Codex.app`, and separate app processes can still consume usage independently at the same time. Account split is best-effort rather than a hard wall because Codex caches auth on startup but can reload auth later in some flows. App-level cache and window state are now separated per profile instead of being shared across every app window.
-Enforcement: `multicodex app <name>` is macOS-only, verifies the profile, `Codex.app`, and app-data directory before switching the shared default auth pointer to the selected profile, launches `Codex.app` via `open -n -a` with the shared default `CODEX_HOME` and without `MULTICODEX_ACTIVE_PROFILE`, passes `--user-data-dir=~/Library/Application Support/Codex-multicodex/<profile>`, reuses that same folder on later launches for the same profile, exits after handing the launch off to macOS instead of keeping a helper daemon running, and reuses the same file-backed-auth isolation checks as `switch-global`.
-References: `internal/multicodex/app_launch.go`, `internal/multicodex/app_launch_test.go`, `internal/multicodex/help.go`, `internal/multicodex/completion.go`, `README.md`, `docs/command-spec.md`
-
 Decision: Parse `cli_auth_credentials_store` by exact key instead of substring matching.
 Context: Shared profile configs rely on the default Codex `config.toml`, so auth-isolation checks must inspect the real credential-store setting rather than unrelated comments or strings.
-Rationale: A small exact-key parser removes false positives without adding a TOML dependency and keeps login, doctor, exec, heartbeat, and switch-global checks aligned.
+Rationale: A small exact-key parser removes false positives without adding a TOML dependency and keeps login, doctor, exec, heartbeat, and profile-scoped run checks aligned.
 Trade-offs: Slightly more parsing code to maintain, but much lower risk of silently misclassifying auth isolation.
 Enforcement: All file-store checks route through the shared parser and regression tests cover comments, unrelated strings, and nested tables.
 References: `internal/multicodex/config.go`, `internal/multicodex/config_test.go`, `internal/multicodex/doctor.go`, `internal/multicodex/app.go`
 
-Decision: Refresh global restore metadata when default auth changes outside multicodex.
-Context: Users may log into the default Codex home outside multicodex after an earlier switch, and restore should not send them back to stale historical auth.
-Rationale: Preserving the latest non-multicodex-managed default auth state keeps restore safe while still preserving the original external state across profile-to-profile multicodex switching.
-Trade-offs: Backup logic is more stateful than a one-time snapshot, but it better matches real operator expectations and avoids deleting newer default auth.
-Enforcement: `switch-global` refreshes backup metadata only when the current default auth is not a multicodex-managed profile symlink and differs from the stored backup; restore tests cover external changes and profile-to-profile switching.
-References: `internal/multicodex/switch_global.go`, `internal/multicodex/switch_global_test.go`, `README.md`, `docs/implementation-notes.md`
-
-Decision: Serialize and roll back shared default auth changes.
-Context: `multicodex switch-global` and `multicodex app` both change the shared default `auth.json` on purpose, and either command may run while another multicodex process is active.
-Rationale: A lock tied to the shared default auth path protects every process that is touching the same auth file, even when the processes use different `MULTICODEX_HOME` values. Replacing auth through a temporary path avoids leaving the default auth missing between remove and create steps. Rolling back app launch failures keeps a failed app handoff from leaving the wrong default account selected.
-Trade-offs: Global auth operations now wait for each other. If rollback itself fails, the user sees the original failure plus the rollback failure.
-Enforcement: `WithGlobalAuthLock` locks beside the shared default `auth.json`; symlink and file restores write a temporary path and rename it into place; `cmdSwitchGlobal` and `cmdApp` run shared auth changes under that lock; app launch failure restores the previous auth state before returning; tests cover shared lock scope, replace refusal for directories, temp cleanup, app launch failure restore, and restore after state-save failure.
-References: `internal/multicodex/switch_global.go`, `internal/multicodex/switch_global_test.go`, `internal/multicodex/app_launch.go`, `internal/multicodex/app_launch_test.go`, `README.md`, `docs/command-spec.md`
-
 Decision: Keep read-only command discovery from changing local state.
-Context: Help, completion, status, doctor, monitor, dry-run, and unknown commands are often used for inspection or shell setup. Running them should not move legacy `~/.multicodex` state or rewrite the default auth symlink.
+Context: Help, completion, status, doctor, monitor, dry-run, and unknown commands are often used for inspection or shell setup. Running them should not move local multicodex state.
 Rationale: Read-only commands need to be safe probes. Migration remains useful, but it should happen only when a known command actually needs normal multicodex state.
 Trade-offs: Legacy migration can happen a little later than before, on the first known command that needs writable multicodex state.
-Enforcement: `RunCLI` handles top-level help, direct command help such as `cli --help`, version, and `exec --help` before migration, validates unknown commands before path resolution, and uses no-migration path resolution for read-only commands. `status` loads existing config without creating a fresh home, and monitor commands no longer create the monitor data dir just to inspect usage. Tests cover help, unknown commands, status, command help, and `exec --help` leaving legacy state and default auth symlinks untouched.
+Enforcement: `RunCLI` handles top-level help, direct command help such as `cli --help`, version, and `exec --help` before migration, validates unknown commands before path resolution, and uses no-migration path resolution for read-only commands. `status` loads existing config without creating a fresh home, and monitor commands no longer create the monitor data dir just to inspect usage. Tests cover help, unknown commands, status, command help, and `exec --help` leaving local state untouched.
 References: `cmd/multicodex/main.go`, `internal/multicodex/app.go`, `internal/multicodex/monitor.go`, `internal/multicodex/run_cli_test.go`, `internal/multicodex/paths.go`, `internal/multicodex/paths_test.go`
 
 Decision: Clear stale profile environment for neutral Codex calls.
-Context: `multicodex exec --help`, `multicodex app`, and the monitor app-server can be launched from a shell that still has profile-scoped `CODEX_HOME` and `MULTICODEX_ACTIVE_PROFILE` values.
-Rationale: Neutral or shared-state commands should not silently inherit a previous profile. The monitor and app should use the intended default Codex home, and help passthrough should act like plain `codex exec --help`.
+Context: `multicodex exec --help` and the monitor app-server can be launched from a shell that still has profile-scoped `CODEX_HOME` and `MULTICODEX_ACTIVE_PROFILE` values.
+Rationale: Neutral or shared-state commands should not silently inherit a previous profile. The monitor should use the intended default Codex home, and help passthrough should act like plain `codex exec --help`.
 Trade-offs: Callers that want profile-specific behavior must use a profile-scoped command instead of relying on inherited environment.
-Enforcement: Shared environment helpers strip stale `CODEX_HOME` and `MULTICODEX_ACTIVE_PROFILE` before adding the intended `CODEX_HOME`; `exec --help` uses the neutral helper; app launch uses the shared helper instead of setting an active profile marker; monitor app-server startup strips stale profile state; monitor default-home discovery respects `MULTICODEX_DEFAULT_CODEX_HOME` first, then `CODEX_HOME`; tests cover each case.
+Enforcement: Shared environment helpers strip stale `CODEX_HOME` and `MULTICODEX_ACTIVE_PROFILE` before adding the intended `CODEX_HOME`; `exec --help` uses the neutral helper; monitor app-server startup strips stale profile state; monitor default-home discovery respects `MULTICODEX_DEFAULT_CODEX_HOME` first, then `CODEX_HOME`; tests cover each case.
 References: `internal/multicodex/process.go`, `internal/multicodex/exec.go`, `internal/multicodex/exec_help_test.go`, `internal/monitor/usage/accounts.go`, `internal/monitor/usage/accounts_test.go`, `internal/monitor/usage/appserver.go`, `internal/monitor/usage/appserver_test.go`
 
 Decision: Keep monitor doctor usable with fallback while surfacing degraded state explicitly.
@@ -251,13 +223,6 @@ Rationale: Preserving exit-success when one source works avoids breaking automat
 Trade-offs: Human output gains one more summary state to interpret.
 Enforcement: `monitor doctor` reports PASS, PASS (degraded), or FAIL based on per-source checks, while exit status still succeeds when at least one source works.
 References: `internal/monitor/usage/doctor.go`, `internal/multicodex/monitor.go`, `README.md`, `docs/command-spec.md`
-
-Decision: Treat the default auth symlink target as an active-home alias in the monitor.
-Context: In common multicodex setups, `~/.codex/auth.json` is a symlink into the currently selected profile home, so the logical active account may be reachable through both `~/.codex` and `~/multicodex/profiles/<name>/codex-home`.
-Rationale: Matching only the `~/.codex` directory can blank the active window cards when the default alias row fails even though the linked profile row succeeds in the same refresh.
-Trade-offs: Active-account detection now follows one extra filesystem indirection through `auth.json`, which slightly increases coupling to the file-backed-auth setup already required by multicodex.
-Enforcement: Monitor active-account selection matches both the active Codex home and the resolved directory of its `auth.json` symlink target; regression tests cover the alias case.
-References: `internal/monitor/usage/fetcher.go`, `internal/monitor/usage/fetcher_test.go`
 
 Decision: Keep last good official monitor window cards visible during full refresh outages, and prioritize concrete fetch failures in diagnostics.
 Context: The monitor can hit short periods where every official usage fetch fails together even though the last good official data is still useful and the local token estimate still refreshes. In that state, blanking every window card to `unavailable` is noisy and hides the more useful fetch error.
@@ -272,13 +237,6 @@ Rationale: Matching the default fetch timeout to the existing 60-second poll clo
 Trade-offs: A truly degraded refresh now takes longer to surface as failed by default, but operators can still lower it with `--timeout` when they want faster failure.
 Enforcement: The TUI default timeout and the user-facing monitor/help usage strings default to 60 seconds; shorter timeouts remain available via `--timeout` for operators who prefer faster failure. When fallback is available, the fetcher caps reserved fallback time so the primary path keeps most of a long refresh budget.
 References: `internal/monitor/tui/model.go`, `internal/multicodex/monitor.go`, `internal/multicodex/help.go`, `internal/monitor/usage/fetcher.go`, `internal/monitor/usage/fetcher_test.go`
-
-Decision: Active-account alias rows prefer the real profile label over the synthetic `default` alias.
-Context: When `~/.codex/auth.json` is linked into a multicodex profile home, the monitor can discover the same logical account twice: once via the synthetic `default` row and once via the real profile row.
-Rationale: Surfacing the synthetic `default` label for that deduplicated account makes the active window cards disagree with `multicodex status` and obscures which profile is actually selected.
-Trade-offs: The monitor now treats the profile row as the canonical display identity for an active alias pair, even if the synthetic `default` row was encountered later in the refresh.
-Enforcement: Active-account label selection and deduplicated account-row selection both prefer non-synthetic profile labels over the `default` alias when they resolve to the same active account; regression tests cover healthy and degraded alias cases.
-References: `internal/monitor/usage/fetcher.go`, `internal/monitor/usage/fetcher_test.go`
 
 Decision: Active account fetches bypass the shared inactive-account worker pool.
 Context: The monitor fetcher limits background account work to four pooled workers, which can otherwise leave the active account queued behind slower inactive accounts in larger setups.
@@ -392,15 +350,3 @@ Enforcement:
 `cmdCLI` repairs the profile home, checks file-backed auth, and launches Codex with the selected profile's `CODEX_HOME`. Tests run two profile-scoped CLI sessions at the same time and assert goal-related state lands in each profile home, not the shared default Codex home.
 References:
 `internal/multicodex/cli.go`, `internal/multicodex/cli_test.go`, `README.md`, `docs/command-spec.md`
-
-Decision: Remove global Codex auth switching and Codex app launch support from Multicodex.
-Context:
-The owner wants Multicodex to keep profile-local CLI and exec capabilities, but no longer wants Multicodex to change, switch, restore, or otherwise manage the global Codex account. The Codex desktop app path has been unreliable, especially when launched through Multicodex after global auth switching.
-Rationale:
-Changing the shared default Codex auth file is too risky for normal Codex app and CLI use. Profile-local `CODEX_HOME` routing already preserves the useful Multicodex behavior for `cli` and `exec` without touching global auth.
-Trade-offs:
-Users lose `multicodex app`, `multicodex switch-global`, and restore-default convenience. The default system Codex account must be managed through normal Codex login outside Multicodex.
-Enforcement:
-Remove app and switch-global commands, their help/completion/dry-run/docs/tests, and support code that writes, symlinks, backs up, restores, or locks the default Codex auth path. Preserve `multicodex cli` and `multicodex exec` behavior and tests. The expected global Codex account is `crowoy`, but Multicodex must not set it programmatically.
-References:
-`docs/global-auth-and-app-removal.md`, `internal/multicodex/cli.go`, `internal/multicodex/exec.go`
