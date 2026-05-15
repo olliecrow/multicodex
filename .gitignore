@@ -5,7 +5,6 @@ plan/
 .multicodex/
 **/multicodex/config.json
 **/multicodex/profiles/
-**/multicodex/backups/
 .codex/
 **/auth.json
 **/*.token

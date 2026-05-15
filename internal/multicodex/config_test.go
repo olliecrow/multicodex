@@ -40,6 +40,17 @@ func TestStoreSaveAndLoad(t *testing.T) {
 	if got := info.Mode().Perm(); got != 0o600 {
 		t.Fatalf("expected config mode 0600, got %o", got)
 	}
+
+	raw, err := os.ReadFile(paths.ConfigPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if strings.Contains(string(raw), `"global"`) {
+		t.Fatalf("config should not contain global auth state: %s", string(raw))
+	}
+	if _, err := os.Stat(filepath.Join(paths.MulticodexHome, "backups")); !os.IsNotExist(err) {
+		t.Fatalf("expected no backup directory, stat err=%v", err)
+	}
 }
 
 func TestStoreLoadRejectsInvalidProfileNames(t *testing.T) {
