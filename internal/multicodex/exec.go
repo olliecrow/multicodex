@@ -56,7 +56,7 @@ var chooseRandomProfileName = func(names []string) string {
 
 func (a *App) cmdExec(args []string) error {
 	if execArgsAreHelpRequest(args) {
-		return RunCommand("codex", append([]string{"exec"}, args...))
+		return runCommandWithEnv("codex", append([]string{"exec"}, args...), withCodexHomeEnv(os.Environ(), ""), fmt.Sprintf("command failed: %s", strings.Join(append([]string{"codex", "exec"}, args...), " ")))
 	}
 	model := parseModelFromExecArgs(args)
 

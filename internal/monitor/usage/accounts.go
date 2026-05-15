@@ -18,6 +18,7 @@ const (
 	defaultAccountsFileName      = "accounts.json"
 	accountsFileEnvVar           = "CODEX_USAGE_MONITOR_ACCOUNTS_FILE"
 	multicodexHomeEnvVar         = "MULTICODEX_HOME"
+	defaultCodexHomeEnvVar       = "MULTICODEX_DEFAULT_CODEX_HOME"
 )
 
 type accountFile struct {
@@ -448,6 +449,9 @@ func EnsureMonitorDataDir() error {
 }
 
 func defaultCodexHome() (string, error) {
+	if codexHome := strings.TrimSpace(os.Getenv(defaultCodexHomeEnvVar)); codexHome != "" {
+		return expandPath(codexHome)
+	}
 	if codexHome := strings.TrimSpace(os.Getenv("CODEX_HOME")); codexHome != "" {
 		return expandPath(codexHome)
 	}

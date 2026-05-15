@@ -20,6 +20,14 @@ type Paths struct {
 }
 
 func ResolvePaths() (Paths, error) {
+	return resolvePaths(true)
+}
+
+func ResolvePathsWithoutMigration() (Paths, error) {
+	return resolvePaths(false)
+}
+
+func resolvePaths(runMigration bool) (Paths, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return Paths{}, fmt.Errorf("resolve home directory: %w", err)
@@ -42,14 +50,16 @@ func ResolvePaths() (Paths, error) {
 	}
 	if multicodexHome == "" {
 		multicodexHome = defaultMulticodexHome
-		if err := migrateLegacyMulticodexHome(legacyMulticodexHome, multicodexHome); err != nil {
-			return Paths{}, err
-		}
-		if err := rewriteMigratedConfigPaths(multicodexHome, legacyMulticodexHome); err != nil {
-			return Paths{}, err
-		}
-		if err := rewriteMigratedDefaultAuthSymlink(defaultAuthPath, legacyMulticodexHome, multicodexHome); err != nil {
-			return Paths{}, err
+		if runMigration {
+			if err := migrateLegacyMulticodexHome(legacyMulticodexHome, multicodexHome); err != nil {
+				return Paths{}, err
+			}
+			if err := rewriteMigratedConfigPaths(multicodexHome, legacyMulticodexHome); err != nil {
+				return Paths{}, err
+			}
+			if err := rewriteMigratedDefaultAuthSymlink(defaultAuthPath, legacyMulticodexHome, multicodexHome); err != nil {
+				return Paths{}, err
+			}
 		}
 	}
 
@@ -194,10 +204,7 @@ func rewriteMigratedDefaultAuthSymlink(defaultAuthPath, legacyHome, newHome stri
 		return nil
 	}
 
-	if err := os.Remove(defaultAuthPath); err != nil {
-		return fmt.Errorf("replace default auth symlink after migration: %w", err)
-	}
-	if err := os.Symlink(rewritten, defaultAuthPath); err != nil {
+	if err := replaceAuthWithSymlink(defaultAuthPath, rewritten); err != nil {
 		return fmt.Errorf("rewrite default auth symlink target after migration: %w", err)
 	}
 	return nil

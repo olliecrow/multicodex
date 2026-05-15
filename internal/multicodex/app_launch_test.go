@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestCmdAppLaunchesOpenWithProfileEnv(t *testing.T) {
+func TestCmdAppLaunchesOpenWithSharedDefaultHomeOnly(t *testing.T) {
 	app, logPath, appPath := newAppLaunchTestApp(t)
 	createExecProfiles(t, app, "alpha")
 	alphaHome := filepath.Join(app.store.paths.ProfilesDir, "alpha", "codex-home")
@@ -21,6 +21,7 @@ func TestCmdAppLaunchesOpenWithProfileEnv(t *testing.T) {
 	defer func() { desktopAppGOOS = originalGOOS }()
 
 	t.Setenv(envCodexAppPath, appPath)
+	t.Setenv("MULTICODEX_ACTIVE_PROFILE", "stale")
 
 	if err := app.Run([]string{"app", "alpha"}); err != nil {
 		t.Fatalf("app command failed: %v", err)
@@ -42,8 +43,8 @@ func TestCmdAppLaunchesOpenWithProfileEnv(t *testing.T) {
 	if !strings.Contains(log, "codex_home="+wantHome) {
 		t.Fatalf("expected shared default codex home in log, got %q", log)
 	}
-	if !strings.Contains(log, "profile=alpha") {
-		t.Fatalf("expected active profile in log, got %q", log)
+	if !strings.Contains(log, "profile=\n") {
+		t.Fatalf("expected active profile env to be cleared for shared app home, got %q", log)
 	}
 	if info, err := os.Stat(wantAppDataDir); err != nil || !info.IsDir() {
 		t.Fatalf("expected app data dir %q to exist, stat err=%v", wantAppDataDir, err)
@@ -141,6 +142,82 @@ func TestCmdAppDoesNotSwitchGlobalAuthBeforeLaunchPrerequisites(t *testing.T) {
 	}
 	if cfg.Global.CurrentProfile != "" {
 		t.Fatalf("expected current profile to remain empty, got %q", cfg.Global.CurrentProfile)
+	}
+}
+
+func TestCmdAppRestoresGlobalAuthWhenOpenFails(t *testing.T) {
+	app, logPath, appPath := newAppLaunchTestApp(t)
+	createExecProfiles(t, app, "alpha")
+	alphaHome := filepath.Join(app.store.paths.ProfilesDir, "alpha", "codex-home")
+	if err := os.WriteFile(filepath.Join(alphaHome, "auth.json"), []byte(`{"tokens":{"access_token":"x"}}`), 0o600); err != nil {
+		t.Fatalf("write profile auth: %v", err)
+	}
+	if err := os.WriteFile(app.store.paths.DefaultAuthPath, []byte("default-auth"), 0o600); err != nil {
+		t.Fatalf("write default auth: %v", err)
+	}
+	fakeOpenPath := filepath.Join(filepath.Dir(logPath), "bin", "open")
+	script := "#!/usr/bin/env bash\nset -euo pipefail\nprintf 'failed open\\n' > " + shellQuote(logPath) + "\nexit 7\n"
+	if err := os.WriteFile(fakeOpenPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("replace fake open: %v", err)
+	}
+
+	originalGOOS := desktopAppGOOS
+	desktopAppGOOS = "darwin"
+	defer func() { desktopAppGOOS = originalGOOS }()
+
+	t.Setenv(envCodexAppPath, appPath)
+
+	err := app.Run([]string{"app", "alpha"})
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("expected ExitError, got %T (%v)", err, err)
+	}
+	if got, err := os.ReadFile(app.store.paths.DefaultAuthPath); err != nil || string(got) != "default-auth" {
+		t.Fatalf("expected default auth to be restored, got %q err=%v", got, err)
+	}
+	cfg, err := app.store.Load()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.Global.CurrentProfile != "" {
+		t.Fatalf("expected current profile to be restored, got %q", cfg.Global.CurrentProfile)
+	}
+}
+
+func TestCmdAppRestoreHelperRestoresAuthEvenWhenSaveFails(t *testing.T) {
+	app, _, _ := newAppLaunchTestApp(t)
+	createExecProfiles(t, app, "alpha")
+	cfg, err := app.store.Load()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	profile := cfg.Profiles["alpha"]
+	if err := os.WriteFile(filepath.Join(profile.CodexHome, "auth.json"), []byte(`{"tokens":{"access_token":"x"}}`), 0o600); err != nil {
+		t.Fatalf("write profile auth: %v", err)
+	}
+	if err := os.WriteFile(app.store.paths.DefaultAuthPath, []byte("default-auth"), 0o600); err != nil {
+		t.Fatalf("write default auth: %v", err)
+	}
+	if err := app.store.SwitchGlobalAuthToProfile(cfg, profile); err != nil {
+		t.Fatalf("switch auth: %v", err)
+	}
+	if err := os.Remove(app.store.paths.ConfigPath); err != nil {
+		t.Fatalf("remove config file: %v", err)
+	}
+	if err := os.Mkdir(app.store.paths.ConfigPath, 0o700); err != nil {
+		t.Fatalf("replace config path with directory: %v", err)
+	}
+
+	err = app.restoreGlobalAuthAfterAppLaunchFailure(cfg, errors.New("save failed"))
+	if err == nil {
+		t.Fatalf("expected save failure to be returned")
+	}
+	got, readErr := os.ReadFile(app.store.paths.DefaultAuthPath)
+	if readErr != nil {
+		t.Fatalf("read restored auth: %v", readErr)
+	}
+	if string(got) != "default-auth" {
+		t.Fatalf("expected default auth to be restored, got %q", got)
 	}
 }
 
