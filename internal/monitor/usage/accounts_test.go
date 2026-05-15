@@ -33,6 +33,64 @@ func TestLoadMonitorAccountsDefaultsWhenFileMissing(t *testing.T) {
 	}
 }
 
+func TestLoadMonitorAccountsUsesConfiguredDefaultCodexHome(t *testing.T) {
+	tmp := t.TempDir()
+	configuredHome := filepath.Join(tmp, "custom-default-codex")
+	t.Setenv("HOME", tmp)
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv(defaultCodexHomeEnvVar, configuredHome)
+	t.Setenv(multicodexHomeEnvVar, filepath.Join(tmp, defaultMulticodexHomeDirName))
+	t.Setenv(accountsFileEnvVar, filepath.Join(tmp, "missing.json"))
+
+	accounts, warning, err := loadMonitorAccounts()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if warning != "" {
+		t.Fatalf("expected no warning, got %q", warning)
+	}
+	if len(accounts) == 0 {
+		t.Fatalf("expected default account")
+	}
+	if accounts[0].CodexHome != configuredHome {
+		t.Fatalf("expected configured default codex home %q, got %q", configuredHome, accounts[0].CodexHome)
+	}
+}
+
+func TestLoadMonitorAccountsPrefersConfiguredDefaultOverActiveCodexHome(t *testing.T) {
+	tmp := t.TempDir()
+	configuredHome := filepath.Join(tmp, "custom-default-codex")
+	activeHome := filepath.Join(tmp, "stale-profile-codex")
+	if err := os.MkdirAll(configuredHome, 0o700); err != nil {
+		t.Fatalf("mkdir configured home: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configuredHome, "auth.json"), []byte(`{"tokens":{"access_token":"x"}}`), 0o600); err != nil {
+		t.Fatalf("write configured auth: %v", err)
+	}
+	t.Setenv("HOME", tmp)
+	t.Setenv("CODEX_HOME", activeHome)
+	t.Setenv(defaultCodexHomeEnvVar, configuredHome)
+	t.Setenv(multicodexHomeEnvVar, filepath.Join(tmp, defaultMulticodexHomeDirName))
+	t.Setenv(accountsFileEnvVar, filepath.Join(tmp, "missing.json"))
+
+	accounts, _, err := loadMonitorAccounts()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	byLabel := map[string]string{}
+	for _, account := range accounts {
+		byLabel[account.Label] = account.CodexHome
+	}
+	expectedConfiguredHome := normalizeHome(configuredHome)
+	if byLabel["default"] != expectedConfiguredHome {
+		t.Fatalf("expected default account from configured home %q, got %q", expectedConfiguredHome, byLabel["default"])
+	}
+	expectedActiveHome := normalizeHome(activeHome)
+	if byLabel["active"] != expectedActiveHome {
+		t.Fatalf("expected active account from CODEX_HOME %q, got %q", expectedActiveHome, byLabel["active"])
+	}
+}
+
 func TestLoadMonitorAccountsFromFileWithDedup(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)

@@ -18,11 +18,84 @@ type App struct {
 }
 
 func NewApp() (*App, error) {
-	paths, err := ResolvePaths()
+	return newApp(true)
+}
+
+func NewAppWithoutMigration() (*App, error) {
+	return newApp(false)
+}
+
+func newApp(runMigration bool) (*App, error) {
+	var (
+		paths Paths
+		err   error
+	)
+	if runMigration {
+		paths, err = ResolvePaths()
+	} else {
+		paths, err = ResolvePathsWithoutMigration()
+	}
 	if err != nil {
 		return nil, err
 	}
 	return &App{store: NewStore(paths)}, nil
+}
+
+func RunCLI(args []string) error {
+	if len(args) == 0 {
+		printHelp()
+		return nil
+	}
+	switch args[0] {
+	case "help", "-h", "--help":
+		if len(args) == 1 {
+			printHelp()
+			return nil
+		}
+		app, err := newApp(false)
+		if err != nil {
+			return err
+		}
+		return app.Run(args)
+	case "version", "-v", "--version":
+		printVersion()
+		return nil
+	}
+	if args[0] == "exec" && execArgsAreHelpRequest(args[1:]) {
+		app, err := newApp(false)
+		if err != nil {
+			return err
+		}
+		return app.Run(args)
+	}
+	if len(args) == 2 && (args[1] == "-h" || args[1] == "--help") {
+		app, err := newApp(false)
+		if err != nil {
+			return err
+		}
+		return app.cmdHelp([]string{args[0]})
+	}
+
+	runMigration, known := commandStartupMigration(args[0])
+	if !known {
+		return &ExitError{Code: 2, Message: fmt.Sprintf("unknown command: %s\nrun \"multicodex help\" for available commands", args[0])}
+	}
+	app, err := newApp(runMigration)
+	if err != nil {
+		return err
+	}
+	return app.Run(args)
+}
+
+func commandStartupMigration(command string) (bool, bool) {
+	switch command {
+	case "status", "doctor", "dry-run", "monitor", "completion", "__complete-profiles":
+		return false, true
+	case "init", "add", "login", "login-all", "use", "app", "cli", "run", "exec", "switch-global", "heartbeat":
+		return true, true
+	default:
+		return false, false
+	}
 }
 
 func (a *App) Run(args []string) error {
@@ -345,11 +418,16 @@ func (a *App) cmdSwitchGlobal(args []string) error {
 	}
 
 	if restoreDefault {
-		changed, err := a.store.RestoreGlobalAuth(cfg)
+		changed := false
+		err := a.store.WithGlobalAuthLock(func() error {
+			var restoreErr error
+			changed, restoreErr = a.store.RestoreGlobalAuth(cfg)
+			if restoreErr != nil {
+				return restoreErr
+			}
+			return a.store.Save(cfg)
+		})
 		if err != nil {
-			return err
-		}
-		if err := a.store.Save(cfg); err != nil {
 			return err
 		}
 		if changed {
@@ -373,10 +451,12 @@ func (a *App) cmdSwitchGlobal(args []string) error {
 		}
 		fmt.Fprintf(os.Stderr, "warning: forcing global switch despite disabled file-backed auth isolation: %v\n", err)
 	}
-	if err := a.store.SwitchGlobalAuthToProfile(cfg, profile); err != nil {
-		return err
-	}
-	if err := a.store.Save(cfg); err != nil {
+	if err := a.store.WithGlobalAuthLock(func() error {
+		if err := a.store.SwitchGlobalAuthToProfile(cfg, profile); err != nil {
+			return err
+		}
+		return a.store.Save(cfg)
+	}); err != nil {
 		return err
 	}
 
@@ -428,7 +508,7 @@ func parseSwitchGlobalArgs(args []string) (string, bool, bool, error) {
 }
 
 func (a *App) cmdStatus() error {
-	cfg, err := a.loadOrInitConfig()
+	cfg, err := a.loadConfigIfExists()
 	if err != nil {
 		return err
 	}

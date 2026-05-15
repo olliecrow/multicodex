@@ -115,6 +115,51 @@ func TestResolvePathsMigratesLegacyHome(t *testing.T) {
 	}
 }
 
+func TestResolvePathsWithoutMigrationLeavesLegacyStateUntouched(t *testing.T) {
+	home := t.TempDir()
+	legacyHome := filepath.Join(home, ".multicodex")
+	newHome := filepath.Join(home, "multicodex")
+	legacyProfileHome := filepath.Join(legacyHome, "profiles", "work", "codex-home")
+	if err := os.MkdirAll(legacyProfileHome, 0o700); err != nil {
+		t.Fatalf("mkdir legacy profile: %v", err)
+	}
+
+	defaultCodexHome := filepath.Join(home, ".codex")
+	if err := os.MkdirAll(defaultCodexHome, 0o700); err != nil {
+		t.Fatalf("mkdir default codex home: %v", err)
+	}
+	defaultAuthPath := filepath.Join(defaultCodexHome, "auth.json")
+	legacyTarget := filepath.Join(legacyProfileHome, "auth.json")
+	if err := os.Symlink(legacyTarget, defaultAuthPath); err != nil {
+		t.Fatalf("symlink default auth path: %v", err)
+	}
+
+	t.Setenv("HOME", home)
+	t.Setenv("MULTICODEX_HOME", "")
+	t.Setenv("MULTICODEX_DEFAULT_CODEX_HOME", "")
+
+	paths, err := ResolvePathsWithoutMigration()
+	if err != nil {
+		t.Fatalf("ResolvePathsWithoutMigration: %v", err)
+	}
+	if got, want := paths.MulticodexHome, newHome; got != want {
+		t.Fatalf("unexpected multicodex home: got=%q want=%q", got, want)
+	}
+	if _, err := os.Stat(legacyHome); err != nil {
+		t.Fatalf("expected legacy home to remain, stat err=%v", err)
+	}
+	if _, err := os.Stat(newHome); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected new home not to be created, stat err=%v", err)
+	}
+	gotTarget, err := os.Readlink(defaultAuthPath)
+	if err != nil {
+		t.Fatalf("read default auth symlink: %v", err)
+	}
+	if gotTarget != legacyTarget {
+		t.Fatalf("expected default auth target to remain %q, got %q", legacyTarget, gotTarget)
+	}
+}
+
 func TestResolvePathsSkipsLegacyMigrationWhenHomeIsExplicit(t *testing.T) {
 	home := t.TempDir()
 	legacyHome := filepath.Join(home, ".multicodex")

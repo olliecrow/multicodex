@@ -47,20 +47,35 @@ func (a *App) cmdApp(args []string) error {
 	if err := os.MkdirAll(appUserDataDir, 0o700); err != nil {
 		return fmt.Errorf("create app data dir: %w", err)
 	}
-	if err := a.store.SwitchGlobalAuthToProfile(cfg, profile); err != nil {
-		return err
-	}
-	if err := a.store.Save(cfg); err != nil {
-		return err
-	}
-
 	fmt.Printf("launching Codex app for profile %q with shared sidebar state and profile app data\n", name)
-	return runCommandWithEnv(
-		"open",
-		[]string{"-n", "-a", appPath, "--args", "--user-data-dir=" + appUserDataDir},
-		withProfileEnv(os.Environ(), a.store.paths.DefaultCodexHome, name),
-		"codex app launch failed",
-	)
+	return a.store.WithGlobalAuthLock(func() error {
+		if err := a.store.SwitchGlobalAuthToProfile(cfg, profile); err != nil {
+			return err
+		}
+		if err := a.store.Save(cfg); err != nil {
+			return a.restoreGlobalAuthAfterAppLaunchFailure(cfg, err)
+		}
+		err := runCommandWithEnv(
+			"open",
+			[]string{"-n", "-a", appPath, "--args", "--user-data-dir=" + appUserDataDir},
+			withCodexHomeEnv(os.Environ(), a.store.paths.DefaultCodexHome),
+			"codex app launch failed",
+		)
+		if err == nil {
+			return nil
+		}
+		return a.restoreGlobalAuthAfterAppLaunchFailure(cfg, err)
+	})
+}
+
+func (a *App) restoreGlobalAuthAfterAppLaunchFailure(cfg *Config, cause error) error {
+	if _, restoreErr := a.store.RestoreGlobalAuth(cfg); restoreErr != nil {
+		return fmt.Errorf("%w; additionally failed to restore global auth: %v", cause, restoreErr)
+	}
+	if saveErr := a.store.Save(cfg); saveErr != nil {
+		return fmt.Errorf("%w; additionally failed to save restored global auth state: %v", cause, saveErr)
+	}
+	return cause
 }
 
 func profileAppUserDataDir(profile string) (string, error) {

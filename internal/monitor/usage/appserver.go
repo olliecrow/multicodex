@@ -237,7 +237,7 @@ func (s *appServerSession) ensureStarted() error {
 	}
 
 	cmd := exec.Command("codex", "-s", "read-only", "-a", "untrusted", "app-server")
-	env := os.Environ()
+	env := withoutCodexProfileEnv(os.Environ())
 	if s.codexHome != "" {
 		env = upsertEnvVar(env, "CODEX_HOME", s.codexHome)
 	}
@@ -497,4 +497,15 @@ func upsertEnvVar(env []string, key, value string) []string {
 		}
 	}
 	return append(env, prefix+value)
+}
+
+func withoutCodexProfileEnv(env []string) []string {
+	clean := make([]string, 0, len(env))
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "CODEX_HOME=") || strings.HasPrefix(kv, "MULTICODEX_ACTIVE_PROFILE=") {
+			continue
+		}
+		clean = append(clean, kv)
+	}
+	return clean
 }

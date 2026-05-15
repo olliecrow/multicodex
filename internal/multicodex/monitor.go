@@ -48,10 +48,6 @@ func (a *App) runMonitorDoctor(args []string) error {
 	if *timeout <= 0 {
 		return &ExitError{Code: 2, Message: "error: --timeout must be > 0"}
 	}
-	if err := usage.EnsureMonitorDataDir(); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not ensure monitor data dir: %v\n", err)
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
 
@@ -102,9 +98,6 @@ func (a *App) runMonitorTUI(args []string) error {
 	}
 	if *timeout <= 0 {
 		return &ExitError{Code: 2, Message: "error: --timeout must be > 0"}
-	}
-	if err := usage.EnsureMonitorDataDir(); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not ensure monitor data dir: %v\n", err)
 	}
 	if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
 		return &ExitError{Code: 1, Message: "interactive monitor requires a TTY"}

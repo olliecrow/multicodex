@@ -9,12 +9,7 @@ import (
 )
 
 func main() {
-	app, err := multicodex.NewApp()
-	if err != nil {
-		fatal(err)
-	}
-
-	if err := app.Run(os.Args[1:]); err != nil {
+	if err := multicodex.RunCLI(os.Args[1:]); err != nil {
 		var exitErr *multicodex.ExitError
 		if errors.As(err, &exitErr) {
 			if exitErr.Message != "" {
