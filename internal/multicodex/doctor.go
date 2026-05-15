@@ -296,34 +296,19 @@ func collectGitignoreContent(root string) (string, error) {
 func missingIgnorePatterns(content string) []string {
 	required := []string{
 		".codex/",
+		"**/multicodex/config.json",
+		"**/multicodex/profiles/",
 		"**/auth.json",
 		".env",
 		".env.*",
 	}
-	missing := make([]string, 0, len(required)+1)
-	hasLegacyMulticodexPattern := strings.Contains(content, ".multicodex/")
-	hasTargetedMulticodexPatterns := containsAnyPattern(content, []string{
-		"multicodex/config.json",
-		"multicodex/profiles/",
-	})
-	if !hasLegacyMulticodexPattern && !hasTargetedMulticodexPatterns {
-		missing = append(missing, ".multicodex/ or **/multicodex/{config.json,profiles/}")
-	}
+	missing := make([]string, 0, len(required))
 	for _, pattern := range required {
 		if !strings.Contains(content, pattern) {
 			missing = append(missing, pattern)
 		}
 	}
 	return missing
-}
-
-func containsAnyPattern(content string, patterns []string) bool {
-	for _, pattern := range patterns {
-		if strings.Contains(content, pattern) {
-			return true
-		}
-	}
-	return false
 }
 
 func checkTrackedSensitiveFiles(root string) DoctorCheck {
@@ -359,9 +344,6 @@ func checkTrackedSensitiveFiles(root string) DoctorCheck {
 func isSensitiveTrackedPath(p string) bool {
 	clean := path.Clean(strings.ToLower(strings.ReplaceAll(strings.TrimSpace(p), "\\", "/")))
 	base := path.Base(clean)
-	if strings.Contains(clean, "/.multicodex/") || strings.HasPrefix(clean, ".multicodex/") {
-		return true
-	}
 	if clean == "multicodex/config.json" || strings.Contains(clean, "/multicodex/config.json") {
 		return true
 	}

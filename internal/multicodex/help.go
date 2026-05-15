@@ -140,7 +140,7 @@ var commandHelpByName = map[string]commandHelp{
 	},
 	"monitor completion": {
 		Usage:       "multicodex monitor completion [bash|zsh|fish]",
-		Description: "Compatibility alias for shell completion setup. This prints the full multicodex completion script and defaults to bash when no shell is provided.",
+		Description: "Print the full multicodex completion script from the monitor namespace. Defaults to bash when no shell is provided.",
 		Examples: []string{
 			"multicodex monitor completion",
 			"multicodex monitor completion zsh",

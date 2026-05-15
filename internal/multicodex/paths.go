@@ -1,8 +1,6 @@
 package multicodex
 
 import (
-	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -18,21 +16,20 @@ type Paths struct {
 }
 
 func ResolvePaths() (Paths, error) {
-	return resolvePaths(true)
+	return resolvePaths()
 }
 
-func ResolvePathsWithoutMigration() (Paths, error) {
-	return resolvePaths(false)
+func ResolvePathsReadOnly() (Paths, error) {
+	return resolvePaths()
 }
 
-func resolvePaths(runMigration bool) (Paths, error) {
+func resolvePaths() (Paths, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return Paths{}, fmt.Errorf("resolve home directory: %w", err)
 	}
 
 	defaultMulticodexHome := filepath.Join(home, "multicodex")
-	legacyMulticodexHome := filepath.Join(home, ".multicodex")
 	defaultCodexHome, err := resolveConfiguredPath(os.Getenv("MULTICODEX_DEFAULT_CODEX_HOME"), home)
 	if err != nil {
 		return Paths{}, fmt.Errorf("resolve MULTICODEX_DEFAULT_CODEX_HOME: %w", err)
@@ -46,14 +43,6 @@ func resolvePaths(runMigration bool) (Paths, error) {
 	}
 	if multicodexHome == "" {
 		multicodexHome = defaultMulticodexHome
-		if runMigration {
-			if err := migrateLegacyMulticodexHome(legacyMulticodexHome, multicodexHome); err != nil {
-				return Paths{}, err
-			}
-			if err := rewriteMigratedConfigPaths(multicodexHome, legacyMulticodexHome); err != nil {
-				return Paths{}, err
-			}
-		}
 	}
 
 	return Paths{
@@ -82,98 +71,4 @@ func resolveConfiguredPath(value, home string) (string, error) {
 		return "", err
 	}
 	return filepath.Clean(absolute), nil
-}
-
-func migrateLegacyMulticodexHome(legacyPath, newPath string) error {
-	if filepath.Clean(legacyPath) == filepath.Clean(newPath) {
-		return nil
-	}
-
-	legacyInfo, err := os.Stat(legacyPath)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		return fmt.Errorf("inspect legacy multicodex home: %w", err)
-	}
-	if !legacyInfo.IsDir() {
-		return fmt.Errorf("legacy multicodex home is not a directory: %s", legacyPath)
-	}
-
-	if _, err := os.Stat(newPath); err == nil {
-		return nil
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("inspect multicodex home: %w", err)
-	}
-
-	if err := os.MkdirAll(filepath.Dir(newPath), 0o700); err != nil {
-		return fmt.Errorf("prepare multicodex home parent: %w", err)
-	}
-	if err := os.Rename(legacyPath, newPath); err != nil {
-		return fmt.Errorf("migrate multicodex home from %s to %s: %w", legacyPath, newPath, err)
-	}
-	return nil
-}
-
-func rewriteMigratedConfigPaths(newHome, legacyHome string) error {
-	configPath := filepath.Join(newHome, "config.json")
-	b, err := os.ReadFile(configPath)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		return fmt.Errorf("read migrated config: %w", err)
-	}
-
-	cfg := DefaultConfig()
-	if err := json.Unmarshal(b, cfg); err != nil {
-		return fmt.Errorf("parse migrated config: %w", err)
-	}
-
-	changed := false
-	for name, profile := range cfg.Profiles {
-		rewritten := rewriteLegacyPathPrefix(profile.CodexHome, legacyHome, newHome)
-		if rewritten == profile.CodexHome {
-			continue
-		}
-		profile.CodexHome = rewritten
-		cfg.Profiles[name] = profile
-		changed = true
-	}
-
-	if !changed {
-		return nil
-	}
-
-	encoded, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode migrated config: %w", err)
-	}
-	tmpPath := configPath + ".tmp"
-	if err := os.WriteFile(tmpPath, append(encoded, '\n'), 0o600); err != nil {
-		return fmt.Errorf("write migrated config temp file: %w", err)
-	}
-	if err := os.Rename(tmpPath, configPath); err != nil {
-		return fmt.Errorf("replace migrated config: %w", err)
-	}
-	return nil
-}
-
-func rewriteLegacyPathPrefix(p, legacyHome, newHome string) string {
-	if p == "" {
-		return p
-	}
-	legacy := filepath.Clean(legacyHome)
-	current := filepath.Clean(p)
-	rel, err := filepath.Rel(legacy, current)
-	if err != nil {
-		return p
-	}
-	if rel == "." {
-		return filepath.Clean(newHome)
-	}
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return p
-	}
-	return filepath.Join(filepath.Clean(newHome), rel)
 }

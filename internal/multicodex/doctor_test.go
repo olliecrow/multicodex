@@ -148,15 +148,16 @@ func TestMissingIgnorePatterns(t *testing.T) {
 		t.Fatalf("expected no missing patterns, got %v", got)
 	}
 
-	minimal := ".multicodex/\n"
+	minimal := ".codex/\n"
 	got := missingIgnorePatterns(minimal)
-	want := []string{".codex/", "**/auth.json", ".env", ".env.*"}
+	want := []string{"**/multicodex/config.json", "**/multicodex/profiles/", "**/auth.json", ".env", ".env.*"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected missing patterns. got=%v want=%v", got, want)
 	}
 
 	minimalNew := "**/multicodex/profiles/\n**/multicodex/config.json\n"
 	got = missingIgnorePatterns(minimalNew)
+	want = []string{".codex/", "**/auth.json", ".env", ".env.*"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected missing patterns for new dir marker. got=%v want=%v", got, want)
 	}
@@ -169,7 +170,6 @@ func TestIsSensitiveTrackedPath(t *testing.T) {
 		path      string
 		sensitive bool
 	}{
-		{path: ".multicodex/config.json", sensitive: true},
 		{path: "multicodex/config.json", sensitive: true},
 		{path: "multicodex/profiles/work/codex-home/config.toml", sensitive: true},
 		{path: "multicodex/docs/readme.md", sensitive: false},

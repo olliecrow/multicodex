@@ -18,22 +18,22 @@ type App struct {
 }
 
 func NewApp() (*App, error) {
-	return newApp(true)
-}
-
-func NewAppWithoutMigration() (*App, error) {
 	return newApp(false)
 }
 
-func newApp(runMigration bool) (*App, error) {
+func NewReadOnlyApp() (*App, error) {
+	return newApp(true)
+}
+
+func newApp(readOnly bool) (*App, error) {
 	var (
 		paths Paths
 		err   error
 	)
-	if runMigration {
-		paths, err = ResolvePaths()
+	if readOnly {
+		paths, err = ResolvePathsReadOnly()
 	} else {
-		paths, err = ResolvePathsWithoutMigration()
+		paths, err = ResolvePaths()
 	}
 	if err != nil {
 		return nil, err
@@ -52,7 +52,7 @@ func RunCLI(args []string) error {
 			printHelp()
 			return nil
 		}
-		app, err := newApp(false)
+		app, err := newApp(true)
 		if err != nil {
 			return err
 		}
@@ -62,37 +62,37 @@ func RunCLI(args []string) error {
 		return nil
 	}
 	if args[0] == "exec" && execArgsAreHelpRequest(args[1:]) {
-		app, err := newApp(false)
+		app, err := newApp(true)
 		if err != nil {
 			return err
 		}
 		return app.Run(args)
 	}
 	if len(args) == 2 && (args[1] == "-h" || args[1] == "--help") {
-		app, err := newApp(false)
+		app, err := newApp(true)
 		if err != nil {
 			return err
 		}
 		return app.cmdHelp([]string{args[0]})
 	}
 
-	runMigration, known := commandStartupMigration(args[0])
+	readOnlyStartup, known := commandReadOnlyStartup(args[0])
 	if !known {
 		return &ExitError{Code: 2, Message: fmt.Sprintf("unknown command: %s\nrun \"multicodex help\" for available commands", args[0])}
 	}
-	app, err := newApp(runMigration)
+	app, err := newApp(readOnlyStartup)
 	if err != nil {
 		return err
 	}
 	return app.Run(args)
 }
 
-func commandStartupMigration(command string) (bool, bool) {
+func commandReadOnlyStartup(command string) (bool, bool) {
 	switch command {
 	case "status", "doctor", "dry-run", "monitor", "completion", "__complete-profiles":
-		return false, true
-	case "init", "add", "login", "login-all", "use", "cli", "run", "exec", "heartbeat":
 		return true, true
+	case "init", "add", "login", "login-all", "use", "cli", "run", "exec", "heartbeat":
+		return false, true
 	default:
 		return false, false
 	}

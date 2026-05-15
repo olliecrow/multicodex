@@ -90,7 +90,6 @@ multicodex dry-run
 ## Local state directory
 
 - Default multicodex state home is `~/multicodex`.
-- If `~/.multicodex` exists and `~/multicodex` does not, multicodex automatically migrates existing state on first run.
 - You can override the state location with `MULTICODEX_HOME`.
 - Profile auth stays isolated under `~/multicodex/profiles/<name>/codex-home/auth.json`.
 - Profile-scoped CLI, exec, and run sessions keep Codex state, including thread and `/goal` state, under `~/multicodex/profiles/<name>/codex-home/`.
@@ -232,11 +231,7 @@ When the same Codex home is found more than once, labels and source details pref
 
 Filesystem discovery is read-only but intentionally broad: it scans your home directory for `.codex*`, `.codex`, and `codex-home` directories up to depth 5, then filters known transient/cache locations and requires real usage signals before including a home.
 
-Legacy account-file paths are still read when the new multicodex monitor file is absent:
-- `~/codex-usage-monitor/accounts.json`
-- `~/.codex-usage-monitor/accounts.json`
-
-For migration convenience, `multicodex monitor completion [shell]` is also supported and defaults to bash, matching the old standalone monitor habit.
+`multicodex monitor completion [shell]` prints the same shell completion script as `multicodex completion [shell]` and defaults to bash.
 
 `multicodex monitor doctor` succeeds when at least one usage source works. A passing result can still be degraded if either the app-server path or the OAuth fallback is unavailable.
 When fallback is available, the monitor keeps most of a long fetch timeout for the main source and reserves at most 10 seconds for fallback, which helps cut false `unavailable` window cards on slower refreshes.
