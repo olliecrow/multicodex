@@ -2,6 +2,7 @@ package usage
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -77,5 +78,23 @@ func TestRefreshAuthStateErrorAfterKnownFingerprintReturnsWarning(t *testing.T) 
 	}
 	if s.session != nil {
 		t.Fatalf("expected session reset on auth-state error")
+	}
+}
+
+func TestWithoutCodexProfileEnvRemovesStaleProfileState(t *testing.T) {
+	env := withoutCodexProfileEnv([]string{
+		"CODEX_HOME=/tmp/stale",
+		"MULTICODEX_ACTIVE_PROFILE=stale",
+		"KEEP=value",
+	})
+	joined := strings.Join(env, "\n")
+	if strings.Contains(joined, "CODEX_HOME=") {
+		t.Fatalf("expected CODEX_HOME to be removed, got %q", env)
+	}
+	if strings.Contains(joined, "MULTICODEX_ACTIVE_PROFILE=") {
+		t.Fatalf("expected MULTICODEX_ACTIVE_PROFILE to be removed, got %q", env)
+	}
+	if !strings.Contains(joined, "KEEP=value") {
+		t.Fatalf("expected unrelated env to remain, got %q", env)
 	}
 }

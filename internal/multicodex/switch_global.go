@@ -7,7 +7,27 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
+
+const globalAuthLockSuffix = ".lock"
+
+func (s *Store) WithGlobalAuthLock(fn func() error) error {
+	if err := os.MkdirAll(s.paths.DefaultCodexHome, 0o700); err != nil {
+		return fmt.Errorf("create default codex home for global auth lock: %w", err)
+	}
+	lockPath := s.paths.DefaultAuthPath + globalAuthLockSuffix
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return fmt.Errorf("open global auth lock: %w", err)
+	}
+	defer lockFile.Close()
+	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
+		return fmt.Errorf("acquire global auth lock: %w", err)
+	}
+	defer syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+	return fn()
+}
 
 func (s *Store) SwitchGlobalAuthToProfile(cfg *Config, profile Profile) error {
 	profileAuthPath := filepath.Join(profile.CodexHome, "auth.json")
@@ -26,10 +46,7 @@ func (s *Store) SwitchGlobalAuthToProfile(cfg *Config, profile Profile) error {
 		return err
 	}
 
-	if err := removeAuthPath(s.paths.DefaultAuthPath); err != nil {
-		return fmt.Errorf("remove existing default auth pointer: %w", err)
-	}
-	if err := os.Symlink(profileAuthPath, s.paths.DefaultAuthPath); err != nil {
+	if err := replaceAuthWithSymlink(s.paths.DefaultAuthPath, profileAuthPath); err != nil {
 		return fmt.Errorf("link default auth to profile: %w", err)
 	}
 
@@ -55,17 +72,11 @@ func (s *Store) RestoreGlobalAuth(cfg *Config) (bool, error) {
 		if err != nil {
 			return false, fmt.Errorf("read auth backup file: %w", err)
 		}
-		if err := removeAuthPath(s.paths.DefaultAuthPath); err != nil {
-			return false, fmt.Errorf("remove default auth path before file restore: %w", err)
-		}
-		if err := os.WriteFile(s.paths.DefaultAuthPath, b, 0o600); err != nil {
+		if err := replaceAuthWithFile(s.paths.DefaultAuthPath, b, 0o600); err != nil {
 			return false, fmt.Errorf("restore default auth file: %w", err)
 		}
 	case "symlink":
-		if err := removeAuthPath(s.paths.DefaultAuthPath); err != nil {
-			return false, fmt.Errorf("remove default auth pointer: %w", err)
-		}
-		if err := os.Symlink(cfg.Global.BackupLinkTarget, s.paths.DefaultAuthPath); err != nil {
+		if err := replaceAuthWithSymlink(s.paths.DefaultAuthPath, cfg.Global.BackupLinkTarget); err != nil {
 			return false, fmt.Errorf("restore default auth symlink: %w", err)
 		}
 	default:
@@ -226,4 +237,64 @@ func removeAuthPath(path string) error {
 		return fmt.Errorf("refusing to remove directory at auth path: %s", path)
 	}
 	return os.Remove(path)
+}
+
+func replaceAuthWithSymlink(path, target string) error {
+	if err := ensureAuthPathReplaceable(path); err != nil {
+		return err
+	}
+	tmpPath, err := temporaryAuthPath(path)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmpPath)
+	if err := os.Symlink(target, tmpPath); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, path)
+}
+
+func replaceAuthWithFile(path string, data []byte, perm os.FileMode) error {
+	if err := ensureAuthPathReplaceable(path); err != nil {
+		return err
+	}
+	tmpPath, err := temporaryAuthPath(path)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmpPath)
+	if err := os.WriteFile(tmpPath, data, perm); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, path)
+}
+
+func ensureAuthPathReplaceable(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	if info.IsDir() {
+		return fmt.Errorf("refusing to replace directory at auth path: %s", path)
+	}
+	return nil
+}
+
+func temporaryAuthPath(path string) (string, error) {
+	tmpFile, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return "", err
+	}
+	tmpPath := tmpFile.Name()
+	if err := tmpFile.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return "", err
+	}
+	if err := os.Remove(tmpPath); err != nil {
+		return "", err
+	}
+	return tmpPath, nil
 }

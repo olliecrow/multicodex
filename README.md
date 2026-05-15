@@ -93,6 +93,7 @@ multicodex dry-run
 - If `~/.multicodex` exists and `~/multicodex` does not, multicodex automatically migrates existing state on first run.
 - You can override the state location with `MULTICODEX_HOME`.
 - Profile auth stays isolated under `~/multicodex/profiles/<name>/codex-home/auth.json`.
+- Profile-scoped CLI, exec, and run sessions keep Codex state, including thread and `/goal` state, under `~/multicodex/profiles/<name>/codex-home/`. The Mac app command is different: it uses the shared default `CODEX_HOME` so the app keeps one shared sidebar and thread list.
 - Profile config defaults to a symlink from `~/multicodex/profiles/<name>/codex-home/config.toml` to your default Codex config at `~/.codex/config.toml`.
 - Profile skills fill in missing top-level entries from `~/.codex/skills` so shared skills stay visible in profile-scoped Codex runs.
 - If you want a per-profile skill override, create that top-level entry inside the profile's `codex-home/skills` directory and multicodex will leave it alone.
@@ -149,7 +150,7 @@ multicodex app personal
 multicodex app work
 ```
 
-`multicodex app` is for macOS. It first switches the shared default auth pointer to that profile, then launches `Codex.app` with the shared default `CODEX_HOME` and a stable per-profile app-data folder under `~/Library/Application Support/Codex-multicodex/<profile>`. That keeps one shared sidebar state while avoiding one giant shared Electron app-data folder across every app window. `multicodex` exits after handing the launch off to macOS; it does not keep a helper process running. Already-open app windows usually keep the account they started with, but that split is best-effort rather than a hard lock because Codex can reload auth later in some flows.
+`multicodex app` is for macOS. It first switches the shared default auth pointer to that profile, then launches `Codex.app` with the shared default `CODEX_HOME`, no active profile marker, and a stable per-profile app-data folder under `~/Library/Application Support/Codex-multicodex/<profile>`. The auth switch is locked against other global auth switches, and a failed app launch restores the previous default auth state. That keeps one shared sidebar state while avoiding one giant shared Electron app-data folder across every app window. `multicodex` exits after handing the launch off to macOS; it does not keep a helper process running. Already-open app windows usually keep the account they started with, but that split is best-effort rather than a hard lock because Codex can reload auth later in some flows.
 
 Run the normal interactive Codex CLI with one profile.
 
@@ -160,6 +161,7 @@ multicodex cli work "check this repo"
 
 `multicodex cli <name>` is the profile-scoped version of the local `c` alias. It runs `codex --search --dangerously-bypass-approvals-and-sandbox -m gpt-5.5 -c model_reasoning_effort=medium` with that profile's `CODEX_HOME`, then appends any extra args you pass after the profile name. It does not change the shared global account.
 When launched from a real interactive terminal, `multicodex cli` hands off directly into `codex` so the live process behaves like a normal Codex CLI session instead of staying wrapped under a long-lived multicodex parent process.
+Two terminals can run `multicodex cli` with different profiles at the same time. Each one gets its own account, threads, and `/goal` state because each one has a different `CODEX_HOME`.
 
 Run `codex exec` on the best available logged-in profile automatically.
 
@@ -253,7 +255,7 @@ multicodex monitor completion
 Monitor account candidates come from:
 - explicit account file under `~/multicodex/monitor/accounts.json`
 - configured multicodex profiles from `~/multicodex/config.json`
-- the default Codex home, respecting `CODEX_HOME` when it is set
+- the default Codex home, respecting `MULTICODEX_DEFAULT_CODEX_HOME` when it is set and otherwise `CODEX_HOME`
 - the active `CODEX_HOME`
 - compatible Codex homes discovered from the local filesystem
 

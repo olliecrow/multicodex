@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestSwitchGlobalAndRestore(t *testing.T) {
@@ -79,6 +80,73 @@ func TestSwitchGlobalAndRestore(t *testing.T) {
 	}
 	if restoredInfo.Mode()&os.ModeSymlink != 0 {
 		t.Fatalf("expected restored default auth to be a regular file, got symlink")
+	}
+}
+
+func TestReplaceAuthWithSymlinkRefusesDirectory(t *testing.T) {
+	root := t.TempDir()
+	authPath := filepath.Join(root, "auth.json")
+	if err := os.MkdirAll(authPath, 0o700); err != nil {
+		t.Fatalf("mkdir auth path: %v", err)
+	}
+
+	err := replaceAuthWithSymlink(authPath, filepath.Join(root, "profile-auth.json"))
+	if err == nil {
+		t.Fatalf("expected replaceAuthWithSymlink to fail")
+	}
+	info, statErr := os.Stat(authPath)
+	if statErr != nil {
+		t.Fatalf("expected auth path directory to remain: %v", statErr)
+	}
+	if !info.IsDir() {
+		t.Fatalf("expected auth path to remain a directory")
+	}
+}
+
+func TestGlobalAuthLockIsSharedByDefaultAuthPath(t *testing.T) {
+	root := t.TempDir()
+	defaultHome := filepath.Join(root, "default-codex")
+	pathsA := Paths{
+		MulticodexHome:   filepath.Join(root, "multi-a"),
+		DefaultCodexHome: defaultHome,
+		DefaultAuthPath:  filepath.Join(defaultHome, "auth.json"),
+	}
+	pathsB := Paths{
+		MulticodexHome:   filepath.Join(root, "multi-b"),
+		DefaultCodexHome: defaultHome,
+		DefaultAuthPath:  filepath.Join(defaultHome, "auth.json"),
+	}
+	storeA := NewStore(pathsA)
+	storeB := NewStore(pathsB)
+
+	acquired := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- storeA.WithGlobalAuthLock(func() error {
+			close(acquired)
+			<-release
+			return nil
+		})
+	}()
+	<-acquired
+
+	blockedDone := make(chan error, 1)
+	go func() {
+		blockedDone <- storeB.WithGlobalAuthLock(func() error { return nil })
+	}()
+
+	select {
+	case err := <-blockedDone:
+		t.Fatalf("expected second lock to wait, got err=%v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("first lock failed: %v", err)
+	}
+	if err := <-blockedDone; err != nil {
+		t.Fatalf("second lock failed: %v", err)
 	}
 }
 

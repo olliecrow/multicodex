@@ -87,6 +87,14 @@ func fileIsTerminal(f *os.File) bool {
 }
 
 func withProfileEnv(base []string, codexHome, profile string) []string {
+	env := withCodexHomeEnv(base, codexHome)
+	if profile != "" {
+		env = append(env, "MULTICODEX_ACTIVE_PROFILE="+profile)
+	}
+	return env
+}
+
+func withCodexHomeEnv(base []string, codexHome string) []string {
 	env := make([]string, 0, len(base)+2)
 	for _, kv := range base {
 		if strings.HasPrefix(kv, "CODEX_HOME=") || strings.HasPrefix(kv, "MULTICODEX_ACTIVE_PROFILE=") {
@@ -94,9 +102,8 @@ func withProfileEnv(base []string, codexHome, profile string) []string {
 		}
 		env = append(env, kv)
 	}
-	env = append(env, "CODEX_HOME="+codexHome)
-	if profile != "" {
-		env = append(env, "MULTICODEX_ACTIVE_PROFILE="+profile)
+	if codexHome != "" {
+		env = append(env, "CODEX_HOME="+codexHome)
 	}
 	return env
 }

@@ -59,9 +59,12 @@
 `multicodex app <name>`
 - macOS only.
 - Switches the shared default auth pointer to the selected profile.
+- Uses a lock tied to the shared default `auth.json` path so overlapping global auth switches do not race.
 - Launches a new `Codex.app` instance with the shared default `CODEX_HOME`.
+- Clears `MULTICODEX_ACTIVE_PROFILE` before launch because the app uses shared default Codex state, not profile-local Codex state.
 - Passes a stable per-profile Electron app-data folder at `~/Library/Application Support/Codex-multicodex/<profile>`.
 - Uses `open -n -a` so each call starts a separate app process.
+- Restores the previous default auth state when the app launch fails after the auth switch.
 - Exits after handing the launch off to macOS; it does not keep a helper process running.
 - Keeps one shared sidebar and thread list across app windows because they share the same default `CODEX_HOME`.
 - Reuses one app-data folder per profile instead of making a fresh folder on every launch.
@@ -76,6 +79,7 @@
 - Appends any extra args after the profile name.
 - When stdin, stdout, and stderr are real terminals, replaces the multicodex process with `codex` so the interactive session behaves like a normal direct Codex launch.
 - Re-checks file-backed auth isolation before launching Codex.
+- Keeps Codex thread state and `/goal` state profile-local through the selected profile's `CODEX_HOME`, so separate terminals using different profiles do not share active goals.
 - Leaves the shared global auth pointer untouched.
 
 `multicodex run <name> -- <command...>`
@@ -102,6 +106,7 @@
 `multicodex switch-global <name> [--force]`
 - Explicit global operation.
 - Changes only minimal auth pointer or file required for default Codex identity.
+- Uses a lock tied to the shared default `auth.json` path and replaces auth files through a temporary path before rename.
 - Re-checks file-backed auth isolation before switching unless `--force` is supplied.
 - Refreshes restore metadata whenever the current default auth state changed outside multicodex.
 - Avoids touching unrelated Codex session data.
@@ -125,7 +130,7 @@
 - Runs a live terminal UI for Codex subscription usage across compatible local accounts.
 - Defaults to the integrated monitor UI when no monitor subcommand is provided.
 - Defaults both the poll interval and the per-poll fetch timeout to 60 seconds.
-- Builds account candidates from monitor-owned account overrides, multicodex profile config, the default Codex home, the active `CODEX_HOME`, and broader filesystem discovery.
+- Builds account candidates from monitor-owned account overrides, multicodex profile config, the default Codex home, the active `CODEX_HOME`, and broader filesystem discovery. The default Codex home respects `MULTICODEX_DEFAULT_CODEX_HOME` first, then `CODEX_HOME`.
 - When the same Codex home appears more than once, labels and source details prefer monitor-owned account overrides, then multicodex profiles, then the default Codex home, then the active `CODEX_HOME`, then auto-discovery.
 - Renders compact usage lines in each window card, for example `used: 12% [resets in 3h4m]`.
 - When Spark data is present for an account, the same panel also shows `used-spark: 8% [resets in 3h4m]` and keeps one row per account in the two-column layout.
