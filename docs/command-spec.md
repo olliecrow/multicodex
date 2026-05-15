@@ -27,7 +27,6 @@
 `multicodex init`
 - Creates local multicodex home and metadata only.
 - Uses `MULTICODEX_HOME` when set, otherwise defaults to `~/multicodex`.
-- If legacy `~/.multicodex` exists and `~/multicodex` does not, it migrates legacy state automatically.
 - Does not modify existing Codex default auth.
 
 `multicodex add <name>`
@@ -109,7 +108,6 @@
 - Shows account labels instead of raw email addresses in the TUI when labels are available.
 - Orders TUI account rows by weekly reset time, from first to reset at the top to last at the bottom; accounts with unknown weekly reset times come last.
 - Keeps tracked timestamps in UTC internally while rendering user-facing TUI timestamps in local time without seconds.
-- Continues to support legacy monitor account-file locations as a compatibility fallback.
 - Uses read-only filesystem auto-discovery under the home directory, scanning for `.codex*`, `.codex`, and `codex-home` paths up to depth 5 before filtering transient/cache locations and requiring usage signals.
 - When fallback is available, keeps most of a long fetch timeout for the primary source and reserves at most 10 seconds for fallback so slow refreshes are less likely to end as false `unavailable` window cards.
 - Treats observed-token totals as local estimates derived from session logs rather than official provider counters.
@@ -137,7 +135,6 @@
 - Keep raw per-account error text available in account data for deeper debugging and tests.
 
 `multicodex monitor completion`
-- Compatibility alias for shell completion setup after migration from the standalone monitor.
 - Defaults to bash when no shell is provided.
 - Prints the full `multicodex` completion script.
 

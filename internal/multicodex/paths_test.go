@@ -1,7 +1,6 @@
 package multicodex
 
 import (
-	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -27,28 +26,12 @@ func TestResolvePathsDefaultsToHomeMulticodex(t *testing.T) {
 	}
 }
 
-func TestResolvePathsMigratesLegacyHome(t *testing.T) {
+func TestResolvePathsLeavesHiddenStateUntouched(t *testing.T) {
 	home := t.TempDir()
-	legacyHome := filepath.Join(home, ".multicodex")
+	hiddenHome := filepath.Join(home, ".unowned-local-state")
 	newHome := filepath.Join(home, "multicodex")
-	legacyProfileHome := filepath.Join(legacyHome, "profiles", "work", "codex-home")
-
-	if err := os.MkdirAll(legacyProfileHome, 0o700); err != nil {
-		t.Fatalf("mkdir legacy profile: %v", err)
-	}
-
-	cfg := map[string]any{
-		"version": 1,
-		"profiles": map[string]Profile{
-			"work": {Name: "work", CodexHome: legacyProfileHome},
-		},
-	}
-	encoded, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		t.Fatalf("marshal legacy config: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(legacyHome, "config.json"), append(encoded, '\n'), 0o600); err != nil {
-		t.Fatalf("write legacy config: %v", err)
+	if err := os.MkdirAll(hiddenHome, 0o700); err != nil {
+		t.Fatalf("mkdir hidden home: %v", err)
 	}
 
 	t.Setenv("HOME", home)
@@ -62,58 +45,17 @@ func TestResolvePathsMigratesLegacyHome(t *testing.T) {
 	if got, want := paths.MulticodexHome, newHome; got != want {
 		t.Fatalf("unexpected multicodex home: got=%q want=%q", got, want)
 	}
-
-	if _, err := os.Stat(legacyHome); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("expected legacy home to be moved, stat err=%v", err)
-	}
-	b, err := os.ReadFile(filepath.Join(newHome, "config.json"))
-	if err != nil {
-		t.Fatalf("read migrated config: %v", err)
-	}
-	var migrated Config
-	if err := json.Unmarshal(b, &migrated); err != nil {
-		t.Fatalf("parse migrated config: %v", err)
-	}
-	if got, want := migrated.Profiles["work"].CodexHome, filepath.Join(newHome, "profiles", "work", "codex-home"); got != want {
-		t.Fatalf("unexpected migrated profile codex home: got=%q want=%q", got, want)
-	}
-}
-
-func TestResolvePathsWithoutMigrationLeavesLegacyStateUntouched(t *testing.T) {
-	home := t.TempDir()
-	legacyHome := filepath.Join(home, ".multicodex")
-	newHome := filepath.Join(home, "multicodex")
-	if err := os.MkdirAll(legacyHome, 0o700); err != nil {
-		t.Fatalf("mkdir legacy home: %v", err)
-	}
-
-	t.Setenv("HOME", home)
-	t.Setenv("MULTICODEX_HOME", "")
-	t.Setenv("MULTICODEX_DEFAULT_CODEX_HOME", "")
-
-	paths, err := ResolvePathsWithoutMigration()
-	if err != nil {
-		t.Fatalf("ResolvePathsWithoutMigration: %v", err)
-	}
-	if got, want := paths.MulticodexHome, newHome; got != want {
-		t.Fatalf("unexpected multicodex home: got=%q want=%q", got, want)
-	}
-	if _, err := os.Stat(legacyHome); err != nil {
-		t.Fatalf("expected legacy home to remain, stat err=%v", err)
+	if _, err := os.Stat(hiddenHome); err != nil {
+		t.Fatalf("expected hidden home to remain, stat err=%v", err)
 	}
 	if _, err := os.Stat(newHome); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected new home not to be created, stat err=%v", err)
 	}
 }
 
-func TestResolvePathsSkipsLegacyMigrationWhenHomeIsExplicit(t *testing.T) {
+func TestResolvePathsUsesExplicitHome(t *testing.T) {
 	home := t.TempDir()
-	legacyHome := filepath.Join(home, ".multicodex")
 	customHome := filepath.Join(home, "custom-multicodex")
-
-	if err := os.MkdirAll(legacyHome, 0o700); err != nil {
-		t.Fatalf("mkdir legacy home: %v", err)
-	}
 
 	t.Setenv("HOME", home)
 	t.Setenv("MULTICODEX_HOME", customHome)
@@ -125,10 +67,6 @@ func TestResolvePathsSkipsLegacyMigrationWhenHomeIsExplicit(t *testing.T) {
 	}
 	if got, want := paths.MulticodexHome, customHome; got != want {
 		t.Fatalf("unexpected multicodex home: got=%q want=%q", got, want)
-	}
-
-	if _, err := os.Stat(legacyHome); err != nil {
-		t.Fatalf("expected legacy home to remain when override is set: %v", err)
 	}
 }
 

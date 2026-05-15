@@ -13,8 +13,6 @@ import (
 const (
 	defaultMulticodexHomeDirName = "multicodex"
 	defaultMonitorSubdirName     = "monitor"
-	legacyMonitorDirName         = "codex-usage-monitor"
-	legacyHiddenMonitorDirName   = ".codex-usage-monitor"
 	defaultAccountsFileName      = "accounts.json"
 	accountsFileEnvVar           = "CODEX_USAGE_MONITOR_ACCOUNTS_FILE"
 	multicodexHomeEnvVar         = "MULTICODEX_HOME"
@@ -415,19 +413,6 @@ func resolveAccountsFilePath() (string, error) {
 	defaultPath := filepath.Join(dir, defaultAccountsFileName)
 	if fileExists(defaultPath) {
 		return defaultPath, nil
-	}
-
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("resolve home directory: %w", err)
-	}
-	legacyPath := filepath.Join(home, legacyMonitorDirName, defaultAccountsFileName)
-	if fileExists(legacyPath) {
-		return legacyPath, nil
-	}
-	legacyHiddenPath := filepath.Join(home, legacyHiddenMonitorDirName, defaultAccountsFileName)
-	if fileExists(legacyHiddenPath) {
-		return legacyHiddenPath, nil
 	}
 	return defaultPath, nil
 }

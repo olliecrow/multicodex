@@ -8,12 +8,12 @@ import (
 	"testing"
 )
 
-func TestRunCLIHelpDoesNotMigrateLegacyState(t *testing.T) {
+func TestRunCLIHelpDoesNotMoveHiddenState(t *testing.T) {
 	home := t.TempDir()
-	legacyHome := filepath.Join(home, ".multicodex")
-	legacyProfileHome := filepath.Join(legacyHome, "profiles", "work", "codex-home")
-	if err := os.MkdirAll(legacyProfileHome, 0o700); err != nil {
-		t.Fatalf("mkdir legacy profile: %v", err)
+	hiddenHome := filepath.Join(home, ".unowned-local-state")
+	hiddenProfileHome := filepath.Join(hiddenHome, "profiles", "work", "codex-home")
+	if err := os.MkdirAll(hiddenProfileHome, 0o700); err != nil {
+		t.Fatalf("mkdir hidden profile: %v", err)
 	}
 	t.Setenv("HOME", home)
 	t.Setenv("MULTICODEX_HOME", "")
@@ -22,16 +22,16 @@ func TestRunCLIHelpDoesNotMigrateLegacyState(t *testing.T) {
 	if err := RunCLI([]string{"help"}); err != nil {
 		t.Fatalf("RunCLI help: %v", err)
 	}
-	if _, err := os.Stat(legacyHome); err != nil {
-		t.Fatalf("expected legacy home to remain, stat err=%v", err)
+	if _, err := os.Stat(hiddenHome); err != nil {
+		t.Fatalf("expected hidden home to remain, stat err=%v", err)
 	}
 }
 
-func TestRunCLIUnknownCommandDoesNotMigrateLegacyState(t *testing.T) {
+func TestRunCLIUnknownCommandDoesNotMoveHiddenState(t *testing.T) {
 	home := t.TempDir()
-	legacyHome := filepath.Join(home, ".multicodex")
-	if err := os.MkdirAll(legacyHome, 0o700); err != nil {
-		t.Fatalf("mkdir legacy home: %v", err)
+	hiddenHome := filepath.Join(home, ".unowned-local-state")
+	if err := os.MkdirAll(hiddenHome, 0o700); err != nil {
+		t.Fatalf("mkdir hidden home: %v", err)
 	}
 
 	t.Setenv("HOME", home)
@@ -43,8 +43,8 @@ func TestRunCLIUnknownCommandDoesNotMigrateLegacyState(t *testing.T) {
 	if !errors.As(err, &exitErr) {
 		t.Fatalf("expected ExitError, got %T (%v)", err, err)
 	}
-	if _, err := os.Stat(legacyHome); err != nil {
-		t.Fatalf("expected legacy home to remain, stat err=%v", err)
+	if _, err := os.Stat(hiddenHome); err != nil {
+		t.Fatalf("expected hidden home to remain, stat err=%v", err)
 	}
 	if _, err := os.Stat(filepath.Join(home, "multicodex")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected new home not to be created, stat err=%v", err)
@@ -68,12 +68,12 @@ func TestRunCLIStatusDoesNotCreateConfig(t *testing.T) {
 	}
 }
 
-func TestRunCLIExecHelpDoesNotMigrateLegacyState(t *testing.T) {
+func TestRunCLIExecHelpDoesNotMoveHiddenState(t *testing.T) {
 	home := t.TempDir()
-	legacyHome := filepath.Join(home, ".multicodex")
-	legacyProfileHome := filepath.Join(legacyHome, "profiles", "work", "codex-home")
-	if err := os.MkdirAll(legacyProfileHome, 0o700); err != nil {
-		t.Fatalf("mkdir legacy profile: %v", err)
+	hiddenHome := filepath.Join(home, ".unowned-local-state")
+	hiddenProfileHome := filepath.Join(hiddenHome, "profiles", "work", "codex-home")
+	if err := os.MkdirAll(hiddenProfileHome, 0o700); err != nil {
+		t.Fatalf("mkdir hidden profile: %v", err)
 	}
 	fakeBin := filepath.Join(home, "bin")
 	if err := os.MkdirAll(fakeBin, 0o700); err != nil {
@@ -95,8 +95,8 @@ func TestRunCLIExecHelpDoesNotMigrateLegacyState(t *testing.T) {
 	if err := RunCLI([]string{"exec", "--help"}); err != nil {
 		t.Fatalf("RunCLI exec help: %v", err)
 	}
-	if _, err := os.Stat(legacyHome); err != nil {
-		t.Fatalf("expected legacy home to remain, stat err=%v", err)
+	if _, err := os.Stat(hiddenHome); err != nil {
+		t.Fatalf("expected hidden home to remain, stat err=%v", err)
 	}
 	if _, err := os.Stat(filepath.Join(home, "multicodex")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected new home not to be created, stat err=%v", err)
@@ -117,12 +117,12 @@ func TestRunCLIExecHelpDoesNotMigrateLegacyState(t *testing.T) {
 	}
 }
 
-func TestRunCLICommandHelpDoesNotMigrateLegacyState(t *testing.T) {
+func TestRunCLICommandHelpDoesNotMoveHiddenState(t *testing.T) {
 	home := t.TempDir()
-	legacyHome := filepath.Join(home, ".multicodex")
-	legacyProfileHome := filepath.Join(legacyHome, "profiles", "work", "codex-home")
-	if err := os.MkdirAll(legacyProfileHome, 0o700); err != nil {
-		t.Fatalf("mkdir legacy profile: %v", err)
+	hiddenHome := filepath.Join(home, ".unowned-local-state")
+	hiddenProfileHome := filepath.Join(hiddenHome, "profiles", "work", "codex-home")
+	if err := os.MkdirAll(hiddenProfileHome, 0o700); err != nil {
+		t.Fatalf("mkdir hidden profile: %v", err)
 	}
 	t.Setenv("HOME", home)
 	t.Setenv("MULTICODEX_HOME", "")
@@ -131,8 +131,8 @@ func TestRunCLICommandHelpDoesNotMigrateLegacyState(t *testing.T) {
 	if err := RunCLI([]string{"cli", "--help"}); err != nil {
 		t.Fatalf("RunCLI cli help: %v", err)
 	}
-	if _, err := os.Stat(legacyHome); err != nil {
-		t.Fatalf("expected legacy home to remain, stat err=%v", err)
+	if _, err := os.Stat(hiddenHome); err != nil {
+		t.Fatalf("expected hidden home to remain, stat err=%v", err)
 	}
 	if _, err := os.Stat(filepath.Join(home, "multicodex")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected new home not to be created, stat err=%v", err)
