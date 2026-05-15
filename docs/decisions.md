@@ -119,11 +119,11 @@ Trade-offs: Slightly larger command surface area.
 Enforcement: Help topics are maintained in one table; completion scripts include dynamic profile-name completion via local `__complete-profiles`.
 References: `internal/multicodex/help.go`, `internal/multicodex/completion.go`, `internal/multicodex/help_completion_test.go`, `README.md`
 
-Decision: Default persistent multicodex state to `~/multicodex` with automatic migration from legacy `~/.multicodex`.
+Decision: Default persistent multicodex state to `~/multicodex`.
 Context: Users may run multiple checkouts and worktrees; one stable home-level state directory reduces fragmentation and accidental repo-local storage.
-Rationale: A single predictable directory improves safety and operational consistency, and migration preserves existing user state without manual steps.
-Trade-offs: Existing users on the old default path incur a one-time filesystem move when no explicit `MULTICODEX_HOME` is set.
-Enforcement: `ResolvePaths` defaults to `~/multicodex`, performs legacy migration when safe, and tests cover defaulting, migration, and explicit override behavior.
+Rationale: A single predictable directory improves safety and operational consistency without moving unrelated local state.
+Trade-offs: Users who want a different state location must set `MULTICODEX_HOME` explicitly.
+Enforcement: `ResolvePaths` defaults to `~/multicodex` and tests cover defaulting, explicit override behavior, and non-mutation of hidden local state.
 References: `internal/multicodex/paths.go`, `internal/multicodex/paths_test.go`, `README.md`, `docs/implementation-notes.md`
 
 Decision: Use Go `cmd/` and `internal/` layout for public-facing maintainability while preserving behavior.
@@ -137,7 +137,7 @@ Decision: Prefer targeted multicodex state ignore patterns over broad `multicode
 Context: After introducing `internal/multicodex`, a broad `multicodex/` ignore rule risked masking source directories and weakening review safety.
 Rationale: Explicit patterns for `config.json` and `profiles/` retain secret-safety goals without accidentally hiding tracked source files.
 Trade-offs: Slightly longer ignore patterns and doctor guidance.
-Enforcement: `.gitignore` uses targeted patterns; doctor missing-pattern checks accept legacy `.multicodex/` or targeted `multicodex` state patterns; tests assert coverage.
+Enforcement: `.gitignore` uses targeted patterns; doctor missing-pattern checks require current `multicodex` state patterns; tests assert coverage.
 References: `.gitignore`, `internal/multicodex/doctor.go`, `internal/multicodex/doctor_test.go`, `docs/security-and-privacy.md`
 
 Decision: Verify newly added profiles with a real read-only Codex request and a follow-up default-account check.
@@ -158,21 +158,21 @@ Decision: Fold subscription usage monitoring into multicodex under a namespaced 
 Context: Users choose between multiple Codex accounts based on both account isolation and remaining subscription headroom, so keeping switching and monitoring in separate products created an avoidable split workflow.
 Rationale: One product with a dedicated `monitor` namespace matches the real user workflow while keeping usage visibility clearly separated from mutating account-management commands.
 Trade-offs: The repo and CLI gain more code and dependencies, so the monitor must stay modular and avoid bloating the root command surface.
-Enforcement: The integrated monitor lives under `internal/monitor/`; the primary user entrypoint is `multicodex monitor`; monitor account candidates come from monitor-owned account overrides, multicodex profiles, the default Codex home, the active `CODEX_HOME`, and read-only filesystem discovery. When the same Codex home appears more than once, labels and source details prefer monitor-owned overrides, then multicodex profiles, then the default home, then active `CODEX_HOME`, then auto-discovery. Legacy monitor account-file paths remain compatibility fallbacks.
+Enforcement: The integrated monitor lives under `internal/monitor/`; the primary user entrypoint is `multicodex monitor`; monitor account candidates come from monitor-owned account overrides, multicodex profiles, the default Codex home, the active `CODEX_HOME`, and read-only filesystem discovery. When the same Codex home appears more than once, labels and source details prefer monitor-owned overrides, then multicodex profiles, then the default home, then active `CODEX_HOME`, then auto-discovery.
 References: `internal/multicodex/monitor.go`, `internal/monitor/usage/accounts.go`, `internal/monitor/tui/model.go`, `README.md`, `docs/command-spec.md`, `docs/implementation-notes.md`
 
-Decision: Preserve standalone monitor command habits where they materially reduce migration friction.
-Context: After merging the standalone usage monitor into multicodex, users may still reach for familiar monitor-specific commands such as `completion`, explicit monitor UI aliases, and nested help topics.
-Rationale: Keeping a small compatibility layer under `multicodex monitor` avoids avoidable dead ends during migration while still steering users toward one unified product.
+Decision: Keep monitor helper subcommands under the `monitor` namespace.
+Context: Users need monitor-specific help, terminal UI launch, setup checks, and shell completion from the same namespaced command group.
+Rationale: Keeping these helpers under `multicodex monitor` makes the monitor workflow discoverable without adding more top-level commands.
 Trade-offs: Slightly more command-surface and completion/help maintenance.
-Enforcement: `multicodex monitor completion [shell]` remains available as a compatibility alias with bash default; explicit UI alias `multicodex monitor tui` remains help-addressable; help topics and shell completion include nested monitor topics such as `monitor doctor`, `monitor completion`, and `monitor tui`.
+Enforcement: `multicodex monitor completion [shell]` remains available with bash default; explicit UI command `multicodex monitor tui` remains help-addressable; help topics and shell completion include nested monitor topics such as `monitor doctor`, `monitor completion`, and `monitor tui`.
 References: `internal/multicodex/monitor.go`, `internal/multicodex/help.go`, `internal/multicodex/completion.go`, `internal/multicodex/monitor_test.go`, `README.md`, `docs/command-spec.md`
 
 Decision: Default profile config to the shared global Codex config, while preserving explicit per-profile overrides.
 Context: Users expect Codex feature settings such as search or model defaults to stay consistent across regular Codex usage and multicodex profile usage without copying config files into each profile.
 Rationale: A profile-local symlink to the default Codex `config.toml` keeps settings current automatically as the global config changes, while leaving any non-generated profile-local config file intact preserves an escape hatch for account-specific customization.
 Trade-offs: Auth isolation now depends more directly on the default Codex config using file-backed credentials; profile login must fail clearly when the effective config would not use file-backed auth; doctor output must explain shared-config states clearly.
-Enforcement: New profiles create a `config.toml` symlink to the default Codex config; existing autogenerated profile configs are migrated to that symlink; manually maintained profile config files are preserved as overrides; `multicodex login` and profile-scoped Codex execution paths reject configs that do not enable file-backed auth.
+Enforcement: New profiles create a `config.toml` symlink to the default Codex config; generated profile configs stay aligned with that symlink policy; manually maintained profile config files are preserved as overrides; `multicodex login` and profile-scoped Codex execution paths reject configs that do not enable file-backed auth.
 References: `internal/multicodex/config.go`, `internal/multicodex/config_test.go`, `internal/multicodex/doctor.go`, `README.md`, `docs/implementation-notes.md`
 
 Decision: Present monitor identities and timestamps for operator readability while keeping internal timekeeping canonical.
@@ -205,9 +205,9 @@ References: `internal/multicodex/config.go`, `internal/multicodex/config_test.go
 
 Decision: Keep read-only command discovery from changing local state.
 Context: Help, completion, status, doctor, monitor, dry-run, and unknown commands are often used for inspection or shell setup. Running them should not move local multicodex state.
-Rationale: Read-only commands need to be safe probes. Migration remains useful, but it should happen only when a known command actually needs normal multicodex state.
-Trade-offs: Legacy migration can happen a little later than before, on the first known command that needs writable multicodex state.
-Enforcement: `RunCLI` handles top-level help, direct command help such as `cli --help`, version, and `exec --help` before migration, validates unknown commands before path resolution, and uses no-migration path resolution for read-only commands. `status` loads existing config without creating a fresh home, and monitor commands no longer create the monitor data dir just to inspect usage. Tests cover help, unknown commands, status, command help, and `exec --help` leaving local state untouched.
+Rationale: Read-only commands need to be safe probes, especially while the default Codex account is outside multicodex ownership.
+Trade-offs: Mutating setup happens only in commands that explicitly create or update multicodex-owned state.
+Enforcement: `RunCLI` handles top-level help, direct command help such as `cli --help`, version, and `exec --help` before path resolution, validates unknown commands before path resolution, and uses read-only path resolution for read-only commands. `status` loads existing config without creating a fresh home, and monitor commands no longer create the monitor data dir just to inspect usage. Tests cover help, unknown commands, status, command help, and `exec --help` leaving local state untouched.
 References: `cmd/multicodex/main.go`, `internal/multicodex/app.go`, `internal/multicodex/monitor.go`, `internal/multicodex/run_cli_test.go`, `internal/multicodex/paths.go`, `internal/multicodex/paths_test.go`
 
 Decision: Clear stale profile environment for neutral Codex calls.

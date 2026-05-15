@@ -18,14 +18,12 @@
 - `~/multicodex/profiles/<name>/codex-home/skills/` fills in missing top-level entries from the default Codex skills tree while keeping manual profile overrides.
 - `~/multicodex/heartbeat.lock` for non-overlapping heartbeat runs by default.
 - `~/multicodex/monitor/accounts.json` for optional monitor-owned account overrides.
-- Legacy `~/.multicodex` is auto-migrated to `~/multicodex` when no explicit `MULTICODEX_HOME` is set.
-- Legacy monitor account files remain readable from `~/codex-usage-monitor/accounts.json` and `~/.codex-usage-monitor/accounts.json` when the multicodex monitor file is absent.
 
 ## Verification strategy
 - Unit tests for config parsing and profile validation.
 - Unit tests for environment and command wrapper behavior.
 - Unit tests for interactive CLI handoff into direct `codex` execution.
-- Unit tests for command help, status, and unknown commands that must not migrate local state or rewrite default auth.
+- Unit tests for command help, status, and unknown commands that must not move local state or rewrite default auth.
 - Unit tests for exact file-store config parsing and runtime isolation re-checks after shared-config drift.
 - Unit tests for heartbeat success, failure, timeout, locking, retries, and read-only exec behavior.
 - Imported and preserved monitor tests for account discovery, source fetching, observed-token aggregation, and TUI layout stability.

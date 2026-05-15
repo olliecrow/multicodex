@@ -2,7 +2,6 @@
 plan/
 
 # Local auth and profile state
-.multicodex/
 **/multicodex/config.json
 **/multicodex/profiles/
 .codex/
