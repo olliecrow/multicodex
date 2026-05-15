@@ -18,12 +18,11 @@ import (
 )
 
 type profileStatus struct {
-	Name         string
-	GlobalMarker string
-	AuthFile     bool
-	State        string
-	Account      string
-	Detail       string
+	Name     string
+	AuthFile bool
+	State    string
+	Account  string
+	Detail   string
 }
 
 var emailRe = regexp.MustCompile(`[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}`)
@@ -38,46 +37,34 @@ func PrintStatus(store *Store, cfg *Config) error {
 		return nil
 	}
 
-	currentGlobalName, err := activeGlobalProfile(store.paths, cfg)
-	if err != nil {
-		return err
-	}
-
 	names := make([]string, 0, len(cfg.Profiles))
 	for name := range cfg.Profiles {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 
-	rows := collectProfileRows(cfg, names, currentGlobalName)
+	rows := collectProfileRows(cfg, names)
 
 	fmt.Println("multicodex status")
-	if currentGlobalName == "" {
-		fmt.Println("no global default profile selected by multicodex")
-	} else {
-		fmt.Println("*", "current global default profile")
-	}
+	fmt.Println("profile-local auth status")
 	fmt.Println()
-	fmt.Printf("%-2s %-16s %-10s %-10s %-30s %s\n", "", "profile", "auth.json", "state", "account", "detail")
+	fmt.Printf("%-16s %-10s %-10s %-30s %s\n", "profile", "auth.json", "state", "account", "detail")
 	for _, row := range rows {
 		auth := "no"
 		if row.AuthFile {
 			auth = "yes"
 		}
-		fmt.Printf("%-2s %-16s %-10s %-10s %-30s %s\n", row.GlobalMarker, row.Name, auth, row.State, truncate(row.Account, 30), truncate(row.Detail, 80))
+		fmt.Printf("%-16s %-10s %-10s %-30s %s\n", row.Name, auth, row.State, truncate(row.Account, 30), truncate(row.Detail, 80))
 	}
-
-	fmt.Println()
-	fmt.Printf("default codex auth path: %s\n", store.paths.DefaultAuthPath)
 	return nil
 }
 
-func collectProfileRows(cfg *Config, names []string, currentGlobalName string) []profileStatus {
+func collectProfileRows(cfg *Config, names []string) []profileStatus {
 	rows := make([]profileStatus, len(names))
 	workers := parallelWorkers(len(names))
 	if workers == 1 {
 		for i, name := range names {
-			rows[i] = buildProfileRow(name, cfg.Profiles[name], currentGlobalName)
+			rows[i] = buildProfileRow(name, cfg.Profiles[name])
 		}
 		return rows
 	}
@@ -93,20 +80,15 @@ func collectProfileRows(cfg *Config, names []string, currentGlobalName string) [
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			rows[i] = buildProfileRow(name, profile, currentGlobalName)
+			rows[i] = buildProfileRow(name, profile)
 		}()
 	}
 	wg.Wait()
 	return rows
 }
 
-func buildProfileRow(name string, profile Profile, currentGlobalName string) profileStatus {
+func buildProfileRow(name string, profile Profile) profileStatus {
 	row := profileStatus{Name: name}
-	if name == currentGlobalName {
-		row.GlobalMarker = "*"
-	} else {
-		row.GlobalMarker = " "
-	}
 	hasAuth, err := HasAuthFile(profile.CodexHome)
 	if err != nil {
 		row.State = "error"
@@ -178,40 +160,6 @@ func codexLoginStatus(codexHome string) (state, account, detail string) {
 	}
 
 	return "error", account, err.Error()
-}
-
-func activeGlobalProfile(paths Paths, cfg *Config) (string, error) {
-	info, err := os.Lstat(paths.DefaultAuthPath)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return "", nil
-		}
-		return "", fmt.Errorf("inspect default auth path: %w", err)
-	}
-	if info.Mode()&os.ModeSymlink == 0 {
-		if cfg.Global.CurrentProfile != "" {
-			return cfg.Global.CurrentProfile, nil
-		}
-		return "", nil
-	}
-
-	target, err := os.Readlink(paths.DefaultAuthPath)
-	if err != nil {
-		return "", fmt.Errorf("read default auth symlink: %w", err)
-	}
-	if !filepath.IsAbs(target) {
-		target = filepath.Join(filepath.Dir(paths.DefaultAuthPath), target)
-	}
-
-	for _, profile := range cfg.Profiles {
-		if filepath.Clean(target) == filepath.Clean(filepath.Join(profile.CodexHome, "auth.json")) {
-			return profile.Name, nil
-		}
-	}
-	if cfg.Global.CurrentProfile != "" {
-		return cfg.Global.CurrentProfile, nil
-	}
-	return "", nil
 }
 
 func firstLineOrDash(s string) string {

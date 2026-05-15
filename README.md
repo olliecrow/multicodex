@@ -6,9 +6,9 @@ It keeps accounts isolated in named local profiles. You log in once per profile,
 
 By default, each profile reuses your global Codex `config.toml`, so normal Codex settings changes continue to apply across all multicodex profiles. A profile can still opt into its own config by replacing its profile-local `config.toml`.
 
-Profile login still requires file-backed auth. If your shared global Codex config does not set `cli_auth_credentials_store = "file"`, `multicodex login` will fail with a setup error until you either enable file-backed auth globally or create a per-profile override. The same preflight is re-checked before profile-scoped Codex execution (`multicodex cli`, `multicodex exec`, `multicodex app`, `multicodex heartbeat`, direct `multicodex run ... -- codex ...`, and `multicodex switch-global` unless you explicitly force it), so later edits to the shared config cannot silently weaken isolation.
+Profile login still requires file-backed auth. If your shared global Codex config does not set `cli_auth_credentials_store = "file"`, `multicodex login` will fail with a setup error until you either enable file-backed auth globally or create a per-profile override. The same preflight is re-checked before profile-scoped Codex execution (`multicodex cli`, `multicodex exec`, `multicodex heartbeat`, and direct `multicodex run ... -- codex ...`), so later edits to the shared config cannot silently weaken isolation.
 
-Most commands only change the current terminal context. `multicodex app` and `multicodex switch-global` are the two commands that also update the shared default Codex auth pointer on purpose.
+Multicodex does not switch, restore, or otherwise manage the shared default Codex auth account. Keep the normal system Codex account, such as `crowoy`, configured through Codex itself.
 
 ## Current status
 
@@ -93,7 +93,7 @@ multicodex dry-run
 - If `~/.multicodex` exists and `~/multicodex` does not, multicodex automatically migrates existing state on first run.
 - You can override the state location with `MULTICODEX_HOME`.
 - Profile auth stays isolated under `~/multicodex/profiles/<name>/codex-home/auth.json`.
-- Profile-scoped CLI, exec, and run sessions keep Codex state, including thread and `/goal` state, under `~/multicodex/profiles/<name>/codex-home/`. The Mac app command is different: it uses the shared default `CODEX_HOME` so the app keeps one shared sidebar and thread list.
+- Profile-scoped CLI, exec, and run sessions keep Codex state, including thread and `/goal` state, under `~/multicodex/profiles/<name>/codex-home/`.
 - Profile config defaults to a symlink from `~/multicodex/profiles/<name>/codex-home/config.toml` to your default Codex config at `~/.codex/config.toml`.
 - Profile skills fill in missing top-level entries from `~/.codex/skills` so shared skills stay visible in profile-scoped Codex runs.
 - If you want a per-profile skill override, create that top-level entry inside the profile's `codex-home/skills` directory and multicodex will leave it alone.
@@ -107,12 +107,9 @@ multicodex add <name>
 multicodex login <name> [codex login args]
 multicodex login-all
 multicodex use <name> [--shell]
-multicodex app <name>
 multicodex cli <name> [codex args...]
 multicodex run <name> -- <command...>
 multicodex exec [codex exec args]
-multicodex switch-global <name> [--force]
-multicodex switch-global --restore-default
 multicodex status
 multicodex heartbeat
 multicodex monitor [flags]
@@ -143,15 +140,6 @@ Run one command in another profile without changing your shell.
 multicodex run personal -- codex login status
 ```
 
-Launch a new Codex Mac app instance for one profile while keeping one shared left-side list.
-
-```bash
-multicodex app personal
-multicodex app work
-```
-
-`multicodex app` is for macOS. It first switches the shared default auth pointer to that profile, then launches `Codex.app` with the shared default `CODEX_HOME`, no active profile marker, and a stable per-profile app-data folder under `~/Library/Application Support/Codex-multicodex/<profile>`. The auth switch is locked against other global auth switches, and a failed app launch restores the previous default auth state. That keeps one shared sidebar state while avoiding one giant shared Electron app-data folder across every app window. `multicodex` exits after handing the launch off to macOS; it does not keep a helper process running. Already-open app windows usually keep the account they started with, but that split is best-effort rather than a hard lock because Codex can reload auth later in some flows.
-
 Run the normal interactive Codex CLI with one profile.
 
 ```bash
@@ -173,29 +161,10 @@ multicodex exec -s read-only "Summarize the README in 3 bullets."
 For explicit Spark models (`--model`/`-m` containing `spark`), `multicodex exec` uses Spark buckets for routing and fails rather than falling back to a random/default Codex account when Spark data is not available.
 For help requests such as `multicodex exec --help`, it delegates directly to `codex exec` and does not require any profiles to be configured.
 
-Switch system default account used by default Codex context.
-
-```bash
-multicodex switch-global work
-```
-
-Restore the latest saved non-multicodex-managed default account state.
-
-```bash
-multicodex switch-global --restore-default
-```
-
-If you deliberately need to bypass the file-backed-auth preflight, use `--force`.
-
-```bash
-multicodex switch-global --force work
-```
-
 Run non-mutating checks and preview commands.
 
 ```bash
 multicodex doctor
-multicodex dry-run switch-global work
 multicodex dry-run use personal
 multicodex dry-run run work -- codex login status
 ```
@@ -210,7 +179,7 @@ multicodex run work -- codex exec -s read-only -C /path/to/repo \
 multicodex status
 ```
 
-This confirms the profile can complete an actual request while keeping the global default unchanged.
+This confirms the profile can complete an actual request without changing the default Codex account.
 
 Send a fire-and-forget keepalive hello to every logged-in profile.
 
@@ -218,7 +187,7 @@ Send a fire-and-forget keepalive hello to every logged-in profile.
 multicodex heartbeat
 ```
 
-Heartbeat runs stay profile-local: they use each profile's `CODEX_HOME`, run `codex exec` in read-only mode, and do not switch the global default account.
+Heartbeat runs stay profile-local: they use each profile's `CODEX_HOME` and run `codex exec` in read-only mode.
 
 For cron use, heartbeat also:
 - skips overlapping runs via a lock file under `~/multicodex`
@@ -329,7 +298,7 @@ go build -o multicodex ./cmd/multicodex
 - Keeps profile state local on disk.
 - Does not send secrets to third-party services.
 - Does not store raw secrets in multicodex config.
-- Global switch touches only the default auth pointer path.
+- Does not change, restore, back up, or symlink the shared default Codex auth account.
 - `monitor` is read-only and does not mutate Codex account data.
 - `doctor` and `dry-run` are non-mutating helpers.
 - `doctor` includes repo leak guards for tracked sensitive files and ignore-pattern coverage.
@@ -338,8 +307,7 @@ go build -o multicodex ./cmd/multicodex
 ## Notes
 
 - Profile auth is isolated by profile `CODEX_HOME`.
-- Global switching is explicit. It is never the default.
-- If your default Codex setup uses keychain auth only, global auth pointer switching might not affect every context. In that case configure default Codex auth storage to file mode.
+- If your default Codex setup uses keychain auth only, configure file-backed auth for the profiles you want to use with multicodex.
 
 ## License
 

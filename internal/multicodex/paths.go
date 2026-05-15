@@ -14,9 +14,7 @@ type Paths struct {
 	MulticodexHome   string
 	ConfigPath       string
 	ProfilesDir      string
-	BackupsDir       string
 	DefaultCodexHome string
-	DefaultAuthPath  string
 }
 
 func ResolvePaths() (Paths, error) {
@@ -42,8 +40,6 @@ func resolvePaths(runMigration bool) (Paths, error) {
 	if defaultCodexHome == "" {
 		defaultCodexHome = filepath.Join(home, ".codex")
 	}
-	defaultAuthPath := filepath.Join(defaultCodexHome, "auth.json")
-
 	multicodexHome, err := resolveConfiguredPath(os.Getenv("MULTICODEX_HOME"), home)
 	if err != nil {
 		return Paths{}, fmt.Errorf("resolve MULTICODEX_HOME: %w", err)
@@ -57,9 +53,6 @@ func resolvePaths(runMigration bool) (Paths, error) {
 			if err := rewriteMigratedConfigPaths(multicodexHome, legacyMulticodexHome); err != nil {
 				return Paths{}, err
 			}
-			if err := rewriteMigratedDefaultAuthSymlink(defaultAuthPath, legacyMulticodexHome, multicodexHome); err != nil {
-				return Paths{}, err
-			}
 		}
 	}
 
@@ -67,9 +60,7 @@ func resolvePaths(runMigration bool) (Paths, error) {
 		MulticodexHome:   multicodexHome,
 		ConfigPath:       filepath.Join(multicodexHome, "config.json"),
 		ProfilesDir:      filepath.Join(multicodexHome, "profiles"),
-		BackupsDir:       filepath.Join(multicodexHome, "backups"),
 		DefaultCodexHome: defaultCodexHome,
-		DefaultAuthPath:  defaultAuthPath,
 	}, nil
 }
 
@@ -150,17 +141,6 @@ func rewriteMigratedConfigPaths(newHome, legacyHome string) error {
 		changed = true
 	}
 
-	rewrittenBackupFile := rewriteLegacyPathPrefix(cfg.Global.BackupFilePath, legacyHome, newHome)
-	if rewrittenBackupFile != cfg.Global.BackupFilePath {
-		cfg.Global.BackupFilePath = rewrittenBackupFile
-		changed = true
-	}
-	rewrittenBackupTarget := rewriteLegacyPathPrefix(cfg.Global.BackupLinkTarget, legacyHome, newHome)
-	if rewrittenBackupTarget != cfg.Global.BackupLinkTarget {
-		cfg.Global.BackupLinkTarget = rewrittenBackupTarget
-		changed = true
-	}
-
 	if !changed {
 		return nil
 	}
@@ -175,37 +155,6 @@ func rewriteMigratedConfigPaths(newHome, legacyHome string) error {
 	}
 	if err := os.Rename(tmpPath, configPath); err != nil {
 		return fmt.Errorf("replace migrated config: %w", err)
-	}
-	return nil
-}
-
-func rewriteMigratedDefaultAuthSymlink(defaultAuthPath, legacyHome, newHome string) error {
-	info, err := os.Lstat(defaultAuthPath)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		return fmt.Errorf("inspect default auth symlink after migration: %w", err)
-	}
-	if info.Mode()&os.ModeSymlink == 0 {
-		return nil
-	}
-
-	target, err := os.Readlink(defaultAuthPath)
-	if err != nil {
-		return fmt.Errorf("read default auth symlink after migration: %w", err)
-	}
-	resolved := target
-	if !filepath.IsAbs(resolved) {
-		resolved = filepath.Join(filepath.Dir(defaultAuthPath), resolved)
-	}
-	rewritten := rewriteLegacyPathPrefix(resolved, legacyHome, newHome)
-	if rewritten == resolved {
-		return nil
-	}
-
-	if err := replaceAuthWithSymlink(defaultAuthPath, rewritten); err != nil {
-		return fmt.Errorf("rewrite default auth symlink target after migration: %w", err)
 	}
 	return nil
 }

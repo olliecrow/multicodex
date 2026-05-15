@@ -32,28 +32,15 @@ func TestResolvePathsMigratesLegacyHome(t *testing.T) {
 	legacyHome := filepath.Join(home, ".multicodex")
 	newHome := filepath.Join(home, "multicodex")
 	legacyProfileHome := filepath.Join(legacyHome, "profiles", "work", "codex-home")
-	legacyBackupPath := filepath.Join(legacyHome, "backups", "default-auth.backup")
 
 	if err := os.MkdirAll(legacyProfileHome, 0o700); err != nil {
 		t.Fatalf("mkdir legacy profile: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(legacyBackupPath), 0o700); err != nil {
-		t.Fatalf("mkdir legacy backups: %v", err)
-	}
-	if err := os.WriteFile(legacyBackupPath, []byte("backup"), 0o600); err != nil {
-		t.Fatalf("write legacy backup: %v", err)
-	}
 
-	cfg := &Config{
-		Version: 1,
-		Profiles: map[string]Profile{
+	cfg := map[string]any{
+		"version": 1,
+		"profiles": map[string]Profile{
 			"work": {Name: "work", CodexHome: legacyProfileHome},
-		},
-		Global: GlobalState{
-			BackupInitialized: true,
-			BackupMode:        "file",
-			BackupFilePath:    legacyBackupPath,
-			BackupLinkTarget:  filepath.Join(legacyProfileHome, "auth.json"),
 		},
 	}
 	encoded, err := json.MarshalIndent(cfg, "", "  ")
@@ -62,15 +49,6 @@ func TestResolvePathsMigratesLegacyHome(t *testing.T) {
 	}
 	if err := os.WriteFile(filepath.Join(legacyHome, "config.json"), append(encoded, '\n'), 0o600); err != nil {
 		t.Fatalf("write legacy config: %v", err)
-	}
-
-	defaultCodexHome := filepath.Join(home, ".codex")
-	if err := os.MkdirAll(defaultCodexHome, 0o700); err != nil {
-		t.Fatalf("mkdir default codex home: %v", err)
-	}
-	defaultAuthPath := filepath.Join(defaultCodexHome, "auth.json")
-	if err := os.Symlink(filepath.Join(legacyProfileHome, "auth.json"), defaultAuthPath); err != nil {
-		t.Fatalf("symlink default auth path: %v", err)
 	}
 
 	t.Setenv("HOME", home)
@@ -99,39 +77,14 @@ func TestResolvePathsMigratesLegacyHome(t *testing.T) {
 	if got, want := migrated.Profiles["work"].CodexHome, filepath.Join(newHome, "profiles", "work", "codex-home"); got != want {
 		t.Fatalf("unexpected migrated profile codex home: got=%q want=%q", got, want)
 	}
-	if got, want := migrated.Global.BackupFilePath, filepath.Join(newHome, "backups", "default-auth.backup"); got != want {
-		t.Fatalf("unexpected migrated backup file path: got=%q want=%q", got, want)
-	}
-	if got, want := migrated.Global.BackupLinkTarget, filepath.Join(newHome, "profiles", "work", "codex-home", "auth.json"); got != want {
-		t.Fatalf("unexpected migrated backup link target: got=%q want=%q", got, want)
-	}
-
-	gotTarget, err := os.Readlink(defaultAuthPath)
-	if err != nil {
-		t.Fatalf("read migrated default auth symlink: %v", err)
-	}
-	if got, want := gotTarget, filepath.Join(newHome, "profiles", "work", "codex-home", "auth.json"); got != want {
-		t.Fatalf("unexpected default auth symlink target: got=%q want=%q", got, want)
-	}
 }
 
 func TestResolvePathsWithoutMigrationLeavesLegacyStateUntouched(t *testing.T) {
 	home := t.TempDir()
 	legacyHome := filepath.Join(home, ".multicodex")
 	newHome := filepath.Join(home, "multicodex")
-	legacyProfileHome := filepath.Join(legacyHome, "profiles", "work", "codex-home")
-	if err := os.MkdirAll(legacyProfileHome, 0o700); err != nil {
-		t.Fatalf("mkdir legacy profile: %v", err)
-	}
-
-	defaultCodexHome := filepath.Join(home, ".codex")
-	if err := os.MkdirAll(defaultCodexHome, 0o700); err != nil {
-		t.Fatalf("mkdir default codex home: %v", err)
-	}
-	defaultAuthPath := filepath.Join(defaultCodexHome, "auth.json")
-	legacyTarget := filepath.Join(legacyProfileHome, "auth.json")
-	if err := os.Symlink(legacyTarget, defaultAuthPath); err != nil {
-		t.Fatalf("symlink default auth path: %v", err)
+	if err := os.MkdirAll(legacyHome, 0o700); err != nil {
+		t.Fatalf("mkdir legacy home: %v", err)
 	}
 
 	t.Setenv("HOME", home)
@@ -150,13 +103,6 @@ func TestResolvePathsWithoutMigrationLeavesLegacyStateUntouched(t *testing.T) {
 	}
 	if _, err := os.Stat(newHome); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected new home not to be created, stat err=%v", err)
-	}
-	gotTarget, err := os.Readlink(defaultAuthPath)
-	if err != nil {
-		t.Fatalf("read default auth symlink: %v", err)
-	}
-	if gotTarget != legacyTarget {
-		t.Fatalf("expected default auth target to remain %q, got %q", legacyTarget, gotTarget)
 	}
 }
 

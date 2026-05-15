@@ -3,7 +3,6 @@ package usage
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -469,20 +468,6 @@ func resolveActiveCodexHomes() activeHomeSet {
 		return out
 	}
 	out.homes[primary] = struct{}{}
-
-	authPath := filepath.Join(primary, "auth.json")
-	info, err := os.Lstat(authPath)
-	if err != nil || info.Mode()&os.ModeSymlink == 0 {
-		return out
-	}
-
-	resolvedAuthPath, err := filepath.EvalSymlinks(authPath)
-	if err != nil {
-		return out
-	}
-	if aliasHome := normalizeHome(filepath.Dir(resolvedAuthPath)); aliasHome != "" {
-		out.homes[aliasHome] = struct{}{}
-	}
 	return out
 }
 

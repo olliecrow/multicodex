@@ -6,12 +6,9 @@
 - `multicodex login <name> [codex login args]`
 - `multicodex login-all`
 - `multicodex use <name> [--shell]`
-- `multicodex app <name>`
 - `multicodex cli <name> [codex args...]`
 - `multicodex run <name> -- <command...>`
 - `multicodex exec [codex exec args]`
-- `multicodex switch-global <name> [--force]`
-- `multicodex switch-global --restore-default`
 - `multicodex status`
 - `multicodex heartbeat`
 - `multicodex monitor [flags]`
@@ -54,24 +51,7 @@
 `multicodex use <name> [--shell]`
 - Local scope only.
 - Emits shell env instructions or starts a subshell bound to that profile.
-- Leaves global default untouched.
-
-`multicodex app <name>`
-- macOS only.
-- Switches the shared default auth pointer to the selected profile.
-- Uses a lock tied to the shared default `auth.json` path so overlapping global auth switches do not race.
-- Launches a new `Codex.app` instance with the shared default `CODEX_HOME`.
-- Clears `MULTICODEX_ACTIVE_PROFILE` before launch because the app uses shared default Codex state, not profile-local Codex state.
-- Passes a stable per-profile Electron app-data folder at `~/Library/Application Support/Codex-multicodex/<profile>`.
-- Uses `open -n -a` so each call starts a separate app process.
-- Restores the previous default auth state when the app launch fails after the auth switch.
-- Exits after handing the launch off to macOS; it does not keep a helper process running.
-- Keeps one shared sidebar and thread list across app windows because they share the same default `CODEX_HOME`.
-- Reuses one app-data folder per profile instead of making a fresh folder on every launch.
-- Keeps per-window account choice on a best-effort basis rather than as a hard lock because Codex can reload auth later in some flows.
-- Re-checks file-backed auth isolation before launching the app.
-- Accepts installed app bundles in `/Applications/Codex.app`, `/System/Volumes/Data/Applications/Codex.app`, or `~/Applications/Codex.app`.
-- `MULTICODEX_APP_PATH` can override the app bundle path when needed.
+- Leaves the default Codex account untouched.
 
 `multicodex cli <name> [codex args...]`
 - Runs the interactive Codex CLI in the selected profile context.
@@ -80,7 +60,7 @@
 - When stdin, stdout, and stderr are real terminals, replaces the multicodex process with `codex` so the interactive session behaves like a normal direct Codex launch.
 - Re-checks file-backed auth isolation before launching Codex.
 - Keeps Codex thread state and `/goal` state profile-local through the selected profile's `CODEX_HOME`, so separate terminals using different profiles do not share active goals.
-- Leaves the shared global auth pointer untouched.
+- Leaves the default Codex account untouched.
 
 `multicodex run <name> -- <command...>`
 - Executes one command with profile-scoped context.
@@ -103,17 +83,9 @@
 - When usage fetch is unavailable for every profile, picks a random configured profile for that call.
 - Returns child exit code.
 
-`multicodex switch-global <name> [--force]`
-- Explicit global operation.
-- Changes only minimal auth pointer or file required for default Codex identity.
-- Uses a lock tied to the shared default `auth.json` path and replaces auth files through a temporary path before rename.
-- Re-checks file-backed auth isolation before switching unless `--force` is supplied.
-- Refreshes restore metadata whenever the current default auth state changed outside multicodex.
-- Avoids touching unrelated Codex session data.
-
 `multicodex status`
 - Shows all profiles and each profile login status.
-- Includes which profile is current global default when known.
+- Does not manage the default Codex account.
 
 `multicodex heartbeat`
 - Runs a minimal read-only `codex exec --skip-git-repo-check --sandbox read-only --color never hello` keepalive for each logged-in profile.
@@ -123,7 +95,7 @@
 - Retries failed logged-in profile heartbeats with linear backoff by default.
 - Prints per-profile result rows and a final summary.
 - Returns non-zero when no logged-in profiles are found or when any logged-in profile heartbeat fails.
-- Leaves the global default auth pointer untouched.
+- Leaves the default Codex account untouched.
 - Supports environment overrides for timeout, retries, backoff, prompt, and lock path.
 
 `multicodex monitor`
@@ -184,8 +156,6 @@
   - `use <name>`
   - `login <name>`
   - `run <name> -- <command...>`
-  - `switch-global <name> [--force]`
-  - `switch-global --restore-default`
 
 `multicodex completion <shell>`
 - Prints tab-completion script for bash, zsh, or fish.

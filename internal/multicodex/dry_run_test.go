@@ -1,7 +1,6 @@
 package multicodex
 
 import (
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -9,7 +8,7 @@ import (
 func TestRenderDryRunOverview(t *testing.T) {
 	t.Parallel()
 
-	paths := Paths{MulticodexHome: "/tmp/multi", DefaultCodexHome: "/tmp/codex", DefaultAuthPath: "/tmp/codex/auth.json", BackupsDir: "/tmp/multi/backups"}
+	paths := Paths{MulticodexHome: "/tmp/multi", DefaultCodexHome: "/tmp/codex"}
 	store := NewStore(paths)
 	cfg := DefaultConfig()
 	cfg.Profiles["work"] = Profile{Name: "work", CodexHome: "/tmp/multi/profiles/work/codex-home"}
@@ -36,27 +35,16 @@ func TestRenderDryRunUseUnknown(t *testing.T) {
 	}
 }
 
-func TestRenderDryRunSwitchGlobal(t *testing.T) {
+func TestRenderDryRunRejectsUnsupportedOperation(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
-	paths := Paths{
-		MulticodexHome:   filepath.Join(root, "multi"),
-		BackupsDir:       filepath.Join(root, "multi", "backups"),
-		DefaultCodexHome: filepath.Join(root, "codex"),
-		DefaultAuthPath:  filepath.Join(root, "codex", "auth.json"),
-	}
-	store := NewStore(paths)
+	store := NewStore(Paths{})
 	cfg := DefaultConfig()
-	cfg.Profiles["personal"] = Profile{Name: "personal", CodexHome: filepath.Join(root, "multi", "profiles", "personal", "codex-home")}
-
-	text, err := RenderDryRun(store, cfg, []string{"switch-global", "personal"})
-	if err != nil {
-		t.Fatalf("RenderDryRun: %v", err)
+	_, err := RenderDryRun(store, cfg, []string{"unsupported", "personal"})
+	if err == nil {
+		t.Fatalf("expected error")
 	}
-	for _, want := range []string{"would do:", "create symlink", "dry-run only:"} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("missing %q in output", want)
-		}
+	if !strings.Contains(err.Error(), "usage: multicodex dry-run [use|login|run]") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

@@ -26,9 +26,6 @@ func TestHelpCommandGlobal(t *testing.T) {
 	if !strings.Contains(out, "exec [codex exec args]") {
 		t.Fatalf("expected exec command in help output")
 	}
-	if !strings.Contains(out, "app <name>") {
-		t.Fatalf("expected app command in help output")
-	}
 	if !strings.Contains(out, "cli <name>") {
 		t.Fatalf("expected cli command in help output")
 	}
@@ -83,9 +80,6 @@ func TestCompletionCommandBash(t *testing.T) {
 	}
 	if !strings.Contains(out, "exec") {
 		t.Fatalf("expected exec command in completion output")
-	}
-	if !strings.Contains(out, "app") {
-		t.Fatalf("expected app command in completion output")
 	}
 	if !strings.Contains(out, "cli") {
 		t.Fatalf("expected cli command in completion output")

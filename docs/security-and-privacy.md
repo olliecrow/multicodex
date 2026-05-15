@@ -15,7 +15,7 @@
 
 ## Repository safeguards
 - `.gitignore` must ignore local auth and profile state.
-- Recommended ignore coverage includes legacy `.multicodex/` and targeted current state paths: `**/multicodex/config.json`, `**/multicodex/profiles/`, and `**/multicodex/backups/`.
+- Recommended ignore coverage includes legacy `.multicodex/` and targeted current state paths: `**/multicodex/config.json` and `**/multicodex/profiles/`.
 - Tests must use synthetic fixtures only.
 - Example files must never include real credentials.
 - CI should run secret scanning before merge.
@@ -28,7 +28,6 @@
 - Rewrite history only in rare, explicit cases.
 - If going public without history, archive prior repo privately and create a fresh public repo.
 
-## Minimal-touch global switching principle
-- Global switching should modify the minimum set of files and settings needed.
-- Do not alter unrelated session or tool state.
-- Provide a restore path for reverting global default safely.
+## Global auth boundary
+- Multicodex must not change, restore, back up, symlink, lock, or otherwise manage the shared default Codex auth account.
+- The system default Codex account is managed by normal Codex tooling outside multicodex.

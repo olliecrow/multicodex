@@ -51,7 +51,7 @@ _multicodex_complete() {
   fi
   cmd="${COMP_WORDS[1]:-}"
 
-  local commands="init add login login-all use app cli run exec switch-global status heartbeat monitor doctor dry-run completion version help"
+  local commands="init add login login-all use cli run exec status heartbeat monitor doctor dry-run completion version help"
 
   if (( COMP_CWORD == 1 )); then
     COMPREPLY=( $(compgen -W "$commands" -- "$cur") )
@@ -59,7 +59,7 @@ _multicodex_complete() {
   fi
 
   case "$cmd" in
-    add|login|use|app|cli)
+    add|login|use|cli)
       if (( COMP_CWORD == 2 )); then
         COMPREPLY=( $(compgen -W "$(_multicodex_profiles)" -- "$cur") )
         return 0
@@ -81,16 +81,6 @@ _multicodex_complete() {
       ;;
     exec)
       return 0
-      ;;
-    switch-global)
-      if (( COMP_CWORD == 2 )); then
-        COMPREPLY=( $(compgen -W "$(_multicodex_profiles) --restore-default --force" -- "$cur") )
-        return 0
-      fi
-      if (( COMP_CWORD == 3 )); then
-        COMPREPLY=( $(compgen -W "--force" -- "$cur") )
-        return 0
-      fi
       ;;
     monitor)
       if (( COMP_CWORD == 2 )); then
@@ -128,7 +118,7 @@ _multicodex_complete() {
       ;;
     dry-run)
       if (( COMP_CWORD == 2 )); then
-        COMPREPLY=( $(compgen -W "use login run switch-global" -- "$cur") )
+        COMPREPLY=( $(compgen -W "use login run" -- "$cur") )
         return 0
       fi
       ;;
@@ -140,7 +130,7 @@ _multicodex_complete() {
       ;;
     help)
       if (( COMP_CWORD == 2 )); then
-        COMPREPLY=( $(compgen -W "init add login login-all use app cli run exec switch-global status heartbeat monitor doctor dry-run completion version help monitor\ doctor monitor\ completion monitor\ tui" -- "$cur") )
+        COMPREPLY=( $(compgen -W "init add login login-all use cli run exec status heartbeat monitor doctor dry-run completion version help monitor\ doctor monitor\ completion monitor\ tui" -- "$cur") )
         return 0
       fi
       ;;
@@ -170,7 +160,7 @@ _multicodex_complete() {
   fi
   cmd="${words[2]:-}"
 
-  local commands="init add login login-all use app cli run exec switch-global status heartbeat monitor doctor dry-run completion version help"
+  local commands="init add login login-all use cli run exec status heartbeat monitor doctor dry-run completion version help"
 
   if (( CURRENT == 2 )); then
     compadd -- ${=commands}
@@ -178,7 +168,7 @@ _multicodex_complete() {
   fi
 
   case "$cmd" in
-    add|login|use|app|cli)
+    add|login|use|cli)
       if (( CURRENT == 3 )); then
         compadd -- ${=($(_multicodex_profiles))}
         return
@@ -200,16 +190,6 @@ _multicodex_complete() {
       ;;
     exec)
       return
-      ;;
-    switch-global)
-      if (( CURRENT == 3 )); then
-        compadd -- ${=($(_multicodex_profiles))} --restore-default --force
-        return
-      fi
-      if (( CURRENT == 4 )); then
-        compadd -- --force
-        return
-      fi
       ;;
     monitor)
       if (( CURRENT == 3 )); then
@@ -245,7 +225,7 @@ _multicodex_complete() {
       ;;
     dry-run)
       if (( CURRENT == 3 )); then
-        compadd -- use login run switch-global
+        compadd -- use login run
         return
       fi
       ;;
@@ -257,7 +237,7 @@ _multicodex_complete() {
       ;;
     help)
       if (( CURRENT == 3 )); then
-        compadd -- init add login login-all use app cli run exec switch-global status heartbeat monitor doctor dry-run completion version help "monitor doctor" "monitor completion" "monitor tui"
+        compadd -- init add login login-all use cli run exec status heartbeat monitor doctor dry-run completion version help "monitor doctor" "monitor completion" "monitor tui"
         return
       fi
       ;;
@@ -274,19 +254,18 @@ function __multicodex_profiles
     multicodex __complete-profiles 2>/dev/null
 end
 
-complete -c multicodex -f -n '__fish_use_subcommand' -a 'init add login login-all use app cli run exec switch-global status heartbeat monitor doctor dry-run completion version help'
-complete -c multicodex -f -n '__fish_seen_subcommand_from add login use app cli' -a '(__multicodex_profiles)'
+complete -c multicodex -f -n '__fish_use_subcommand' -a 'init add login login-all use cli run exec status heartbeat monitor doctor dry-run completion version help'
+complete -c multicodex -f -n '__fish_seen_subcommand_from add login use cli' -a '(__multicodex_profiles)'
 complete -c multicodex -f -n '__fish_seen_subcommand_from run' -a '(__multicodex_profiles)'
-complete -c multicodex -f -n '__fish_seen_subcommand_from switch-global' -a '(__multicodex_profiles) --restore-default --force'
 complete -c multicodex -f -n '__fish_seen_subcommand_from monitor' -a 'doctor completion help tui'
 complete -c multicodex -f -n '__fish_seen_subcommand_from monitor' -l interval
 complete -c multicodex -f -n '__fish_seen_subcommand_from monitor' -l timeout
 complete -c multicodex -f -n '__fish_seen_subcommand_from monitor' -l no-color
 complete -c multicodex -f -n '__fish_seen_subcommand_from monitor' -l no-alt-screen
 complete -c multicodex -f -n '__fish_seen_subcommand_from completion; and __fish_seen_subcommand_from monitor' -a 'bash zsh fish'
-complete -c multicodex -f -n '__fish_seen_subcommand_from dry-run' -a 'use login run switch-global'
+complete -c multicodex -f -n '__fish_seen_subcommand_from dry-run' -a 'use login run'
 complete -c multicodex -f -n '__fish_seen_subcommand_from completion' -a 'bash zsh fish'
-complete -c multicodex -f -n '__fish_seen_subcommand_from help' -a 'init add login login-all use app cli run exec switch-global status heartbeat monitor doctor dry-run completion version help "monitor doctor" "monitor completion" "monitor tui"'
+complete -c multicodex -f -n '__fish_seen_subcommand_from help' -a 'init add login login-all use cli run exec status heartbeat monitor doctor dry-run completion version help "monitor doctor" "monitor completion" "monitor tui"'
 complete -c multicodex -f -n '__fish_seen_subcommand_from use' -l shell
 complete -c multicodex -f -n '__fish_seen_subcommand_from doctor' -l json
 complete -c multicodex -f -n '__fish_seen_subcommand_from doctor' -l timeout

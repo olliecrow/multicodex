@@ -17,7 +17,6 @@ const generatedProfileConfigContent = "cli_auth_credentials_store = \"file\"\n"
 type Config struct {
 	Version  int                `json:"version"`
 	Profiles map[string]Profile `json:"profiles"`
-	Global   GlobalState        `json:"global"`
 }
 
 // Profile maps a user-friendly name to an isolated Codex home path.
@@ -26,24 +25,14 @@ type Profile struct {
 	CodexHome string `json:"codex_home"`
 }
 
-// GlobalState tracks minimal backup metadata for safe global auth switching.
-type GlobalState struct {
-	CurrentProfile    string `json:"current_profile,omitempty"`
-	BackupMode        string `json:"backup_mode,omitempty"`
-	BackupFilePath    string `json:"backup_file_path,omitempty"`
-	BackupLinkTarget  string `json:"backup_link_target,omitempty"`
-	BackupInitialized bool   `json:"backup_initialized,omitempty"`
-}
-
 func DefaultConfig() *Config {
 	return &Config{
 		Version:  configVersion,
 		Profiles: map[string]Profile{},
-		Global:   GlobalState{},
 	}
 }
 
-// Store persists config and manages profile/global-switch filesystem state.
+// Store persists config and manages profile filesystem state.
 type Store struct {
 	paths Paths
 }
@@ -58,9 +47,6 @@ func (s *Store) EnsureBaseDirs() error {
 	}
 	if err := os.MkdirAll(s.paths.ProfilesDir, 0o700); err != nil {
 		return fmt.Errorf("create profiles dir: %w", err)
-	}
-	if err := os.MkdirAll(s.paths.BackupsDir, 0o700); err != nil {
-		return fmt.Errorf("create backups dir: %w", err)
 	}
 	return nil
 }

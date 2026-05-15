@@ -21,12 +21,9 @@ var commandSummaries = []struct {
 	{Name: "login <name> [codex login args]", Summary: "login profile using official codex flow"},
 	{Name: "login-all", Summary: "run login for every known profile"},
 	{Name: "use <name> [--shell]", Summary: "switch profile in current terminal context"},
-	{Name: "app <name>", Summary: "launch a new Codex Mac app instance for one profile"},
 	{Name: "cli <name> [codex args...]", Summary: "run the interactive Codex CLI with one profile"},
 	{Name: "run <name> -- <command...>", Summary: "run one command in profile context"},
 	{Name: "exec [codex exec args]", Summary: "run codex exec on the best available profile"},
-	{Name: "switch-global <name> [--force]", Summary: "switch default global codex auth to profile"},
-	{Name: "switch-global --restore-default", Summary: "restore latest saved external global auth"},
 	{Name: "status", Summary: "show all profile auth states"},
 	{Name: "heartbeat", Summary: "send a minimal keepalive hello for logged-in profiles"},
 	{Name: "monitor [flags]", Summary: "show live subscription usage across accounts"},
@@ -79,14 +76,6 @@ var commandHelpByName = map[string]commandHelp{
 			"multicodex use personal --shell",
 		},
 	},
-	"app": {
-		Usage:       "multicodex app <name>",
-		Description: "Launch a new Codex Mac app instance for one profile while keeping the shared sidebar. This switches the shared global auth pointer to that profile, then launches Codex with the shared default CODEX_HOME and a stable per-profile app-data folder.",
-		Examples: []string{
-			"multicodex app personal",
-			"multicodex app work",
-		},
-	},
 	"cli": {
 		Usage:       "multicodex cli <name> [codex args...]",
 		Description: "Run the interactive Codex CLI with the selected profile. This uses the same default args as the local c alias: search on, gpt-5.5, medium reasoning, and no sandbox or approval prompts.",
@@ -110,18 +99,9 @@ var commandHelpByName = map[string]commandHelp{
 			"multicodex exec --skip-git-repo-check -C /path/to/repo \"Review the latest diff.\"",
 		},
 	},
-	"switch-global": {
-		Usage:       "multicodex switch-global <name> [--force] | --restore-default",
-		Description: "Explicitly switch global default auth pointer to a profile, or restore the latest saved non-multicodex-managed default state. By default this refuses when the effective profile config no longer enables file-backed auth isolation; use --force only when you understand the risk.",
-		Examples: []string{
-			"multicodex switch-global personal",
-			"multicodex switch-global --force personal",
-			"multicodex switch-global --restore-default",
-		},
-	},
 	"status": {
 		Usage:       "multicodex status",
-		Description: "Show profile login status, account hints, and which profile is the global default when known.",
+		Description: "Show profile-local login status and account hints.",
 		Examples: []string{
 			"multicodex status",
 		},
@@ -180,7 +160,6 @@ var commandHelpByName = map[string]commandHelp{
 		Description: "Preview commands and filesystem operations without making changes.",
 		Examples: []string{
 			"multicodex dry-run",
-			"multicodex dry-run switch-global personal",
 			"multicodex dry-run run personal -- codex login status",
 		},
 	},
@@ -227,7 +206,6 @@ func printHelp() {
 	fmt.Println("  multicodex init")
 	fmt.Println("  multicodex add personal")
 	fmt.Println(`  eval "$(multicodex use personal)"`)
-	fmt.Println("  multicodex app personal")
 	fmt.Println("  multicodex cli personal")
 	fmt.Println("  multicodex monitor")
 	fmt.Println("  multicodex heartbeat")
@@ -237,8 +215,7 @@ func printHelp() {
 	fmt.Println("  multicodex help <command> [subcommand]")
 	fmt.Println()
 	fmt.Println("Notes:")
-	fmt.Println("  - most commands are local-first and do not change shared default auth")
-	fmt.Println("  - multicodex app and switch-global both update shared default auth on purpose")
+	fmt.Println("  - commands are profile-local and do not change shared default auth")
 }
 
 func (a *App) cmdHelp(args []string) error {

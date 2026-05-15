@@ -91,7 +91,7 @@ func commandStartupMigration(command string) (bool, bool) {
 	switch command {
 	case "status", "doctor", "dry-run", "monitor", "completion", "__complete-profiles":
 		return false, true
-	case "init", "add", "login", "login-all", "use", "app", "cli", "run", "exec", "switch-global", "heartbeat":
+	case "init", "add", "login", "login-all", "use", "cli", "run", "exec", "heartbeat":
 		return true, true
 	default:
 		return false, false
@@ -120,16 +120,12 @@ func (a *App) Run(args []string) error {
 		return a.cmdLoginAll()
 	case "use":
 		return a.cmdUse(args[1:])
-	case "app":
-		return a.cmdApp(args[1:])
 	case "cli":
 		return a.cmdCLI(args[1:])
 	case "run":
 		return a.cmdRun(args[1:])
 	case "exec":
 		return a.cmdExec(args[1:])
-	case "switch-global":
-		return a.cmdSwitchGlobal(args[1:])
 	case "status":
 		return a.cmdStatus()
 	case "heartbeat":
@@ -404,107 +400,6 @@ func (a *App) cmdRun(args []string) error {
 		}
 	}
 	return RunWithProfile(profile.CodexHome, name, cmd, cmdArgs)
-}
-
-func (a *App) cmdSwitchGlobal(args []string) error {
-	name, restoreDefault, force, err := parseSwitchGlobalArgs(args)
-	if err != nil {
-		return err
-	}
-
-	cfg, err := a.loadOrInitConfig()
-	if err != nil {
-		return err
-	}
-
-	if restoreDefault {
-		changed := false
-		err := a.store.WithGlobalAuthLock(func() error {
-			var restoreErr error
-			changed, restoreErr = a.store.RestoreGlobalAuth(cfg)
-			if restoreErr != nil {
-				return restoreErr
-			}
-			return a.store.Save(cfg)
-		})
-		if err != nil {
-			return err
-		}
-		if changed {
-			fmt.Println("restored global default auth")
-		} else {
-			fmt.Println("no global backup state found. nothing to restore")
-		}
-		return nil
-	}
-
-	profile, ok := cfg.Profiles[name]
-	if !ok {
-		return &ExitError{Code: 2, Message: fmt.Sprintf("unknown profile: %s", name)}
-	}
-	if err := a.store.EnsureProfileDir(profile); err != nil {
-		return err
-	}
-	if err := ensureProfileCodexExecutionReady(a.store.paths, profile); err != nil {
-		if !force {
-			return err
-		}
-		fmt.Fprintf(os.Stderr, "warning: forcing global switch despite disabled file-backed auth isolation: %v\n", err)
-	}
-	if err := a.store.WithGlobalAuthLock(func() error {
-		if err := a.store.SwitchGlobalAuthToProfile(cfg, profile); err != nil {
-			return err
-		}
-		return a.store.Save(cfg)
-	}); err != nil {
-		return err
-	}
-
-	fmt.Printf("global codex auth now points to profile %q\n", name)
-	fmt.Println("note: only auth pointer was switched. unrelated codex files were left untouched")
-	if force {
-		fmt.Println("warning: forced switch bypassed file-backed auth isolation preflight")
-	}
-	return nil
-}
-
-func parseSwitchGlobalArgs(args []string) (string, bool, bool, error) {
-	usageErr := &ExitError{Code: 2, Message: "usage: multicodex switch-global <name> [--force] | --restore-default"}
-	if len(args) == 0 || len(args) > 2 {
-		return "", false, false, usageErr
-	}
-
-	var (
-		name           string
-		restoreDefault bool
-		force          bool
-	)
-	for _, arg := range args {
-		switch strings.TrimSpace(arg) {
-		case "":
-			return "", false, false, usageErr
-		case "--restore-default":
-			restoreDefault = true
-		case "--force":
-			force = true
-		default:
-			if name != "" {
-				return "", false, false, usageErr
-			}
-			name = arg
-		}
-	}
-
-	if restoreDefault {
-		if force || name != "" {
-			return "", false, false, usageErr
-		}
-		return "", true, false, nil
-	}
-	if name == "" {
-		return "", false, false, usageErr
-	}
-	return name, false, force, nil
 }
 
 func (a *App) cmdStatus() error {

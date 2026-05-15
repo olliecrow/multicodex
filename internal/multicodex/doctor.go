@@ -70,7 +70,6 @@ func RunDoctor(store *Store, cfg *Config, timeout time.Duration) DoctorReport {
 	}
 
 	checks = append(checks, checkDirExists("default codex home", store.paths.DefaultCodexHome, false))
-	checks = append(checks, checkDefaultAuthPath(store.paths.DefaultAuthPath))
 	checks = append(checks, checkFileStoreConfig("default codex config", filepath.Join(store.paths.DefaultCodexHome, "config.toml"), false))
 	checks = append(checks, checkRepositoryLeakGuards(store.paths)...)
 
@@ -306,10 +305,9 @@ func missingIgnorePatterns(content string) []string {
 	hasTargetedMulticodexPatterns := containsAnyPattern(content, []string{
 		"multicodex/config.json",
 		"multicodex/profiles/",
-		"multicodex/backups/",
 	})
 	if !hasLegacyMulticodexPattern && !hasTargetedMulticodexPatterns {
-		missing = append(missing, ".multicodex/ or **/multicodex/{config.json,profiles/,backups/}")
+		missing = append(missing, ".multicodex/ or **/multicodex/{config.json,profiles/}")
 	}
 	for _, pattern := range required {
 		if !strings.Contains(content, pattern) {
@@ -370,9 +368,6 @@ func isSensitiveTrackedPath(p string) bool {
 	if strings.Contains(clean, "/multicodex/profiles/") || strings.HasPrefix(clean, "multicodex/profiles/") {
 		return true
 	}
-	if strings.Contains(clean, "/multicodex/backups/") || strings.HasPrefix(clean, "multicodex/backups/") {
-		return true
-	}
 	if strings.Contains(clean, "/.codex/") || strings.HasPrefix(clean, ".codex/") {
 		return true
 	}
@@ -406,27 +401,6 @@ func checkDirExists(name, path string, strictPerms bool) DoctorCheck {
 		return DoctorCheck{Name: name, Status: "warn", Details: fmt.Sprintf("permissions are %o, recommend 700", info.Mode().Perm())}
 	}
 	return DoctorCheck{Name: name, Status: "ok", Details: path}
-}
-
-func checkDefaultAuthPath(path string) DoctorCheck {
-	info, err := os.Lstat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return DoctorCheck{Name: "default auth path", Status: "warn", Details: "not found"}
-		}
-		return DoctorCheck{Name: "default auth path", Status: "fail", Details: err.Error()}
-	}
-	if info.IsDir() {
-		return DoctorCheck{Name: "default auth path", Status: "fail", Details: "path is a directory, expected file or symlink"}
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		target, err := os.Readlink(path)
-		if err != nil {
-			return DoctorCheck{Name: "default auth path", Status: "fail", Details: fmt.Sprintf("symlink read failed: %v", err)}
-		}
-		return DoctorCheck{Name: "default auth path", Status: "ok", Details: "symlink -> " + target}
-	}
-	return DoctorCheck{Name: "default auth path", Status: "ok", Details: "regular file"}
 }
 
 func checkFileStoreConfig(name, path string, required bool) DoctorCheck {
