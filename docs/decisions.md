@@ -392,3 +392,15 @@ Enforcement:
 `cmdCLI` repairs the profile home, checks file-backed auth, and launches Codex with the selected profile's `CODEX_HOME`. Tests run two profile-scoped CLI sessions at the same time and assert goal-related state lands in each profile home, not the shared default Codex home.
 References:
 `internal/multicodex/cli.go`, `internal/multicodex/cli_test.go`, `README.md`, `docs/command-spec.md`
+
+Decision: Remove global Codex auth switching and Codex app launch support from Multicodex.
+Context:
+The owner wants Multicodex to keep profile-local CLI and exec capabilities, but no longer wants Multicodex to change, switch, restore, or otherwise manage the global Codex account. The Codex desktop app path has been unreliable, especially when launched through Multicodex after global auth switching.
+Rationale:
+Changing the shared default Codex auth file is too risky for normal Codex app and CLI use. Profile-local `CODEX_HOME` routing already preserves the useful Multicodex behavior for `cli` and `exec` without touching global auth.
+Trade-offs:
+Users lose `multicodex app`, `multicodex switch-global`, and restore-default convenience. The default system Codex account must be managed through normal Codex login outside Multicodex.
+Enforcement:
+Remove app and switch-global commands, their help/completion/dry-run/docs/tests, and support code that writes, symlinks, backs up, restores, or locks the default Codex auth path. Preserve `multicodex cli` and `multicodex exec` behavior and tests. The expected global Codex account is `crowoy`, but Multicodex must not set it programmatically.
+References:
+`docs/global-auth-and-app-removal.md`, `internal/multicodex/cli.go`, `internal/multicodex/exec.go`

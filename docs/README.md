@@ -7,6 +7,7 @@ This directory holds long-term contributor documentation for this repo and is co
 - `docs/requirements.md`: product, UX, and technical requirements.
 - `docs/command-spec.md`: command behavior contract and error semantics.
 - `docs/security-and-privacy.md`: secret handling model and repository safety guardrails.
+- `docs/global-auth-and-app-removal.md`: target plan to remove global auth switching and Codex app launching while preserving profile-local CLI and exec flows.
 - `docs/implementation-notes.md`: architecture, state layout, and verification approach.
 - `docs/decisions.md`: durable rationale and decision log.
 - `docs/public-repo-principles.md`: public-readiness and publication standards.
