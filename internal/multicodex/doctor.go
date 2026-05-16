@@ -426,12 +426,15 @@ func checkFileStoreConfig(name, path string, required bool) DoctorCheck {
 }
 
 func checkAuthFile(name, path string) DoctorCheck {
-	info, err := os.Stat(path)
+	info, err := os.Lstat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return DoctorCheck{Name: name, Status: "warn", Details: "auth.json not found. run multicodex login <name>"}
 		}
 		return DoctorCheck{Name: name, Status: "fail", Details: err.Error()}
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return DoctorCheck{Name: name, Status: "fail", Details: "auth.json is a symlink; expected profile-local file"}
 	}
 	if info.IsDir() {
 		return DoctorCheck{Name: name, Status: "fail", Details: "auth.json is a directory"}
