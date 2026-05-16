@@ -92,6 +92,7 @@ multicodex dry-run
 - Default multicodex state home is `~/multicodex`.
 - You can override the state location with `MULTICODEX_HOME`.
 - Profile auth stays isolated under `~/multicodex/profiles/<name>/codex-home/auth.json`.
+- Profile `auth.json` must be a regular profile-local file; auth symlinks fail login hardening and doctor checks.
 - Profile-scoped CLI, exec, and run sessions keep Codex state, including thread and `/goal` state, under `~/multicodex/profiles/<name>/codex-home/`.
 - Profile config defaults to a symlink from `~/multicodex/profiles/<name>/codex-home/config.toml` to your default Codex config at `~/.codex/config.toml`.
 - Profile skills fill in missing top-level entries from `~/.codex/skills` so shared skills stay visible in profile-scoped Codex runs.
@@ -297,7 +298,7 @@ go build -o multicodex ./cmd/multicodex
 - `monitor` is read-only and does not mutate Codex account data.
 - `doctor` and `dry-run` are non-mutating helpers.
 - `doctor` includes repo leak guards for tracked sensitive files and ignore-pattern coverage.
-- After successful login, auth file permissions are normalized to `0600`.
+- After successful login, regular auth file permissions are normalized to `0600`; auth symlinks are rejected.
 
 ## Notes
 
