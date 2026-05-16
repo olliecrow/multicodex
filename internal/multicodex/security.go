@@ -17,7 +17,7 @@ func secureAuthFilePermissions(codexHome string) error {
 		return fmt.Errorf("inspect auth file permissions: %w", err)
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
-		return nil
+		return fmt.Errorf("auth path is a symlink, expected profile-local file: %s", authPath)
 	}
 	if info.IsDir() {
 		return fmt.Errorf("auth path is a directory, expected file: %s", authPath)

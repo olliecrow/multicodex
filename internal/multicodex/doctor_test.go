@@ -133,6 +133,28 @@ func TestCheckAuthFileTokensAndAPIKeyAllowed(t *testing.T) {
 	}
 }
 
+func TestCheckAuthFileRejectsSymlink(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	target := filepath.Join(root, "shared-auth.json")
+	if err := os.WriteFile(target, []byte(`{"tokens":{"access_token":"a"}}`), 0o600); err != nil {
+		t.Fatalf("write target auth file: %v", err)
+	}
+	path := filepath.Join(root, "auth.json")
+	if err := os.Symlink(target, path); err != nil {
+		t.Fatalf("symlink auth file: %v", err)
+	}
+
+	check := checkAuthFile("profile test auth", path)
+	if check.Status != "fail" {
+		t.Fatalf("expected fail for symlink auth, got %s", check.Status)
+	}
+	if !strings.Contains(check.Details, "auth.json is a symlink") {
+		t.Fatalf("expected symlink detail, got %q", check.Details)
+	}
+}
+
 func TestMissingIgnorePatterns(t *testing.T) {
 	t.Parallel()
 
