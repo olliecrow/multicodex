@@ -78,7 +78,7 @@ func RunDoctor(store *Store, cfg *Config, timeout time.Duration) DoctorReport {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	profileChecks := collectProfileDoctorChecks(cfg, names, codexFound)
+	profileChecks := collectProfileDoctorChecks(store.paths, cfg, names, codexFound)
 	for i := range profileChecks {
 		checks = append(checks, profileChecks[i]...)
 	}
@@ -86,12 +86,12 @@ func RunDoctor(store *Store, cfg *Config, timeout time.Duration) DoctorReport {
 	return DoctorReport{Checks: checks}
 }
 
-func collectProfileDoctorChecks(cfg *Config, names []string, codexFound bool) [][]DoctorCheck {
+func collectProfileDoctorChecks(paths Paths, cfg *Config, names []string, codexFound bool) [][]DoctorCheck {
 	result := make([][]DoctorCheck, len(names))
 	workers := parallelWorkers(len(names))
 	if workers == 1 {
 		for i, name := range names {
-			result[i] = profileDoctorChecks(name, cfg.Profiles[name], codexFound)
+			result[i] = profileDoctorChecks(paths, name, cfg.Profiles[name], codexFound)
 		}
 		return result
 	}
@@ -107,14 +107,14 @@ func collectProfileDoctorChecks(cfg *Config, names []string, codexFound bool) []
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			result[i] = profileDoctorChecks(name, profile, codexFound)
+			result[i] = profileDoctorChecks(paths, name, profile, codexFound)
 		}()
 	}
 	wg.Wait()
 	return result
 }
 
-func profileDoctorChecks(name string, profile Profile, codexFound bool) []DoctorCheck {
+func profileDoctorChecks(paths Paths, name string, profile Profile, codexFound bool) []DoctorCheck {
 	prefix := "profile " + name
 	out := make([]DoctorCheck, 0, 4)
 
@@ -124,7 +124,7 @@ func profileDoctorChecks(name string, profile Profile, codexFound bool) []Doctor
 		out = append(out, DoctorCheck{Name: prefix + " name", Status: "ok", Details: "valid"})
 	}
 
-	homeCheck := checkDirExists(prefix+" codex home", profile.CodexHome, true)
+	homeCheck := checkProfileCodexHome(paths, prefix+" codex home", profile)
 	out = append(out, homeCheck)
 	if homeCheck.Status == "fail" {
 		return out
@@ -146,6 +146,13 @@ func profileDoctorChecks(name string, profile Profile, codexFound bool) []Doctor
 		})
 	}
 	return out
+}
+
+func checkProfileCodexHome(paths Paths, name string, profile Profile) DoctorCheck {
+	if err := NewStore(paths).ensureProfileStoragePathSafe(profile); err != nil {
+		return DoctorCheck{Name: name, Status: "fail", Details: err.Error()}
+	}
+	return checkDirExists(name, profile.CodexHome, true)
 }
 
 func checkRepositoryLeakGuards(paths Paths) []DoctorCheck {
@@ -374,15 +381,12 @@ func isSensitiveTrackedPath(p string) bool {
 }
 
 func checkDirExists(name, path string, strictPerms bool) DoctorCheck {
-	info, err := os.Lstat(path)
+	info, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return DoctorCheck{Name: name, Status: "warn", Details: "not found"}
 		}
 		return DoctorCheck{Name: name, Status: "fail", Details: err.Error()}
-	}
-	if strictPerms && info.Mode()&os.ModeSymlink != 0 {
-		return DoctorCheck{Name: name, Status: "fail", Details: "expected profile-local directory, got symlink"}
 	}
 	if !info.IsDir() {
 		return DoctorCheck{Name: name, Status: "fail", Details: "expected directory"}

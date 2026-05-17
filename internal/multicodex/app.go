@@ -283,6 +283,9 @@ func ensureLoginConfigReady(paths Paths, profile Profile) error {
 }
 
 func ensureProfileCodexExecutionReady(paths Paths, profile Profile) error {
+	if err := NewStore(paths).ensureProfileStoragePathSafe(profile); err != nil {
+		return err
+	}
 	if _, _, err := ensureProfileAuthPathSafe(profile.CodexHome); err != nil {
 		return err
 	}
