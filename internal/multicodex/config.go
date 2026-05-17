@@ -483,6 +483,9 @@ func (s *Store) ensureProfileConfig(codexHome string) error {
 		if info.Mode()&os.ModeSymlink != 0 {
 			return nil
 		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("profile config path is not a regular file: %s", configPath)
+		}
 		content, err := os.ReadFile(configPath)
 		if err != nil {
 			return fmt.Errorf("read profile config: %w", err)

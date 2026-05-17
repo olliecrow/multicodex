@@ -17,7 +17,7 @@ func TestCmdUseMigratesGeneratedProfileConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cmdUse: %v", err)
 	}
-	if !strings.Contains(out, "MULTICODEX_ACTIVE_PROFILE=\"work\"") {
+	if !strings.Contains(out, "MULTICODEX_ACTIVE_PROFILE='work'") {
 		t.Fatalf("expected profile exports, got %q", out)
 	}
 

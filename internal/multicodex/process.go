@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
 	"syscall"
 )
@@ -111,10 +110,14 @@ func withCodexHomeEnv(base []string, codexHome string) []string {
 func RenderShellExports(codexHome, profile string) string {
 	var b strings.Builder
 	b.WriteString("export CODEX_HOME=")
-	b.WriteString(strconv.Quote(codexHome))
+	b.WriteString(shellQuoteValue(codexHome))
 	b.WriteString("\n")
 	b.WriteString("export MULTICODEX_ACTIVE_PROFILE=")
-	b.WriteString(strconv.Quote(profile))
+	b.WriteString(shellQuoteValue(profile))
 	b.WriteString("\n")
 	return b.String()
+}
+
+func shellQuoteValue(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
