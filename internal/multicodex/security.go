@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
 )
 
 func secureAuthFilePermissions(codexHome string) error {
@@ -47,5 +48,13 @@ func ensureProfileAuthPathSafe(codexHome string) (string, bool, error) {
 	if info.IsDir() {
 		return "", false, fmt.Errorf("auth path is a directory, expected file: %s", authPath)
 	}
+	if fileHasMultipleLinks(info) {
+		return "", false, fmt.Errorf("auth path has multiple hard links, expected profile-local file: %s", authPath)
+	}
 	return authPath, true, nil
+}
+
+func fileHasMultipleLinks(info os.FileInfo) bool {
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	return ok && stat.Nlink > 1
 }

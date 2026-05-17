@@ -156,6 +156,64 @@ func TestCheckAuthFileRejectsSymlink(t *testing.T) {
 	}
 }
 
+func TestCheckAuthFileRejectsHardLink(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	target := filepath.Join(root, "shared-auth.json")
+	if err := os.WriteFile(target, []byte(`{"tokens":{"access_token":"a"}}`), 0o600); err != nil {
+		t.Fatalf("write target auth file: %v", err)
+	}
+	path := filepath.Join(root, "auth.json")
+	if err := os.Link(target, path); err != nil {
+		t.Skipf("hard links are not supported here: %v", err)
+	}
+
+	check := checkAuthFile("profile test auth", path)
+	if check.Status != "fail" {
+		t.Fatalf("expected fail for hard-linked auth, got %s", check.Status)
+	}
+	if !strings.Contains(check.Details, "multiple hard links") {
+		t.Fatalf("expected hard-link detail, got %q", check.Details)
+	}
+}
+
+func TestProfileDoctorChecksSkipLoginStatusWhenConfigFails(t *testing.T) {
+	root := t.TempDir()
+	fakeBin := filepath.Join(root, "bin")
+	if err := os.MkdirAll(fakeBin, 0o700); err != nil {
+		t.Fatalf("mkdir fake bin: %v", err)
+	}
+	logPath := filepath.Join(root, "codex.log")
+	script := "#!/bin/sh\nprintf 'codex login status invoked\\n' > " + shellQuote(logPath) + "\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(fakeBin, "codex"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake codex: %v", err)
+	}
+	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	paths := Paths{ProfilesDir: filepath.Join(root, "profiles"), DefaultCodexHome: filepath.Join(root, "default-codex")}
+	codexHome := filepath.Join(paths.ProfilesDir, "work", "codex-home")
+	if err := os.MkdirAll(codexHome, 0o700); err != nil {
+		t.Fatalf("mkdir codex home: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(codexHome, "config.toml"), []byte("model = \"global\"\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(codexHome, "auth.json"), []byte(`{"tokens":{"access_token":"a"}}`), 0o600); err != nil {
+		t.Fatalf("write auth file: %v", err)
+	}
+
+	checks := profileDoctorChecks(paths, "work", Profile{Name: "work", CodexHome: codexHome}, true)
+	if _, err := os.Stat(logPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected codex login status not to run, stat err=%v", err)
+	}
+	for _, check := range checks {
+		if strings.Contains(check.Name, "login status") {
+			t.Fatalf("expected login status check to be skipped after config failure, got %v", checks)
+		}
+	}
+}
+
 func TestProfileDoctorChecksSkipLoginStatusWhenAuthFails(t *testing.T) {
 	root := t.TempDir()
 	fakeBin := filepath.Join(root, "bin")

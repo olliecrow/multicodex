@@ -58,6 +58,32 @@ func TestSecureAuthFilePermissionsRejectsSymlink(t *testing.T) {
 	}
 }
 
+func TestSecureAuthFilePermissionsRejectsHardLink(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	codexHome := filepath.Join(root, "codex-home")
+	if err := os.MkdirAll(codexHome, 0o700); err != nil {
+		t.Fatalf("mkdir codex home: %v", err)
+	}
+	target := filepath.Join(root, "shared-auth.json")
+	if err := os.WriteFile(target, []byte(`{"tokens":{"access_token":"a"}}`), 0o600); err != nil {
+		t.Fatalf("write target auth file: %v", err)
+	}
+	authPath := filepath.Join(codexHome, "auth.json")
+	if err := os.Link(target, authPath); err != nil {
+		t.Skipf("hard links are not supported here: %v", err)
+	}
+
+	err := secureAuthFilePermissions(codexHome)
+	if err == nil {
+		t.Fatal("expected hard-linked auth file to fail")
+	}
+	if !strings.Contains(err.Error(), "multiple hard links") {
+		t.Fatalf("expected hard-link error, got %v", err)
+	}
+}
+
 func TestEnsureProfileAuthPathSafeRejectsSymlinkedHome(t *testing.T) {
 	t.Parallel()
 
