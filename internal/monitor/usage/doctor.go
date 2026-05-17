@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"sort"
 	"strings"
 )
 
@@ -19,11 +20,15 @@ func RunDoctor(ctx context.Context) DoctorReport {
 
 	appSource := NewAppServerSource()
 	defer appSource.Close()
-	checks = append(checks, checkSourceFetch(ctx, appSource))
-
 	oauthSource := NewOAuthSource()
 	defer oauthSource.Close()
-	checks = append(checks, checkSourceFetch(ctx, oauthSource))
+
+	sourceChecks := make(chan DoctorCheck, 2)
+	go func() { sourceChecks <- checkSourceFetch(ctx, appSource) }()
+	go func() { sourceChecks <- checkSourceFetch(ctx, oauthSource) }()
+	checks = append(checks, <-sourceChecks)
+	checks = append(checks, <-sourceChecks)
+	sort.Slice(checks, func(i, j int) bool { return checks[i].Name < checks[j].Name })
 
 	return DoctorReport{Checks: checks}
 }
