@@ -254,6 +254,9 @@ func (a *App) cmdLogin(args []string) error {
 	if err := ensureLoginConfigReady(a.store.paths, profile); err != nil {
 		return err
 	}
+	if err := secureAuthFilePermissions(profile.CodexHome); err != nil {
+		return err
+	}
 
 	fmt.Printf("logging in profile %q\n", name)
 	if err := RunCodexLogin(profile.CodexHome, args[1:]); err != nil {

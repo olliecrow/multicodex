@@ -70,6 +70,52 @@ func TestCmdLoginFailsWhenSharedConfigDoesNotUseFileStore(t *testing.T) {
 	}
 }
 
+func TestCmdLoginRejectsAuthSymlinkBeforeRunningCodex(t *testing.T) {
+	app := newTestAppForCLI(t)
+	writeDefaultFileStoreConfig(t, app)
+	fakeBin := filepath.Join(t.TempDir(), "bin")
+	if err := os.MkdirAll(fakeBin, 0o700); err != nil {
+		t.Fatalf("mkdir fake bin: %v", err)
+	}
+	logPath := filepath.Join(t.TempDir(), "codex.log")
+	script := "#!/bin/sh\nprintf 'codex invoked\\n' > " + shellQuote(logPath) + "\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(fakeBin, "codex"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake codex: %v", err)
+	}
+	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	profile := Profile{Name: "work", CodexHome: filepath.Join(app.store.paths.ProfilesDir, "work", "codex-home")}
+	if err := os.MkdirAll(profile.CodexHome, 0o700); err != nil {
+		t.Fatalf("mkdir profile codex home: %v", err)
+	}
+	cfg := DefaultConfig()
+	cfg.Profiles[profile.Name] = profile
+	if err := app.store.Save(cfg); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if err := app.store.EnsureProfileDir(profile); err != nil {
+		t.Fatalf("EnsureProfileDir: %v", err)
+	}
+	target := filepath.Join(t.TempDir(), "shared-auth.json")
+	if err := os.WriteFile(target, []byte(`{"tokens":{"access_token":"a"}}`), 0o600); err != nil {
+		t.Fatalf("write target auth: %v", err)
+	}
+	if err := os.Symlink(target, filepath.Join(profile.CodexHome, "auth.json")); err != nil {
+		t.Fatalf("symlink auth: %v", err)
+	}
+
+	err := app.cmdLogin([]string{profile.Name})
+	if err == nil {
+		t.Fatal("expected auth symlink login to fail")
+	}
+	if !strings.Contains(err.Error(), "auth path is a symlink") {
+		t.Fatalf("expected symlink error, got %v", err)
+	}
+	if _, statErr := os.Stat(logPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("expected codex not to be invoked, stat err=%v", statErr)
+	}
+}
+
 func TestCmdRunCodexFailsWhenSharedConfigDoesNotUseFileStore(t *testing.T) {
 	app, logPath := newExecTestApp(t)
 	createExecProfiles(t, app, "alpha")
