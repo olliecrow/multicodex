@@ -171,7 +171,11 @@ func findAuthJSONPath() (string, error) {
 func findAuthJSONPathForHome(codexHome string) (string, error) {
 	if strings.TrimSpace(codexHome) != "" {
 		p := filepath.Join(codexHome, "auth.json")
-		if fileExists(p) {
+		ok, err := usableAuthFile(p)
+		if err != nil {
+			return "", err
+		}
+		if ok {
 			return p, nil
 		}
 	}
@@ -197,8 +201,28 @@ func readAccessToken(path string) (string, error) {
 }
 
 func fileExists(path string) bool {
+	ok, err := usableAuthFile(path)
+	return err == nil && ok
+}
+
+func usableAuthFile(path string) (bool, error) {
 	info, err := os.Lstat(path)
-	return err == nil && info.Mode().IsRegular() && !monitorFileHasMultipleLinks(info)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return false, fmt.Errorf("auth.json is a symlink: %s", path)
+	}
+	if !info.Mode().IsRegular() {
+		return false, fmt.Errorf("auth.json is not a regular file: %s", path)
+	}
+	if monitorFileHasMultipleLinks(info) {
+		return false, fmt.Errorf("auth.json has multiple hard links: %s", path)
+	}
+	return true, nil
 }
 
 func summarizeBody(b []byte) string {
