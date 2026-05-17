@@ -94,6 +94,7 @@ multicodex dry-run
 - Profile auth stays isolated under `~/multicodex/profiles/<name>/codex-home/auth.json`.
 - The multicodex state home, profile directories, profile `codex-home`, profile skills directory, and `auth.json` must be regular profile-local filesystem entries; symlinks fail setup, status, profile execution, and doctor checks.
 - Profile `auth.json` must not be a hard link to another file.
+- `multicodex heartbeat` rejects lock files that are symlinks or hard links before writing the PID.
 - Profile-scoped CLI, exec, and run sessions keep Codex state, including thread and `/goal` state, under `~/multicodex/profiles/<name>/codex-home/`.
 - Profile config defaults to a symlink from `~/multicodex/profiles/<name>/codex-home/config.toml` to your default Codex config at `~/.codex/config.toml`.
 - Profile skills fill in missing top-level entries from `~/.codex/skills` so shared skills stay visible in profile-scoped Codex runs.
@@ -160,7 +161,7 @@ multicodex exec -s read-only "Summarize the README in 3 bullets."
 
 `multicodex exec` first keeps profiles whose five-hour window is below 40% used and whose weekly window is not known to be exhausted. From those eligible profiles, it picks the one whose weekly reset is soonest. If eligible profiles do not expose a weekly reset time, it picks randomly among those eligible profiles. If no profile is eligible, it picks a random accessible profile for that call. If usage data is unavailable for every profile, it falls back to a random configured profile.
 For explicit Spark models (`--model`/`-m` containing `spark`), `multicodex exec` uses Spark buckets for routing and fails rather than falling back to a random/default Codex account when Spark data is not available.
-For help requests such as `multicodex exec --help`, it delegates directly to `codex exec` and does not require any profiles to be configured.
+For exact help requests such as `multicodex exec --help` or `multicodex exec help`, it delegates directly to `codex exec` and does not require any profiles to be configured. Normal prompts that start with the word `help` still use profile selection.
 
 Run non-mutating checks and preview commands.
 

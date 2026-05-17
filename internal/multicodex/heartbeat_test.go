@@ -111,6 +111,60 @@ func TestCmdHeartbeatSkipsWhenRunAlreadyInProgress(t *testing.T) {
 	}
 }
 
+func TestAcquireHeartbeatLockRejectsSymlink(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "target")
+	if err := os.WriteFile(target, []byte("keep\n"), 0o600); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	lockPath := filepath.Join(root, "heartbeat.lock")
+	if err := os.Symlink(target, lockPath); err != nil {
+		t.Fatalf("symlink lock: %v", err)
+	}
+
+	_, _, err := acquireHeartbeatLock(lockPath)
+	if err == nil {
+		t.Fatal("expected symlink lock to fail")
+	}
+	if !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("expected symlink error, got %v", err)
+	}
+	b, readErr := os.ReadFile(target)
+	if readErr != nil {
+		t.Fatalf("read target: %v", readErr)
+	}
+	if string(b) != "keep\n" {
+		t.Fatalf("expected target not to be truncated, got %q", string(b))
+	}
+}
+
+func TestAcquireHeartbeatLockRejectsHardLink(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "target")
+	if err := os.WriteFile(target, []byte("keep\n"), 0o600); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	lockPath := filepath.Join(root, "heartbeat.lock")
+	if err := os.Link(target, lockPath); err != nil {
+		t.Skipf("hard links are not supported here: %v", err)
+	}
+
+	_, _, err := acquireHeartbeatLock(lockPath)
+	if err == nil {
+		t.Fatal("expected hard-linked lock to fail")
+	}
+	if !strings.Contains(err.Error(), "multiple hard links") {
+		t.Fatalf("expected hard-link error, got %v", err)
+	}
+	b, readErr := os.ReadFile(target)
+	if readErr != nil {
+		t.Fatalf("read target: %v", readErr)
+	}
+	if string(b) != "keep\n" {
+		t.Fatalf("expected target not to be truncated, got %q", string(b))
+	}
+}
+
 func TestCmdHeartbeatFailsWhenSharedConfigDoesNotUseFileStore(t *testing.T) {
 	app := newHeartbeatTestApp(t, fakeCodexScript{
 		loginStatusByProfile: map[string]fakeStatus{

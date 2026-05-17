@@ -172,6 +172,9 @@ func (s *Store) ensureProfileStoragePathSafe(profile Profile) error {
 	if filepath.Clean(profile.CodexHome) != profile.CodexHome {
 		return fmt.Errorf("profile codex home %s does not match clean profile-local path %s", profile.CodexHome, filepath.Clean(profile.CodexHome))
 	}
+	if rel, err := filepath.Rel(s.paths.ProfilesDir, profile.CodexHome); err != nil || rel != filepath.Join(profile.Name, "codex-home") {
+		return fmt.Errorf("profile codex home %s does not match profile-local path under %s", profile.CodexHome, s.paths.ProfilesDir)
+	}
 	if !sameProfilePath(profile.CodexHome, expectedCodexHome) {
 		return fmt.Errorf("profile codex home %s does not match expected profile-local path %s", profile.CodexHome, expectedCodexHome)
 	}
@@ -504,18 +507,19 @@ func (s *Store) ensureProfileSkills(codexHome string) error {
 	defaultSkillsPath := filepath.Join(s.paths.DefaultCodexHome, "skills")
 	profileSkillsPath := filepath.Join(codexHome, "skills")
 
+	if err := ensurePathNotSymlinkIfExists(profileSkillsPath); err != nil {
+		return err
+	}
+	if err := ensurePathPrefixesBelowRootNotSymlinks(codexHome, profileSkillsPath); err != nil {
+		return err
+	}
+
 	entries, err := os.ReadDir(defaultSkillsPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
 		}
 		return fmt.Errorf("read default skills dir: %w", err)
-	}
-	if err := ensurePathNotSymlinkIfExists(profileSkillsPath); err != nil {
-		return err
-	}
-	if err := ensurePathPrefixesBelowRootNotSymlinks(codexHome, profileSkillsPath); err != nil {
-		return err
 	}
 	if err := os.MkdirAll(profileSkillsPath, 0o700); err != nil {
 		return fmt.Errorf("create profile skills dir: %w", err)

@@ -296,8 +296,18 @@ func acquireHeartbeatLock(path string) (*os.File, bool, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, false, fmt.Errorf("create heartbeat lock dir: %w", err)
 	}
+	if info, err := os.Lstat(path); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return nil, false, fmt.Errorf("heartbeat lock path is a symlink: %s", path)
+		}
+		if fileHasMultipleLinks(info) {
+			return nil, false, fmt.Errorf("heartbeat lock path has multiple hard links: %s", path)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, false, fmt.Errorf("inspect heartbeat lock: %w", err)
+	}
 
-	lockFile, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	lockFile, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0o600)
 	if err != nil {
 		return nil, false, fmt.Errorf("open heartbeat lock: %w", err)
 	}

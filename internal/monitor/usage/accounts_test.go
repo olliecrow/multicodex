@@ -305,6 +305,9 @@ func TestLoadMonitorAccountsPrefersMulticodexProfiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(profileHome, "auth.json"), []byte(`{"tokens":{"access_token":"x"}}`), 0o600); err != nil {
 		t.Fatalf("write auth file: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(profileHome, "config.toml"), []byte("cli_auth_credentials_store = \"file\"\n"), 0o600); err != nil {
+		t.Fatalf("write profile config: %v", err)
+	}
 	configPath := filepath.Join(configDir, "config.json")
 	configBody := `{"version":1,"profiles":{"personal":{"name":"personal","codex_home":"` + profileHome + `"}}}`
 	if err := os.WriteFile(configPath, []byte(configBody), 0o600); err != nil {
@@ -326,5 +329,45 @@ func TestLoadMonitorAccountsPrefersMulticodexProfiles(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected multicodex profile account to be included, got %#v", accounts)
+	}
+}
+
+func TestLoadMonitorAccountsSkipsUnsafeMulticodexProfile(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv(multicodexHomeEnvVar, filepath.Join(tmp, defaultMulticodexHomeDirName))
+	t.Setenv(accountsFileEnvVar, filepath.Join(tmp, "missing.json"))
+
+	configDir := filepath.Join(tmp, defaultMulticodexHomeDirName)
+	profileHome := filepath.Join(configDir, "profiles", "personal", "codex-home")
+	if err := os.MkdirAll(profileHome, 0o755); err != nil {
+		t.Fatalf("mkdir profile home: %v", err)
+	}
+	target := filepath.Join(tmp, "shared-auth.json")
+	if err := os.WriteFile(target, []byte(`{"tokens":{"access_token":"x"}}`), 0o600); err != nil {
+		t.Fatalf("write auth target: %v", err)
+	}
+	if err := os.Symlink(target, filepath.Join(profileHome, "auth.json")); err != nil {
+		t.Fatalf("symlink auth: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(profileHome, "config.toml"), []byte("cli_auth_credentials_store = \"file\"\n"), 0o600); err != nil {
+		t.Fatalf("write profile config: %v", err)
+	}
+	configPath := filepath.Join(configDir, "config.json")
+	configBody := `{"version":1,"profiles":{"personal":{"name":"personal","codex_home":"` + profileHome + `"}}}`
+	if err := os.WriteFile(configPath, []byte(configBody), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	accounts, warning, err := loadAccountsFromMulticodexConfig()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(accounts) != 0 {
+		t.Fatalf("expected unsafe multicodex profile to be skipped, got %#v", accounts)
+	}
+	if !strings.Contains(warning, "skipping multicodex profile") {
+		t.Fatalf("expected skip warning, got %q", warning)
 	}
 }
