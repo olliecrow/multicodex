@@ -382,12 +382,22 @@ func isSensitiveTrackedPath(p string) bool {
 }
 
 func checkDirExists(name, path string, strictPerms bool) DoctorCheck {
-	info, err := os.Stat(path)
+	info, err := os.Lstat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return DoctorCheck{Name: name, Status: "warn", Details: "not found"}
 		}
 		return DoctorCheck{Name: name, Status: "fail", Details: err.Error()}
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		if strictPerms {
+			return DoctorCheck{Name: name, Status: "fail", Details: "expected directory, got symlink"}
+		}
+		targetInfo, statErr := os.Stat(path)
+		if statErr != nil {
+			return DoctorCheck{Name: name, Status: "fail", Details: statErr.Error()}
+		}
+		info = targetInfo
 	}
 	if !info.IsDir() {
 		return DoctorCheck{Name: name, Status: "fail", Details: "expected directory"}

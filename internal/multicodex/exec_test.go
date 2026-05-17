@@ -192,6 +192,7 @@ func TestExecArgsAreHelpRequest(t *testing.T) {
 		{name: "help flag", args: []string{"--help"}, want: true},
 		{name: "short help flag", args: []string{"-h"}, want: true},
 		{name: "help subcommand", args: []string{"help"}, want: true},
+		{name: "help prompt text", args: []string{"help", "me", "debug"}, want: false},
 		{name: "help after other args", args: []string{"--model", "gpt-5", "--help"}, want: true},
 		{name: "help after terminator is prompt text", args: []string{"--", "--help"}, want: false},
 		{name: "normal exec", args: []string{"prompt"}, want: false},

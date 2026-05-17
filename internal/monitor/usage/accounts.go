@@ -135,8 +135,15 @@ func loadAccountsFromMulticodexConfig() ([]MonitorAccount, string, error) {
 	sort.Strings(names)
 
 	out := make([]MonitorAccount, 0, len(names))
+	warnings := make([]string, 0)
+	multicodexHome := filepath.Dir(configPath)
+	profilesDir := filepath.Join(multicodexHome, "profiles")
 	for _, name := range names {
 		profile := raw.Profiles[name]
+		if strings.TrimSpace(profile.Name) != name {
+			warnings = append(warnings, fmt.Sprintf("skipping multicodex profile %q: stored name mismatch", name))
+			continue
+		}
 		label := strings.TrimSpace(profile.Name)
 		if label == "" {
 			label = name
@@ -148,13 +155,67 @@ func loadAccountsFromMulticodexConfig() ([]MonitorAccount, string, error) {
 		if strings.TrimSpace(home) == "" {
 			continue
 		}
+		home = filepath.Clean(home)
+		if err := monitorProfileHomeSafe(profilesDir, name, home); err != nil {
+			warnings = append(warnings, fmt.Sprintf("skipping multicodex profile %q: %v", label, err))
+			continue
+		}
 		out = append(out, MonitorAccount{
 			Label:     safeLabel(label),
-			CodexHome: filepath.Clean(home),
+			CodexHome: home,
 		})
 	}
 
-	return out, "", nil
+	return out, strings.Join(warnings, "; "), nil
+}
+
+func monitorProfileHomeSafe(profilesDir, name, home string) error {
+	expected := filepath.Join(profilesDir, name, "codex-home")
+	if filepath.Clean(home) != home {
+		return fmt.Errorf("codex_home is not clean")
+	}
+	if rel, err := filepath.Rel(profilesDir, home); err != nil || rel != filepath.Join(name, "codex-home") {
+		return fmt.Errorf("codex_home is not profile-local")
+	}
+	for _, path := range []string{filepath.Join(profilesDir, name), expected, home, filepath.Join(home, "auth.json")} {
+		info, err := os.Lstat(path)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) && strings.HasSuffix(path, "auth.json") {
+				continue
+			}
+			return fmt.Errorf("inspect %s: %w", path, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("%s is a symlink", path)
+		}
+	}
+	ok, err := monitorConfigUsesFileStore(filepath.Join(home, "config.toml"))
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("config does not enable file-backed auth")
+	}
+	return nil
+}
+
+func monitorConfigUsesFileStore(path string) (bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false, fmt.Errorf("read profile config: %w", err)
+	}
+	for _, rawLine := range strings.Split(string(data), "\n") {
+		line := strings.TrimSpace(strings.SplitN(rawLine, "#", 2)[0])
+		if strings.HasPrefix(line, "cli_auth_credentials_store") {
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) != 2 {
+				return false, nil
+			}
+			value := strings.Trim(strings.TrimSpace(parts[1]), `"'`)
+			return value == "file", nil
+		}
+	}
+	return false, nil
 }
 
 func loadAccountsFromFile() ([]MonitorAccount, string, error) {

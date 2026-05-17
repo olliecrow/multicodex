@@ -214,6 +214,25 @@ func TestProfileDoctorChecksSkipLoginStatusWhenConfigFails(t *testing.T) {
 	}
 }
 
+func TestCheckDirExistsRejectsStrictSymlink(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	target := filepath.Join(root, "real-home")
+	if err := os.MkdirAll(target, 0o700); err != nil {
+		t.Fatalf("mkdir target: %v", err)
+	}
+	link := filepath.Join(root, "linked-home")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("symlink home: %v", err)
+	}
+
+	check := checkDirExists("multicodex home", link, true)
+	if check.Status != "fail" {
+		t.Fatalf("expected strict symlink dir to fail, got %s (%s)", check.Status, check.Details)
+	}
+}
+
 func TestProfileDoctorChecksSkipLoginStatusWhenAuthFails(t *testing.T) {
 	root := t.TempDir()
 	fakeBin := filepath.Join(root, "bin")

@@ -137,7 +137,7 @@ func execArgsAreHelpRequest(args []string) bool {
 			return true
 		}
 	}
-	return args[0] == "help"
+	return len(args) == 1 && args[0] == "help"
 }
 
 func (a *App) selectExecProfile(cfg *Config, selector execAccountSelector, model string) (execSelection, error) {
