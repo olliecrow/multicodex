@@ -9,6 +9,9 @@ import (
 )
 
 func accountEmailFromAuthFile(path string) (string, error) {
+	if !fileExists(path) {
+		return "", os.ErrNotExist
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", err

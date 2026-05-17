@@ -58,6 +58,9 @@ func (s *Store) EnsureBaseDirs() error {
 }
 
 func (s *Store) Load() (*Config, error) {
+	if err := ensureRegularFileOrSymlinkTarget(s.paths.ConfigPath, "multicodex config"); err != nil {
+		return nil, err
+	}
 	b, err := os.ReadFile(s.paths.ConfigPath)
 	if err != nil {
 		return nil, err
@@ -451,13 +454,10 @@ func parseTOMLStringOrBareValue(raw string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("invalid quoted cli_auth_credentials_store value %q: %w", value, err)
 		}
-		return strings.TrimSpace(unquoted), nil
+		return unquoted, nil
 	}
 	if len(value) >= 2 && value[0] == '\'' && value[len(value)-1] == '\'' {
-		return strings.TrimSpace(value[1 : len(value)-1]), nil
-	}
-	if fields := strings.Fields(value); len(fields) == 1 {
-		return strings.TrimSpace(fields[0]), nil
+		return value[1 : len(value)-1], nil
 	}
 	return "", fmt.Errorf("invalid cli_auth_credentials_store value %q", value)
 }

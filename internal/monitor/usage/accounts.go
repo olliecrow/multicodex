@@ -271,8 +271,15 @@ func monitorConfigUsesFileStore(path string) (bool, error) {
 			}
 			continue
 		}
-		value := strings.Trim(strings.TrimSpace(parts[1]), `"'`)
-		return value == "file", nil
+		rawValue := strings.TrimSpace(parts[1])
+		if len(rawValue) < 2 {
+			return false, nil
+		}
+		quote := rawValue[0]
+		if (quote != '"' && quote != '\'') || rawValue[len(rawValue)-1] != quote {
+			return false, nil
+		}
+		return rawValue[1:len(rawValue)-1] == "file", nil
 	}
 	return false, nil
 }
@@ -357,6 +364,12 @@ func loadAccountsFromFile() ([]MonitorAccount, string, error) {
 		return nil, "", fmt.Errorf("resolve accounts file: %w", err)
 	}
 
+	if err := monitorRegularFileOrSymlinkTarget(accountsPath); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, "", nil
+		}
+		return nil, "", fmt.Errorf("read accounts file %s: %w", accountsPath, err)
+	}
 	data, err := os.ReadFile(accountsPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
