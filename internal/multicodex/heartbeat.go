@@ -91,7 +91,8 @@ func (a *App) cmdHeartbeat(args []string) error {
 			continue
 		}
 		if err := ensureProfileCodexExecutionReady(a.store.paths, profile); err != nil {
-			if !hasAuth {
+			_, authStatErr := os.Lstat(filepath.Join(profile.CodexHome, "auth.json"))
+			if !hasAuth && errors.Is(authStatErr, os.ErrNotExist) {
 				rows = append(rows, heartbeatRow{
 					Profile: name,
 					Status:  "skipped",
@@ -300,6 +301,9 @@ func acquireHeartbeatLock(path string) (*os.File, bool, error) {
 		if info.Mode()&os.ModeSymlink != 0 {
 			return nil, false, fmt.Errorf("heartbeat lock path is a symlink: %s", path)
 		}
+		if !info.Mode().IsRegular() {
+			return nil, false, fmt.Errorf("heartbeat lock path is not a regular file: %s", path)
+		}
 		if fileHasMultipleLinks(info) {
 			return nil, false, fmt.Errorf("heartbeat lock path has multiple hard links: %s", path)
 		}
@@ -326,6 +330,10 @@ func acquireHeartbeatLock(path string) (*os.File, bool, error) {
 	if fileHasMultipleLinks(info) {
 		_ = lockFile.Close()
 		return nil, false, fmt.Errorf("heartbeat lock path has multiple hard links: %s", path)
+	}
+	if !info.Mode().IsRegular() {
+		_ = lockFile.Close()
+		return nil, false, fmt.Errorf("heartbeat lock path is not a regular file: %s", path)
 	}
 
 	if err := lockFile.Truncate(0); err == nil {

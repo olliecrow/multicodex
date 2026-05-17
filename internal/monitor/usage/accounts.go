@@ -200,6 +200,9 @@ func monitorProfileHomeSafe(profilesDir, name, home string) error {
 		if info.Mode()&os.ModeSymlink != 0 {
 			return fmt.Errorf("%s is a symlink", path)
 		}
+		if path == authPath && !info.Mode().IsRegular() {
+			return fmt.Errorf("%s is not a regular file", path)
+		}
 		if path == authPath && monitorFileHasMultipleLinks(info) {
 			return fmt.Errorf("%s has multiple hard links", path)
 		}
