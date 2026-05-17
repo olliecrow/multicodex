@@ -3,8 +3,10 @@ package multicodex
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -65,6 +67,73 @@ func TestEmailFromAuthFileMissingEmail(t *testing.T) {
 	if email != "" {
 		t.Fatalf("expected empty email, got %q", email)
 	}
+}
+
+func TestCmdStatusRejectsAuthSymlinkBeforeCodexStatus(t *testing.T) {
+	app, logPath := newStatusTestApp(t)
+	writeDefaultFileStoreConfig(t, app)
+	createTestProfiles(t, app, "work")
+	profileHome := filepath.Join(app.store.paths.ProfilesDir, "work", "codex-home")
+	target := filepath.Join(t.TempDir(), "shared-auth.json")
+	if err := os.WriteFile(target, []byte(`{"tokens":{"access_token":"a"}}`), 0o600); err != nil {
+		t.Fatalf("write target auth: %v", err)
+	}
+	if err := os.Symlink(target, filepath.Join(profileHome, "auth.json")); err != nil {
+		t.Fatalf("symlink auth: %v", err)
+	}
+
+	out, err := captureStdout(t, app.cmdStatus)
+	if err != nil {
+		t.Fatalf("cmdStatus: %v", err)
+	}
+	if !strings.Contains(out, "auth path is a symlink") {
+		t.Fatalf("expected symlink error in status output, got %q", out)
+	}
+	if _, statErr := os.Stat(logPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("expected codex status not to be invoked, stat err=%v", statErr)
+	}
+}
+
+func TestCmdStatusRequiresFileStoreBeforeCodexStatus(t *testing.T) {
+	app, logPath := newStatusTestApp(t)
+	writeDefaultConfig(t, app, "model = \"global\"\n")
+	createTestProfiles(t, app, "work")
+
+	out, err := captureStdout(t, app.cmdStatus)
+	if err != nil {
+		t.Fatalf("cmdStatus: %v", err)
+	}
+	if !strings.Contains(out, "requires file-backed auth") {
+		t.Fatalf("expected file-store error in status output, got %q", out)
+	}
+	if _, statErr := os.Stat(logPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("expected codex status not to be invoked, stat err=%v", statErr)
+	}
+}
+
+func newStatusTestApp(t *testing.T) (*App, string) {
+	t.Helper()
+
+	root := t.TempDir()
+	t.Setenv("MULTICODEX_HOME", filepath.Join(root, "multi"))
+	t.Setenv("MULTICODEX_DEFAULT_CODEX_HOME", filepath.Join(root, "default-codex"))
+
+	fakeBin := filepath.Join(root, "bin")
+	if err := os.MkdirAll(fakeBin, 0o755); err != nil {
+		t.Fatalf("mkdir fake bin: %v", err)
+	}
+	logPath := filepath.Join(root, "codex-status.log")
+	script := "#!/bin/sh\nprintf 'codex login status invoked\\n' > " + shellQuote(logPath) + "\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(fakeBin, "codex"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake codex: %v", err)
+	}
+	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	app, err := NewApp()
+	if err != nil {
+		t.Fatalf("NewApp: %v", err)
+	}
+	return app, logPath
 }
 
 func syntheticJWT(t *testing.T, claims map[string]any) string {

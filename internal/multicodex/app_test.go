@@ -177,6 +177,40 @@ func TestCmdUseRejectsAuthSymlinkBeforeExport(t *testing.T) {
 	}
 }
 
+func TestCmdUseFailsWhenSharedConfigDoesNotUseFileStore(t *testing.T) {
+	app := newTestAppForCLI(t)
+	if err := app.store.EnsureBaseDirs(); err != nil {
+		t.Fatalf("EnsureBaseDirs: %v", err)
+	}
+	writeDefaultConfig(t, app, "model = \"global\"\n")
+	profile := Profile{Name: "work", CodexHome: filepath.Join(app.store.paths.ProfilesDir, "work", "codex-home")}
+	if err := os.MkdirAll(profile.CodexHome, 0o700); err != nil {
+		t.Fatalf("mkdir profile codex home: %v", err)
+	}
+	cfg := DefaultConfig()
+	cfg.Profiles[profile.Name] = profile
+	if err := app.store.Save(cfg); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	out, err := captureStdout(t, func() error {
+		return app.cmdUse([]string{profile.Name})
+	})
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("expected ExitError, got %T (%v)", err, err)
+	}
+	if exitErr.Code != 2 {
+		t.Fatalf("expected exit code 2, got %d", exitErr.Code)
+	}
+	if !strings.Contains(exitErr.Message, "requires file-backed auth") {
+		t.Fatalf("unexpected error message: %s", exitErr.Message)
+	}
+	if strings.Contains(out, "CODEX_HOME") {
+		t.Fatalf("expected no shell exports, got %q", out)
+	}
+}
+
 func TestCmdRunCodexFailsWhenSharedConfigDoesNotUseFileStore(t *testing.T) {
 	app, logPath := newExecTestApp(t)
 	createExecProfiles(t, app, "alpha")

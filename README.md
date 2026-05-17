@@ -6,7 +6,7 @@ It keeps accounts isolated in named local profiles. You log in once per profile,
 
 By default, each profile reuses your global Codex `config.toml`, so normal Codex settings changes continue to apply across all multicodex profiles. A profile can still opt into its own config by replacing its profile-local `config.toml`.
 
-Profile login still requires file-backed auth. If your shared global Codex config does not set `cli_auth_credentials_store = "file"`, `multicodex login` will fail with a setup error until you either enable file-backed auth globally or create a per-profile override. The same preflight is re-checked before profile-scoped Codex execution (`multicodex cli`, `multicodex exec`, `multicodex heartbeat`, and direct `multicodex run ... -- codex ...`), so later edits to the shared config cannot silently weaken isolation.
+Profile login still requires file-backed auth. If your shared global Codex config does not set `cli_auth_credentials_store = "file"`, `multicodex login` will fail with a setup error until you either enable file-backed auth globally or create a per-profile override. The same preflight is re-checked before shell switching, status probes, and profile-scoped Codex execution (`multicodex use`, `multicodex status`, `multicodex cli`, `multicodex exec`, `multicodex heartbeat`, and direct `multicodex run ... -- codex ...`), so later edits to the shared config cannot silently weaken isolation.
 
 Multicodex does not switch, restore, or otherwise manage the shared default Codex auth account. Keep the normal system Codex account, such as `crowoy`, configured through Codex itself.
 
@@ -92,7 +92,7 @@ multicodex dry-run
 - Default multicodex state home is `~/multicodex`.
 - You can override the state location with `MULTICODEX_HOME`.
 - Profile auth stays isolated under `~/multicodex/profiles/<name>/codex-home/auth.json`.
-- Profile `codex-home` and `auth.json` must be regular profile-local filesystem entries; symlinks fail profile execution and doctor checks.
+- The multicodex state home, profile directories, profile `codex-home`, and `auth.json` must be regular profile-local filesystem entries; symlinks fail setup, status, profile execution, and doctor checks.
 - Profile-scoped CLI, exec, and run sessions keep Codex state, including thread and `/goal` state, under `~/multicodex/profiles/<name>/codex-home/`.
 - Profile config defaults to a symlink from `~/multicodex/profiles/<name>/codex-home/config.toml` to your default Codex config at `~/.codex/config.toml`.
 - Profile skills fill in missing top-level entries from `~/.codex/skills` so shared skills stay visible in profile-scoped Codex runs.

@@ -364,7 +364,7 @@ func (a *App) cmdUse(args []string) error {
 	if err := a.store.EnsureProfileDir(profile); err != nil {
 		return err
 	}
-	if _, _, err := ensureProfileAuthPathSafe(profile.CodexHome); err != nil {
+	if err := ensureProfileCodexExecutionReady(a.store.paths, profile); err != nil {
 		return err
 	}
 

@@ -196,6 +196,65 @@ func TestCreateProfileRejectsSymlinkedProfileDir(t *testing.T) {
 	}
 }
 
+func TestEnsureBaseDirsRejectsSymlinkedMulticodexHome(t *testing.T) {
+	root := t.TempDir()
+	realHome := filepath.Join(root, "real-home")
+	if err := os.MkdirAll(realHome, 0o700); err != nil {
+		t.Fatalf("mkdir real home: %v", err)
+	}
+	linkedHome := filepath.Join(root, "linked-home")
+	if err := os.Symlink(realHome, linkedHome); err != nil {
+		t.Fatalf("symlink multicodex home: %v", err)
+	}
+
+	store := NewStore(Paths{
+		MulticodexHome:   linkedHome,
+		ConfigPath:       filepath.Join(linkedHome, "config.json"),
+		ProfilesDir:      filepath.Join(linkedHome, "profiles"),
+		DefaultCodexHome: filepath.Join(root, "codex-default"),
+	})
+
+	err := store.EnsureBaseDirs()
+	if err == nil {
+		t.Fatal("expected symlinked multicodex home to fail")
+	}
+	if !strings.Contains(err.Error(), "profile path is a symlink") {
+		t.Fatalf("expected symlink error, got %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(realHome, "profiles")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("expected setup not to write through symlink, stat err=%v", statErr)
+	}
+}
+
+func TestEnsureProfileDirRejectsStoredSymlinkedCodexHomeAlias(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("MULTICODEX_HOME", filepath.Join(root, "multicodex"))
+	t.Setenv("MULTICODEX_DEFAULT_CODEX_HOME", filepath.Join(root, "codex-default"))
+
+	paths, err := ResolvePaths()
+	if err != nil {
+		t.Fatalf("ResolvePaths: %v", err)
+	}
+	store := NewStore(paths)
+	expectedHome := filepath.Join(paths.ProfilesDir, "work", "codex-home")
+	if err := os.MkdirAll(expectedHome, 0o700); err != nil {
+		t.Fatalf("mkdir expected home: %v", err)
+	}
+	aliasHome := filepath.Join(root, "alias-home")
+	if err := os.Symlink(expectedHome, aliasHome); err != nil {
+		t.Fatalf("symlink alias home: %v", err)
+	}
+	profile := Profile{Name: "work", CodexHome: aliasHome}
+
+	err = store.EnsureProfileDir(profile)
+	if err == nil {
+		t.Fatal("expected symlinked stored codex home alias to fail")
+	}
+	if !strings.Contains(err.Error(), "profile path is a symlink") {
+		t.Fatalf("expected symlink error, got %v", err)
+	}
+}
+
 func TestEnsureProfileDirMigratesGeneratedConfigToDefaultConfig(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("MULTICODEX_HOME", filepath.Join(root, "multicodex"))
