@@ -182,6 +182,9 @@ func (s *Store) ensureProfileStoragePathSafe(profile Profile) error {
 		if err := ensurePathNotSymlinkIfExists(path); err != nil {
 			return err
 		}
+		if err := ensureExistingDirPrivate(path); err != nil {
+			return err
+		}
 	}
 	for _, path := range uniquePaths(s.paths.ProfilesDir, profileDir, expectedCodexHome, profile.CodexHome) {
 		if err := ensurePathPrefixesBelowRootNotSymlinks(s.paths.MulticodexHome, path); err != nil {
@@ -228,6 +231,20 @@ func ensurePathNotSymlinkIfExists(path string) error {
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("profile path is a symlink, expected profile-local directory: %s", path)
+	}
+	return nil
+}
+
+func ensureExistingDirPrivate(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	if info.IsDir() && info.Mode().Perm()&0o022 != 0 {
+		return fmt.Errorf("profile path permissions are %o, expected no group/world write bits: %s", info.Mode().Perm(), path)
 	}
 	return nil
 }
@@ -327,9 +344,16 @@ func profileConfigCredentialStore(configPath string) (string, bool, error) {
 
 func parseCredentialStoreFromTOML(content string) (string, bool, error) {
 	inRootTable := true
+	multilineDelimiter := ""
 	for _, rawLine := range strings.Split(content, "\n") {
 		line := strings.TrimSpace(stripTOMLComment(rawLine))
 		if line == "" {
+			continue
+		}
+		if multilineDelimiter != "" {
+			if strings.Contains(line, multilineDelimiter) {
+				multilineDelimiter = ""
+			}
 			continue
 		}
 		if strings.HasPrefix(line, "[[") && strings.HasSuffix(line, "]]") {
@@ -354,6 +378,12 @@ func parseCredentialStoreFromTOML(content string) (string, bool, error) {
 			return "", false, err
 		}
 		if key != "cli_auth_credentials_store" {
+			value := strings.TrimSpace(line[assignIdx+1:])
+			if strings.HasPrefix(value, `"""`) {
+				multilineDelimiter = `"""`
+			} else if strings.HasPrefix(value, `'''`) {
+				multilineDelimiter = `'''`
+			}
 			continue
 		}
 
@@ -481,6 +511,13 @@ func (s *Store) ensureProfileConfig(codexHome string) error {
 			return fmt.Errorf("profile config path is a directory: %s", configPath)
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
+			targetInfo, err := os.Stat(configPath)
+			if err != nil {
+				return fmt.Errorf("profile config symlink target is not readable: %w", err)
+			}
+			if !targetInfo.Mode().IsRegular() {
+				return fmt.Errorf("profile config symlink target is not a regular file: %s", configPath)
+			}
 			return nil
 		}
 		if !info.Mode().IsRegular() {

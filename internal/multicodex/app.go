@@ -308,21 +308,6 @@ func ensureProfileCodexExecutionReady(paths Paths, profile Profile) error {
 	}
 }
 
-func commandRequiresProfileCodexIsolation(cmd string, args ...string) bool {
-	base := filepath.Base(strings.TrimSpace(cmd))
-	if base == "codex" {
-		return true
-	}
-	for _, arg := range args {
-		for _, field := range strings.Fields(arg) {
-			if filepath.Base(strings.Trim(field, `"'`)) == "codex" {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 func (a *App) cmdLoginAll() error {
 	cfg, err := a.loadOrInitConfig()
 	if err != nil {
@@ -416,10 +401,8 @@ func (a *App) cmdRun(args []string) error {
 	}
 	cmd := args[sep+1]
 	cmdArgs := args[sep+2:]
-	if commandRequiresProfileCodexIsolation(cmd, cmdArgs...) {
-		if err := ensureProfileCodexExecutionReady(a.store.paths, profile); err != nil {
-			return err
-		}
+	if err := ensureProfileCodexExecutionReady(a.store.paths, profile); err != nil {
+		return err
 	}
 	return RunWithProfile(profile.CodexHome, name, cmd, cmdArgs)
 }
