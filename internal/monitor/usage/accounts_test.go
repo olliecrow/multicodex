@@ -593,3 +593,20 @@ func TestMonitorConfigUsesFileStoreRequiresExactRootKey(t *testing.T) {
 		t.Fatal("expected lookalike or nested credential store key not to pass")
 	}
 }
+
+func TestMonitorConfigUsesFileStoreRejectsQuotedKeyWithExtraSpaces(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "config.toml")
+	content := `" cli_auth_credentials_store " = "file"` + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	ok, err := monitorConfigUsesFileStore(path)
+	if err != nil {
+		t.Fatalf("monitorConfigUsesFileStore: %v", err)
+	}
+	if ok {
+		t.Fatal("expected quoted key with extra spaces not to pass")
+	}
+}

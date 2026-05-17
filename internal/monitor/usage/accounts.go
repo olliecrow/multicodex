@@ -311,7 +311,7 @@ func monitorRegularFileOrSymlinkTarget(path string) error {
 
 func monitorTOMLKey(raw string) string {
 	if len(raw) >= 2 && ((raw[0] == '"' && raw[len(raw)-1] == '"') || (raw[0] == '\'' && raw[len(raw)-1] == '\'')) {
-		return strings.Trim(raw[1:len(raw)-1], " ")
+		return raw[1 : len(raw)-1]
 	}
 	return raw
 }
