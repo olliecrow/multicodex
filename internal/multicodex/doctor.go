@@ -124,7 +124,11 @@ func profileDoctorChecks(name string, profile Profile, codexFound bool) []Doctor
 		out = append(out, DoctorCheck{Name: prefix + " name", Status: "ok", Details: "valid"})
 	}
 
-	out = append(out, checkDirExists(prefix+" codex home", profile.CodexHome, true))
+	homeCheck := checkDirExists(prefix+" codex home", profile.CodexHome, true)
+	out = append(out, homeCheck)
+	if homeCheck.Status == "fail" {
+		return out
+	}
 	out = append(out, checkFileStoreConfig(prefix+" config", filepath.Join(profile.CodexHome, "config.toml"), true))
 	authCheck := checkAuthFile(prefix+" auth", filepath.Join(profile.CodexHome, "auth.json"))
 	out = append(out, authCheck)
@@ -370,12 +374,15 @@ func isSensitiveTrackedPath(p string) bool {
 }
 
 func checkDirExists(name, path string, strictPerms bool) DoctorCheck {
-	info, err := os.Stat(path)
+	info, err := os.Lstat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return DoctorCheck{Name: name, Status: "warn", Details: "not found"}
 		}
 		return DoctorCheck{Name: name, Status: "fail", Details: err.Error()}
+	}
+	if strictPerms && info.Mode()&os.ModeSymlink != 0 {
+		return DoctorCheck{Name: name, Status: "fail", Details: "expected profile-local directory, got symlink"}
 	}
 	if !info.IsDir() {
 		return DoctorCheck{Name: name, Status: "fail", Details: "expected directory"}
