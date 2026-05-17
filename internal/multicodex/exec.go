@@ -117,6 +117,19 @@ func writeSelectedProfileMetadata(path string, metadata execSelectionMetadata) e
 	if err != nil {
 		return fmt.Errorf("marshal selected profile metadata: %w", err)
 	}
+	if info, err := os.Lstat(path); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("selected profile metadata path is a symlink: %s", path)
+		}
+		if fileHasMultipleLinks(info) {
+			return fmt.Errorf("selected profile metadata path has multiple hard links: %s", path)
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("selected profile metadata path is not a regular file: %s", path)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("inspect selected profile metadata: %w", err)
+	}
 	if err := os.WriteFile(path, append(data, '\n'), 0o600); err != nil {
 		return fmt.Errorf("write selected profile metadata: %w", err)
 	}

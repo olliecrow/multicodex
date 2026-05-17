@@ -115,7 +115,17 @@ func loadAccountsFromMulticodexConfig() ([]MonitorAccount, string, error) {
 	if err != nil {
 		return nil, "", fmt.Errorf("resolve multicodex config: %w", err)
 	}
+	multicodexHome := filepath.Dir(configPath)
+	if info, err := os.Lstat(multicodexHome); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		return nil, "skipping multicodex profiles: multicodex home is a symlink", nil
+	}
 
+	if err := monitorRegularFileOrSymlinkTarget(configPath); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, "", nil
+		}
+		return nil, "", fmt.Errorf("read multicodex config %s: %w", configPath, err)
+	}
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -140,10 +150,6 @@ func loadAccountsFromMulticodexConfig() ([]MonitorAccount, string, error) {
 
 	out := make([]MonitorAccount, 0, len(names))
 	warnings := make([]string, 0)
-	multicodexHome := filepath.Dir(configPath)
-	if info, err := os.Lstat(multicodexHome); err == nil && info.Mode()&os.ModeSymlink != 0 {
-		return nil, "skipping multicodex profiles: multicodex home is a symlink", nil
-	}
 	profilesDir := filepath.Join(multicodexHome, "profiles")
 	for _, name := range names {
 		profile := raw.Profiles[name]
@@ -231,6 +237,9 @@ func monitorFileHasMultipleLinks(info os.FileInfo) bool {
 }
 
 func monitorConfigUsesFileStore(path string) (bool, error) {
+	if err := monitorRegularFileOrSymlinkTarget(path); err != nil {
+		return false, err
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return false, fmt.Errorf("read profile config: %w", err)
@@ -254,9 +263,9 @@ func monitorConfigUsesFileStore(path string) (bool, error) {
 		if len(parts) != 2 || monitorTOMLKey(strings.TrimSpace(parts[0])) != "cli_auth_credentials_store" {
 			if len(parts) == 2 {
 				value := strings.TrimSpace(parts[1])
-				if strings.HasPrefix(value, `"""`) {
+				if strings.HasPrefix(value, `"""`) && strings.Count(value, `"""`)%2 == 1 {
 					multilineDelimiter = `"""`
-				} else if strings.HasPrefix(value, `'''`) {
+				} else if strings.HasPrefix(value, `'''`) && strings.Count(value, `'''`)%2 == 1 {
 					multilineDelimiter = `'''`
 				}
 			}
@@ -266,6 +275,27 @@ func monitorConfigUsesFileStore(path string) (bool, error) {
 		return value == "file", nil
 	}
 	return false, nil
+}
+
+func monitorRegularFileOrSymlinkTarget(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		targetInfo, err := os.Stat(path)
+		if err != nil {
+			return err
+		}
+		if !targetInfo.Mode().IsRegular() {
+			return fmt.Errorf("%s symlink target is not a regular file", path)
+		}
+		return nil
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("%s is not a regular file", path)
+	}
+	return nil
 }
 
 func monitorTOMLKey(raw string) string {
