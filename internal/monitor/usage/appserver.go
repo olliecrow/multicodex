@@ -159,12 +159,9 @@ func (s *AppServerSource) refreshAuthState() (string, error) {
 
 	fingerprint, err := fingerprintFn()
 	if err != nil {
-		if s.authFingerprint == "" {
-			return "", err
-		}
 		s.resetSession()
 		s.authFingerprint = ""
-		return "auth state changed; restarted app-server session", nil
+		return "", err
 	}
 
 	if s.authFingerprint == "" {

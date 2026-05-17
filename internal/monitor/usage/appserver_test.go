@@ -70,7 +70,7 @@ func TestRefreshAuthStateChangedReturnsWarning(t *testing.T) {
 	}
 }
 
-func TestRefreshAuthStateErrorAfterKnownFingerprintReturnsWarning(t *testing.T) {
+func TestRefreshAuthStateErrorAfterKnownFingerprintReturnsError(t *testing.T) {
 	s := &AppServerSource{
 		authFingerprint: "fp-a",
 		authFingerprintFn: func() (string, error) {
@@ -80,11 +80,11 @@ func TestRefreshAuthStateErrorAfterKnownFingerprintReturnsWarning(t *testing.T) 
 	}
 
 	warning, err := s.refreshAuthState()
-	if err != nil {
-		t.Fatalf("refreshAuthState: %v", err)
+	if err == nil {
+		t.Fatal("expected auth-state error")
 	}
-	if warning == "" {
-		t.Fatalf("expected warning on auth-state error after prior fingerprint")
+	if warning != "" {
+		t.Fatalf("expected no warning on auth-state error, got %q", warning)
 	}
 	if s.authFingerprint != "" {
 		t.Fatalf("expected fingerprint to be cleared")
