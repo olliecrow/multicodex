@@ -73,6 +73,10 @@ func (s *Store) Load() (*Config, error) {
 		if err := ValidateProfileName(name); err != nil {
 			return nil, fmt.Errorf("invalid stored profile name %q: %w", name, err)
 		}
+		profile := cfg.Profiles[name]
+		if profile.Name != name {
+			return nil, fmt.Errorf("stored profile %q has mismatched name %q", name, profile.Name)
+		}
 	}
 	if cfg.Version == 0 {
 		cfg.Version = configVersion
@@ -90,10 +94,26 @@ func (s *Store) Save(cfg *Config) error {
 		return fmt.Errorf("encode config: %w", err)
 	}
 
-	tmpPath := s.paths.ConfigPath + ".tmp"
-	if err := os.WriteFile(tmpPath, append(b, '\n'), 0o600); err != nil {
+	tmp, err := os.CreateTemp(filepath.Dir(s.paths.ConfigPath), filepath.Base(s.paths.ConfigPath)+".tmp.")
+	if err != nil {
+		return fmt.Errorf("create temp config: %w", err)
+	}
+	tmpPath := tmp.Name()
+	tmpClosed := false
+	defer func() {
+		if !tmpClosed {
+			_ = tmp.Close()
+		}
+		_ = os.Remove(tmpPath)
+	}()
+	if _, err := tmp.Write(append(b, '\n')); err != nil {
 		return fmt.Errorf("write temp config: %w", err)
 	}
+	if err := tmp.Close(); err != nil {
+		tmpClosed = true
+		return fmt.Errorf("close temp config: %w", err)
+	}
+	tmpClosed = true
 	if err := os.Rename(tmpPath, s.paths.ConfigPath); err != nil {
 		return fmt.Errorf("replace config: %w", err)
 	}
@@ -149,12 +169,47 @@ func (s *Store) ensureProfileStoragePathSafe(profile Profile) error {
 	}
 	profileDir := filepath.Join(s.paths.ProfilesDir, profile.Name)
 	expectedCodexHome := filepath.Join(profileDir, "codex-home")
+	if filepath.Clean(profile.CodexHome) != profile.CodexHome {
+		return fmt.Errorf("profile codex home %s does not match clean profile-local path %s", profile.CodexHome, filepath.Clean(profile.CodexHome))
+	}
 	if !sameProfilePath(profile.CodexHome, expectedCodexHome) {
 		return fmt.Errorf("profile codex home %s does not match expected profile-local path %s", profile.CodexHome, expectedCodexHome)
 	}
 	for _, path := range uniquePaths(s.paths.MulticodexHome, s.paths.ProfilesDir, profileDir, expectedCodexHome, profile.CodexHome) {
 		if err := ensurePathNotSymlinkIfExists(path); err != nil {
 			return err
+		}
+	}
+	for _, path := range uniquePaths(s.paths.ProfilesDir, profileDir, expectedCodexHome, profile.CodexHome) {
+		if err := ensurePathPrefixesBelowRootNotSymlinks(s.paths.MulticodexHome, path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func ensurePathPrefixesBelowRootNotSymlinks(root, path string) error {
+	root = filepath.Clean(root)
+	path = filepath.Clean(path)
+	rel, err := filepath.Rel(root, path)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return nil
+	}
+	current := root
+	for _, part := range strings.Split(rel, string(os.PathSeparator)) {
+		if part == "" {
+			continue
+		}
+		current = filepath.Join(current, part)
+		info, err := os.Lstat(current)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return nil
+			}
+			return fmt.Errorf("inspect profile path %s: %w", current, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("profile path is a symlink, expected profile-local directory: %s", current)
 		}
 	}
 	return nil
@@ -455,6 +510,12 @@ func (s *Store) ensureProfileSkills(codexHome string) error {
 			return nil
 		}
 		return fmt.Errorf("read default skills dir: %w", err)
+	}
+	if err := ensurePathNotSymlinkIfExists(profileSkillsPath); err != nil {
+		return err
+	}
+	if err := ensurePathPrefixesBelowRootNotSymlinks(codexHome, profileSkillsPath); err != nil {
+		return err
 	}
 	if err := os.MkdirAll(profileSkillsPath, 0o700); err != nil {
 		return fmt.Errorf("create profile skills dir: %w", err)
