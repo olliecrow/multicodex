@@ -162,6 +162,40 @@ func TestEnsureProfileDirRejectsSymlinkedProfileDir(t *testing.T) {
 	}
 }
 
+func TestCreateProfileRejectsSymlinkedProfileDir(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("MULTICODEX_HOME", filepath.Join(root, "multicodex"))
+	t.Setenv("MULTICODEX_DEFAULT_CODEX_HOME", filepath.Join(root, "codex-default"))
+
+	paths, err := ResolvePaths()
+	if err != nil {
+		t.Fatalf("ResolvePaths: %v", err)
+	}
+	store := NewStore(paths)
+	if err := store.EnsureBaseDirs(); err != nil {
+		t.Fatalf("EnsureBaseDirs: %v", err)
+	}
+	realProfileDir := filepath.Join(t.TempDir(), "real-profile")
+	if err := os.MkdirAll(realProfileDir, 0o700); err != nil {
+		t.Fatalf("mkdir real profile dir: %v", err)
+	}
+	profileDir := filepath.Join(paths.ProfilesDir, "work")
+	if err := os.Symlink(realProfileDir, profileDir); err != nil {
+		t.Fatalf("symlink profile dir: %v", err)
+	}
+
+	_, err = store.CreateProfile("work")
+	if err == nil {
+		t.Fatal("expected symlinked profile dir to fail")
+	}
+	if !strings.Contains(err.Error(), "profile path is a symlink") {
+		t.Fatalf("expected symlink error, got %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(realProfileDir, "codex-home")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("expected create not to write through symlink, stat err=%v", statErr)
+	}
+}
+
 func TestEnsureProfileDirMigratesGeneratedConfigToDefaultConfig(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("MULTICODEX_HOME", filepath.Join(root, "multicodex"))

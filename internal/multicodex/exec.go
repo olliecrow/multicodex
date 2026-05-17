@@ -64,6 +64,9 @@ func (a *App) cmdExec(args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := a.ensureConfiguredProfileAuthPathsSafe(cfg); err != nil {
+		return err
+	}
 
 	selected, err := a.selectExecProfile(cfg, defaultExecAccountSelector, model)
 	if err != nil {
@@ -80,6 +83,25 @@ func (a *App) cmdExec(args []string) error {
 	}
 
 	return RunWithProfile(selected.Profile.CodexHome, selected.Name, "codex", append([]string{"exec"}, args...))
+}
+
+func (a *App) ensureConfiguredProfileAuthPathsSafe(cfg *Config) error {
+	for _, name := range sortedProfileNames(cfg) {
+		profile := cfg.Profiles[name]
+		if err := a.store.ensureProfileStoragePathSafe(profile); err != nil {
+			return err
+		}
+		if _, err := os.Stat(profile.CodexHome); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return err
+		}
+		if _, _, err := ensureProfileAuthPathSafe(profile.CodexHome); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func writeSelectedProfileMetadata(path string, metadata execSelectionMetadata) error {

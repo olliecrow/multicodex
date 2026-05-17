@@ -140,6 +140,41 @@ func TestCmdExecFailsWhenSharedConfigDoesNotUseFileStore(t *testing.T) {
 	}
 }
 
+func TestCmdExecRejectsUnsafeAuthBeforeSelection(t *testing.T) {
+	app, logPath := newExecTestApp(t)
+	createExecProfiles(t, app, "alpha")
+	home := filepath.Join(app.store.paths.ProfilesDir, "alpha", "codex-home")
+	target := filepath.Join(t.TempDir(), "shared-auth.json")
+	if err := os.WriteFile(target, []byte(`{"tokens":{"access_token":"a"}}`), 0o600); err != nil {
+		t.Fatalf("write target auth: %v", err)
+	}
+	if err := os.Symlink(target, filepath.Join(home, "auth.json")); err != nil {
+		t.Fatalf("symlink auth: %v", err)
+	}
+
+	selectorCalled := false
+	originalSelector := defaultExecAccountSelector
+	defaultExecAccountSelector = func(context.Context, []usage.MonitorAccount, int, string) (usage.SelectedAccount, error) {
+		selectorCalled = true
+		return usage.SelectedAccount{Account: usage.MonitorAccount{Label: "alpha"}}, nil
+	}
+	defer func() { defaultExecAccountSelector = originalSelector }()
+
+	err := app.Run([]string{"exec", "--skip-git-repo-check", "hello"})
+	if err == nil {
+		t.Fatal("expected auth symlink exec to fail")
+	}
+	if !strings.Contains(err.Error(), "auth path is a symlink") {
+		t.Fatalf("expected auth symlink error, got %v", err)
+	}
+	if selectorCalled {
+		t.Fatal("expected selector not to run before auth path safety check")
+	}
+	if _, statErr := os.Stat(logPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("expected codex not to be invoked, stat err=%v", statErr)
+	}
+}
+
 func TestExecArgsAreHelpRequest(t *testing.T) {
 	t.Parallel()
 

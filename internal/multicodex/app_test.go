@@ -144,6 +144,39 @@ func TestEnsureProfileCodexExecutionReadyRejectsAuthSymlink(t *testing.T) {
 	}
 }
 
+func TestCmdUseRejectsAuthSymlinkBeforeExport(t *testing.T) {
+	app := newTestAppForCLI(t)
+	writeDefaultFileStoreConfig(t, app)
+
+	profile := Profile{Name: "work", CodexHome: filepath.Join(app.store.paths.ProfilesDir, "work", "codex-home")}
+	if err := os.MkdirAll(profile.CodexHome, 0o700); err != nil {
+		t.Fatalf("mkdir profile codex home: %v", err)
+	}
+	cfg := DefaultConfig()
+	cfg.Profiles[profile.Name] = profile
+	if err := app.store.Save(cfg); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if err := app.store.EnsureProfileDir(profile); err != nil {
+		t.Fatalf("EnsureProfileDir: %v", err)
+	}
+	target := filepath.Join(t.TempDir(), "shared-auth.json")
+	if err := os.WriteFile(target, []byte(`{"tokens":{"access_token":"a"}}`), 0o600); err != nil {
+		t.Fatalf("write target auth: %v", err)
+	}
+	if err := os.Symlink(target, filepath.Join(profile.CodexHome, "auth.json")); err != nil {
+		t.Fatalf("symlink auth: %v", err)
+	}
+
+	err := app.cmdUse([]string{profile.Name})
+	if err == nil {
+		t.Fatal("expected use with auth symlink to fail")
+	}
+	if !strings.Contains(err.Error(), "auth path is a symlink") {
+		t.Fatalf("expected auth symlink error, got %v", err)
+	}
+}
+
 func TestCmdRunCodexFailsWhenSharedConfigDoesNotUseFileStore(t *testing.T) {
 	app, logPath := newExecTestApp(t)
 	createExecProfiles(t, app, "alpha")
