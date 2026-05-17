@@ -294,18 +294,14 @@ func parseNonNegativeEnvInt(name string, fallback int) (int, error) {
 }
 
 func acquireHeartbeatLock(path string) (*os.File, bool, error) {
-	if info, err := os.Lstat(filepath.Dir(path)); err == nil {
-		if info.Mode()&os.ModeSymlink != 0 {
-			return nil, false, fmt.Errorf("heartbeat lock dir is a symlink: %s", filepath.Dir(path))
-		}
-		if !info.IsDir() {
-			return nil, false, fmt.Errorf("heartbeat lock dir is not a directory: %s", filepath.Dir(path))
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return nil, false, fmt.Errorf("inspect heartbeat lock dir: %w", err)
+	if err := ensureHeartbeatLockAncestorsSafe(path); err != nil {
+		return nil, false, err
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, false, fmt.Errorf("create heartbeat lock dir: %w", err)
+	}
+	if err := ensureHeartbeatLockAncestorsSafe(path); err != nil {
+		return nil, false, err
 	}
 	if info, err := os.Lstat(path); err == nil {
 		if info.Mode()&os.ModeSymlink != 0 {
@@ -350,6 +346,56 @@ func acquireHeartbeatLock(path string) (*os.File, bool, error) {
 		_, _ = lockFile.WriteString(fmt.Sprintf("%d\n", os.Getpid()))
 	}
 	return lockFile, true, nil
+}
+
+func ensureHeartbeatLockAncestorsSafe(path string) error {
+	dir := filepath.Clean(filepath.Dir(path))
+	if !filepath.IsAbs(dir) {
+		abs, err := filepath.Abs(dir)
+		if err != nil {
+			return fmt.Errorf("resolve heartbeat lock dir: %w", err)
+		}
+		dir = abs
+	}
+	var ancestors []string
+	for current := dir; ; current = filepath.Dir(current) {
+		ancestors = append(ancestors, current)
+		parent := filepath.Dir(current)
+		if parent == current {
+			break
+		}
+	}
+	for i := len(ancestors) - 1; i >= 0; i-- {
+		ancestor := ancestors[i]
+		info, err := os.Lstat(ancestor)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return fmt.Errorf("inspect heartbeat lock dir: %w", err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			if heartbeatLockAncestorDepth(ancestor) <= 1 {
+				continue
+			}
+			return fmt.Errorf("heartbeat lock dir is a symlink: %s", ancestor)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("heartbeat lock dir is not a directory: %s", ancestor)
+		}
+	}
+	return nil
+}
+
+func heartbeatLockAncestorDepth(path string) int {
+	clean := filepath.Clean(path)
+	volume := filepath.VolumeName(clean)
+	rest := strings.TrimPrefix(clean, volume)
+	rest = strings.Trim(rest, string(filepath.Separator))
+	if rest == "" {
+		return 0
+	}
+	return len(strings.Split(rest, string(filepath.Separator)))
 }
 
 func releaseHeartbeatLock(lockFile *os.File) {
