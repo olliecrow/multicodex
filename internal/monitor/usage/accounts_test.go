@@ -371,3 +371,85 @@ func TestLoadMonitorAccountsSkipsUnsafeMulticodexProfile(t *testing.T) {
 		t.Fatalf("expected skip warning, got %q", warning)
 	}
 }
+
+func TestLoadAccountsFromMulticodexConfigRejectsInvalidProfileName(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv(multicodexHomeEnvVar, filepath.Join(tmp, defaultMulticodexHomeDirName))
+
+	configDir := filepath.Join(tmp, defaultMulticodexHomeDirName)
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	configPath := filepath.Join(configDir, "config.json")
+	configBody := `{"version":1,"profiles":{"../shared":{"name":"../shared","codex_home":"` + filepath.Join(configDir, "shared", "codex-home") + `"}}}`
+	if err := os.WriteFile(configPath, []byte(configBody), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	accounts, warning, err := loadAccountsFromMulticodexConfig()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(accounts) != 0 {
+		t.Fatalf("expected invalid profile to be skipped, got %#v", accounts)
+	}
+	if !strings.Contains(warning, "invalid profile name") {
+		t.Fatalf("expected invalid-name warning, got %q", warning)
+	}
+}
+
+func TestLoadAccountsFromMulticodexConfigRejectsHardLinkedAuth(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv(multicodexHomeEnvVar, filepath.Join(tmp, defaultMulticodexHomeDirName))
+
+	configDir := filepath.Join(tmp, defaultMulticodexHomeDirName)
+	profileHome := filepath.Join(configDir, "profiles", "personal", "codex-home")
+	if err := os.MkdirAll(profileHome, 0o755); err != nil {
+		t.Fatalf("mkdir profile home: %v", err)
+	}
+	target := filepath.Join(tmp, "shared-auth.json")
+	if err := os.WriteFile(target, []byte(`{"tokens":{"access_token":"x"}}`), 0o600); err != nil {
+		t.Fatalf("write auth target: %v", err)
+	}
+	if err := os.Link(target, filepath.Join(profileHome, "auth.json")); err != nil {
+		t.Skipf("hard links are not supported here: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(profileHome, "config.toml"), []byte("cli_auth_credentials_store = \"file\"\n"), 0o600); err != nil {
+		t.Fatalf("write profile config: %v", err)
+	}
+	configPath := filepath.Join(configDir, "config.json")
+	configBody := `{"version":1,"profiles":{"personal":{"name":"personal","codex_home":"` + profileHome + `"}}}`
+	if err := os.WriteFile(configPath, []byte(configBody), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	accounts, warning, err := loadAccountsFromMulticodexConfig()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(accounts) != 0 {
+		t.Fatalf("expected hard-linked auth profile to be skipped, got %#v", accounts)
+	}
+	if !strings.Contains(warning, "multiple hard links") {
+		t.Fatalf("expected hard-link warning, got %q", warning)
+	}
+}
+
+func TestMonitorConfigUsesFileStoreRequiresExactRootKey(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "config.toml")
+	content := "cli_auth_credentials_store_backup = \"file\"\n[other]\ncli_auth_credentials_store = \"file\"\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	ok, err := monitorConfigUsesFileStore(path)
+	if err != nil {
+		t.Fatalf("monitorConfigUsesFileStore: %v", err)
+	}
+	if ok {
+		t.Fatal("expected lookalike or nested credential store key not to pass")
+	}
+}
