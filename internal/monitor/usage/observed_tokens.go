@@ -324,6 +324,10 @@ func discoverRecentUsageFiles(codexHome string, now time.Time) ([]string, []stri
 				warnings = append(warnings, fmt.Sprintf("skip %s: %v", fullPath, infoErr))
 				continue
 			}
+			lstatInfo, lstatErr := os.Lstat(fullPath)
+			if lstatErr != nil || !lstatInfo.Mode().IsRegular() {
+				continue
+			}
 			if info.ModTime().UTC().Before(cutoff) {
 				continue
 			}

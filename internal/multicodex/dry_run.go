@@ -87,7 +87,7 @@ func renderDryRunLogin(cfg *Config, name string) (string, error) {
 	b.WriteString("\n")
 	b.WriteString("would run:\n")
 	b.WriteString("CODEX_HOME=")
-	b.WriteString(profile.CodexHome)
+	b.WriteString(shellQuoteValue(profile.CodexHome))
 	b.WriteString(" codex login\n")
 	b.WriteString("dry-run only: no commands were executed and no files were changed.\n")
 	return b.String(), nil

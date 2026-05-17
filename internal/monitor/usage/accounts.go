@@ -235,9 +235,16 @@ func monitorConfigUsesFileStore(path string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("read profile config: %w", err)
 	}
+	multilineDelimiter := ""
 	for _, rawLine := range strings.Split(string(data), "\n") {
 		line := strings.TrimSpace(monitorStripTOMLComment(rawLine))
 		if line == "" {
+			continue
+		}
+		if multilineDelimiter != "" {
+			if strings.Contains(line, multilineDelimiter) {
+				multilineDelimiter = ""
+			}
 			continue
 		}
 		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
@@ -245,6 +252,14 @@ func monitorConfigUsesFileStore(path string) (bool, error) {
 		}
 		parts := strings.SplitN(line, "=", 2)
 		if len(parts) != 2 || monitorTOMLKey(strings.TrimSpace(parts[0])) != "cli_auth_credentials_store" {
+			if len(parts) == 2 {
+				value := strings.TrimSpace(parts[1])
+				if strings.HasPrefix(value, `"""`) {
+					multilineDelimiter = `"""`
+				} else if strings.HasPrefix(value, `'''`) {
+					multilineDelimiter = `'''`
+				}
+			}
 			continue
 		}
 		value := strings.Trim(strings.TrimSpace(parts[1]), `"'`)
@@ -584,9 +599,6 @@ func EnsureMonitorDataDir() error {
 
 func defaultCodexHome() (string, error) {
 	if codexHome := strings.TrimSpace(os.Getenv(defaultCodexHomeEnvVar)); codexHome != "" {
-		return expandPath(codexHome)
-	}
-	if codexHome := strings.TrimSpace(os.Getenv("CODEX_HOME")); codexHome != "" {
 		return expandPath(codexHome)
 	}
 	home, err := os.UserHomeDir()
