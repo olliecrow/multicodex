@@ -3,6 +3,7 @@ package usage
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -446,6 +447,12 @@ func normalizeHome(home string) string {
 }
 
 func resolveActiveCodexHome() string {
+	if home := strings.TrimSpace(os.Getenv("CODEX_HOME")); home != "" {
+		expanded, err := expandPath(home)
+		if err == nil {
+			return normalizeHome(expanded)
+		}
+	}
 	home, err := defaultCodexHome()
 	if err != nil {
 		return ""

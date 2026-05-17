@@ -108,7 +108,6 @@ func renderDryRunRun(cfg *Config, name string, args []string) (string, error) {
 	if sep == -1 || sep == len(args)-1 {
 		return "", &ExitError{Code: 2, Message: "usage: multicodex dry-run run <name> -- <command...>"}
 	}
-	command := strings.Join(args[sep+1:], " ")
 	var b strings.Builder
 	b.WriteString("multicodex dry-run run\n")
 	b.WriteString("profile: ")
@@ -116,9 +115,11 @@ func renderDryRunRun(cfg *Config, name string, args []string) (string, error) {
 	b.WriteString("\n")
 	b.WriteString("would run:\n")
 	b.WriteString("CODEX_HOME=")
-	b.WriteString(profile.CodexHome)
-	b.WriteString(" ")
-	b.WriteString(command)
+	b.WriteString(shellQuoteValue(profile.CodexHome))
+	for _, arg := range args[sep+1:] {
+		b.WriteString(" ")
+		b.WriteString(shellQuoteValue(arg))
+	}
 	b.WriteString("\n")
 	b.WriteString("dry-run only: no commands were executed and no files were changed.\n")
 	return b.String(), nil

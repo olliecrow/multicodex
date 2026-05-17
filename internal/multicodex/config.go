@@ -513,6 +513,9 @@ func (s *Store) ensureProfileSkills(codexHome string) error {
 	if err := ensurePathNotSymlinkIfExists(profileSkillsPath); err != nil {
 		return err
 	}
+	if info, err := os.Lstat(profileSkillsPath); err == nil && !info.IsDir() {
+		return fmt.Errorf("profile skills path is not a directory: %s", profileSkillsPath)
+	}
 	if err := ensurePathPrefixesBelowRootNotSymlinks(codexHome, profileSkillsPath); err != nil {
 		return err
 	}

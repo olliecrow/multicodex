@@ -10,7 +10,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"multicodex/internal/monitor/usage"
+	"github.com/olliecrow/multicodex/internal/monitor/usage"
 )
 
 func TestViewFitsViewportAcrossSizes(t *testing.T) {

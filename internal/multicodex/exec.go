@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"multicodex/internal/monitor/usage"
+	"github.com/olliecrow/multicodex/internal/monitor/usage"
 )
 
 const (

@@ -357,10 +357,10 @@ func checkTrackedSensitiveFiles(root string) DoctorCheck {
 func isSensitiveTrackedPath(p string) bool {
 	clean := path.Clean(strings.ToLower(strings.ReplaceAll(strings.TrimSpace(p), "\\", "/")))
 	base := path.Base(clean)
-	if clean == "multicodex/config.json" || strings.Contains(clean, "/multicodex/config.json") {
+	if clean == "github.com/olliecrow/multicodex/config.json" || strings.Contains(clean, "/multicodex/config.json") {
 		return true
 	}
-	if strings.Contains(clean, "/multicodex/profiles/") || strings.HasPrefix(clean, "multicodex/profiles/") {
+	if strings.Contains(clean, "/multicodex/profiles/") || strings.HasPrefix(clean, "github.com/olliecrow/multicodex/profiles/") {
 		return true
 	}
 	if strings.Contains(clean, "/.codex/") || strings.HasPrefix(clean, ".codex/") {
@@ -461,6 +461,9 @@ func checkAuthFile(name, path string) DoctorCheck {
 	}
 	if info.IsDir() {
 		return DoctorCheck{Name: name, Status: "fail", Details: "auth.json is a directory"}
+	}
+	if !info.Mode().IsRegular() {
+		return DoctorCheck{Name: name, Status: "fail", Details: "auth.json is not a regular file"}
 	}
 	if fileHasMultipleLinks(info) {
 		return DoctorCheck{Name: name, Status: "fail", Details: "auth.json has multiple hard links; expected profile-local file"}

@@ -197,8 +197,8 @@ func readAccessToken(path string) (string, error) {
 }
 
 func fileExists(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && !info.IsDir()
+	info, err := os.Lstat(path)
+	return err == nil && info.Mode().IsRegular() && !monitorFileHasMultipleLinks(info)
 }
 
 func summarizeBody(b []byte) string {
