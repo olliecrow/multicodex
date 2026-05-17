@@ -57,3 +57,28 @@ func TestSecureAuthFilePermissionsRejectsSymlink(t *testing.T) {
 		t.Fatalf("expected symlink error, got %v", err)
 	}
 }
+
+func TestEnsureProfileAuthPathSafeRejectsSymlinkedHome(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	realHome := filepath.Join(root, "real-codex-home")
+	if err := os.MkdirAll(realHome, 0o700); err != nil {
+		t.Fatalf("mkdir real home: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(realHome, "auth.json"), []byte(`{"tokens":{"access_token":"a"}}`), 0o600); err != nil {
+		t.Fatalf("write auth file: %v", err)
+	}
+	linkHome := filepath.Join(root, "linked-codex-home")
+	if err := os.Symlink(realHome, linkHome); err != nil {
+		t.Fatalf("symlink codex home: %v", err)
+	}
+
+	_, _, err := ensureProfileAuthPathSafe(linkHome)
+	if err == nil {
+		t.Fatal("expected symlinked codex home to fail")
+	}
+	if !strings.Contains(err.Error(), "profile codex home is a symlink") {
+		t.Fatalf("expected symlinked home error, got %v", err)
+	}
+}

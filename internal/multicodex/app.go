@@ -283,6 +283,9 @@ func ensureLoginConfigReady(paths Paths, profile Profile) error {
 }
 
 func ensureProfileCodexExecutionReady(paths Paths, profile Profile) error {
+	if _, _, err := ensureProfileAuthPathSafe(profile.CodexHome); err != nil {
+		return err
+	}
 	configPath := filepath.Join(profile.CodexHome, "config.toml")
 	ok, err := profileConfigUsesFileStore(configPath)
 	if err != nil {
