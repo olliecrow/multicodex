@@ -103,6 +103,10 @@ func (s *Store) CreateProfile(name string) (Profile, error) {
 	}
 	profileDir := filepath.Join(s.paths.ProfilesDir, name)
 	codexHome := filepath.Join(profileDir, "codex-home")
+	profile := Profile{Name: name, CodexHome: codexHome}
+	if err := s.ensureProfileStoragePathSafe(profile); err != nil {
+		return Profile{}, err
+	}
 	if err := os.MkdirAll(codexHome, 0o700); err != nil {
 		return Profile{}, fmt.Errorf("create profile dir: %w", err)
 	}
@@ -114,7 +118,7 @@ func (s *Store) CreateProfile(name string) (Profile, error) {
 		return Profile{}, err
 	}
 
-	return Profile{Name: name, CodexHome: codexHome}, nil
+	return profile, nil
 }
 
 func (s *Store) EnsureProfileDir(profile Profile) error {
@@ -139,10 +143,10 @@ func (s *Store) ensureProfileStoragePathSafe(profile Profile) error {
 	}
 	profileDir := filepath.Join(s.paths.ProfilesDir, profile.Name)
 	expectedCodexHome := filepath.Join(profileDir, "codex-home")
-	if filepath.Clean(profile.CodexHome) != filepath.Clean(expectedCodexHome) {
+	if !sameProfilePath(profile.CodexHome, expectedCodexHome) {
 		return fmt.Errorf("profile codex home %s does not match expected profile-local path %s", profile.CodexHome, expectedCodexHome)
 	}
-	for _, path := range []string{profileDir, expectedCodexHome} {
+	for _, path := range []string{s.paths.ProfilesDir, profileDir, expectedCodexHome} {
 		info, err := os.Lstat(path)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
@@ -155,6 +159,21 @@ func (s *Store) ensureProfileStoragePathSafe(profile Profile) error {
 		}
 	}
 	return nil
+}
+
+func sameProfilePath(a, b string) bool {
+	return canonicalProfilePath(a) == canonicalProfilePath(b)
+}
+
+func canonicalProfilePath(p string) string {
+	cleaned := filepath.Clean(p)
+	if abs, err := filepath.Abs(cleaned); err == nil {
+		cleaned = abs
+	}
+	if resolved, err := filepath.EvalSymlinks(cleaned); err == nil {
+		cleaned = resolved
+	}
+	return filepath.Clean(cleaned)
 }
 
 func HasAuthFile(codexHome string) (bool, error) {
