@@ -364,6 +364,9 @@ func (a *App) cmdUse(args []string) error {
 	if err := a.store.EnsureProfileDir(profile); err != nil {
 		return err
 	}
+	if _, _, err := ensureProfileAuthPathSafe(profile.CodexHome); err != nil {
+		return err
+	}
 
 	if openShell {
 		fmt.Printf("starting shell with profile %q\n", name)
