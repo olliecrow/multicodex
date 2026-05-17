@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 )
 
 const (
@@ -140,6 +141,10 @@ func loadAccountsFromMulticodexConfig() ([]MonitorAccount, string, error) {
 	profilesDir := filepath.Join(multicodexHome, "profiles")
 	for _, name := range names {
 		profile := raw.Profiles[name]
+		if !monitorProfileNameValid(name) {
+			warnings = append(warnings, fmt.Sprintf("skipping multicodex profile %q: invalid profile name", name))
+			continue
+		}
 		if strings.TrimSpace(profile.Name) != name {
 			warnings = append(warnings, fmt.Sprintf("skipping multicodex profile %q: stored name mismatch", name))
 			continue
@@ -177,7 +182,8 @@ func monitorProfileHomeSafe(profilesDir, name, home string) error {
 	if rel, err := filepath.Rel(profilesDir, home); err != nil || rel != filepath.Join(name, "codex-home") {
 		return fmt.Errorf("codex_home is not profile-local")
 	}
-	for _, path := range []string{filepath.Join(profilesDir, name), expected, home, filepath.Join(home, "auth.json")} {
+	authPath := filepath.Join(home, "auth.json")
+	for _, path := range []string{profilesDir, filepath.Join(profilesDir, name), expected, home, authPath} {
 		info, err := os.Lstat(path)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) && strings.HasSuffix(path, "auth.json") {
@@ -187,6 +193,9 @@ func monitorProfileHomeSafe(profilesDir, name, home string) error {
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
 			return fmt.Errorf("%s is a symlink", path)
+		}
+		if path == authPath && monitorFileHasMultipleLinks(info) {
+			return fmt.Errorf("%s has multiple hard links", path)
 		}
 	}
 	ok, err := monitorConfigUsesFileStore(filepath.Join(home, "config.toml"))
@@ -199,23 +208,73 @@ func monitorProfileHomeSafe(profilesDir, name, home string) error {
 	return nil
 }
 
+func monitorProfileNameValid(name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" || name == "." || name == ".." {
+		return false
+	}
+	return !strings.ContainsAny(name, `/\`)
+}
+
+func monitorFileHasMultipleLinks(info os.FileInfo) bool {
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	return ok && stat.Nlink > 1
+}
+
 func monitorConfigUsesFileStore(path string) (bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return false, fmt.Errorf("read profile config: %w", err)
 	}
 	for _, rawLine := range strings.Split(string(data), "\n") {
-		line := strings.TrimSpace(strings.SplitN(rawLine, "#", 2)[0])
-		if strings.HasPrefix(line, "cli_auth_credentials_store") {
-			parts := strings.SplitN(line, "=", 2)
-			if len(parts) != 2 {
-				return false, nil
-			}
-			value := strings.Trim(strings.TrimSpace(parts[1]), `"'`)
-			return value == "file", nil
+		line := strings.TrimSpace(monitorStripTOMLComment(rawLine))
+		if line == "" {
+			continue
 		}
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			return false, nil
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 || strings.TrimSpace(parts[0]) != "cli_auth_credentials_store" {
+			continue
+		}
+		value := strings.Trim(strings.TrimSpace(parts[1]), `"'`)
+		return value == "file", nil
 	}
 	return false, nil
+}
+
+func monitorStripTOMLComment(line string) string {
+	inDouble := false
+	inSingle := false
+	escaped := false
+	for i := 0; i < len(line); i++ {
+		ch := line[i]
+		switch {
+		case escaped:
+			escaped = false
+		case inDouble:
+			if ch == '\\' {
+				escaped = true
+			} else if ch == '"' {
+				inDouble = false
+			}
+		case inSingle:
+			if ch == '\'' {
+				inSingle = false
+			}
+		default:
+			switch ch {
+			case '"':
+				inDouble = true
+			case '\'':
+				inSingle = true
+			case '#':
+				return line[:i]
+			}
+		}
+	}
+	return line
 }
 
 func loadAccountsFromFile() ([]MonitorAccount, string, error) {

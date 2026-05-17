@@ -180,6 +180,37 @@ func TestCmdExecRejectsUnsafeAuthBeforeSelection(t *testing.T) {
 	}
 }
 
+func TestCmdExecPreparesMissingProfileBeforeSelection(t *testing.T) {
+	app, logPath := newExecTestApp(t)
+	profile := Profile{Name: "alpha", CodexHome: filepath.Join(app.store.paths.ProfilesDir, "alpha", "codex-home")}
+	cfg := DefaultConfig()
+	cfg.Profiles[profile.Name] = profile
+	if err := app.store.Save(cfg); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	selectorCalled := false
+	originalSelector := defaultExecAccountSelector
+	defaultExecAccountSelector = func(context.Context, []usage.MonitorAccount, int, string) (usage.SelectedAccount, error) {
+		selectorCalled = true
+		return usage.SelectedAccount{Account: usage.MonitorAccount{Label: "alpha"}}, nil
+	}
+	defer func() { defaultExecAccountSelector = originalSelector }()
+
+	if err := app.Run([]string{"exec", "--skip-git-repo-check", "hello"}); err != nil {
+		t.Fatalf("exec failed: %v", err)
+	}
+	if !selectorCalled {
+		t.Fatal("expected selector to run after profile preparation")
+	}
+	if _, err := os.Stat(filepath.Join(profile.CodexHome, "config.toml")); err != nil {
+		t.Fatalf("expected profile config to be prepared, stat err=%v", err)
+	}
+	if _, err := os.Stat(logPath); err != nil {
+		t.Fatalf("expected codex to be invoked after safe preparation, stat err=%v", err)
+	}
+}
+
 func TestExecArgsAreHelpRequest(t *testing.T) {
 	t.Parallel()
 

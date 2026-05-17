@@ -92,10 +92,9 @@ func (a *App) ensureConfiguredProfileAuthPathsSafe(cfg *Config) error {
 			return err
 		}
 		if _, err := os.Stat(profile.CodexHome); err != nil {
-			if os.IsNotExist(err) {
-				continue
+			if !os.IsNotExist(err) {
+				return err
 			}
-			return err
 		}
 		if err := a.store.EnsureProfileDir(profile); err != nil {
 			return err
