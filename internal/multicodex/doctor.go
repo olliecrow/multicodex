@@ -357,10 +357,10 @@ func checkTrackedSensitiveFiles(root string) DoctorCheck {
 func isSensitiveTrackedPath(p string) bool {
 	clean := path.Clean(strings.ToLower(strings.ReplaceAll(strings.TrimSpace(p), "\\", "/")))
 	base := path.Base(clean)
-	if clean == "github.com/olliecrow/multicodex/config.json" || strings.Contains(clean, "/multicodex/config.json") {
+	if clean == "multicodex/config.json" || clean == "github.com/olliecrow/multicodex/config.json" || strings.Contains(clean, "/multicodex/config.json") {
 		return true
 	}
-	if strings.Contains(clean, "/multicodex/profiles/") || strings.HasPrefix(clean, "github.com/olliecrow/multicodex/profiles/") {
+	if strings.Contains(clean, "/multicodex/profiles/") || strings.HasPrefix(clean, "multicodex/profiles/") || strings.HasPrefix(clean, "github.com/olliecrow/multicodex/profiles/") {
 		return true
 	}
 	if strings.Contains(clean, "/.codex/") || strings.HasPrefix(clean, ".codex/") {
@@ -419,6 +419,18 @@ func checkFileStoreConfig(name, path string, required bool) DoctorCheck {
 		linkTarget = target
 	}
 
+	if err := ensureRegularFileOrSymlinkTarget(path, "config.toml"); err != nil {
+		if os.IsNotExist(err) {
+			if required {
+				if linkTarget != "" {
+					return DoctorCheck{Name: name, Status: "fail", Details: "config.toml symlink target not found: " + linkTarget}
+				}
+				return DoctorCheck{Name: name, Status: "fail", Details: "missing config.toml. expected a default-config symlink or manual override with cli_auth_credentials_store = \"file\""}
+			}
+			return DoctorCheck{Name: name, Status: "warn", Details: "config.toml not found"}
+		}
+		return DoctorCheck{Name: name, Status: "fail", Details: err.Error()}
+	}
 	if _, err := os.ReadFile(path); err != nil {
 		if os.IsNotExist(err) {
 			if required {

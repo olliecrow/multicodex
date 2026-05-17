@@ -328,6 +328,12 @@ func profileConfigUsesFileStore(configPath string) (bool, error) {
 }
 
 func profileConfigCredentialStore(configPath string) (string, bool, error) {
+	if err := ensureRegularFileOrSymlinkTarget(configPath, "profile config"); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
 	b, err := os.ReadFile(configPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -379,9 +385,9 @@ func parseCredentialStoreFromTOML(content string) (string, bool, error) {
 		}
 		if key != "cli_auth_credentials_store" {
 			value := strings.TrimSpace(line[assignIdx+1:])
-			if strings.HasPrefix(value, `"""`) {
+			if strings.HasPrefix(value, `"""`) && strings.Count(value, `"""`)%2 == 1 {
 				multilineDelimiter = `"""`
-			} else if strings.HasPrefix(value, `'''`) {
+			} else if strings.HasPrefix(value, `'''`) && strings.Count(value, `'''`)%2 == 1 {
 				multilineDelimiter = `'''`
 			}
 			continue
@@ -394,6 +400,27 @@ func parseCredentialStoreFromTOML(content string) (string, bool, error) {
 		return value, true, nil
 	}
 	return "", false, nil
+}
+
+func ensureRegularFileOrSymlinkTarget(path, label string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		targetInfo, err := os.Stat(path)
+		if err != nil {
+			return fmt.Errorf("%s symlink target is not readable: %w", label, err)
+		}
+		if !targetInfo.Mode().IsRegular() {
+			return fmt.Errorf("%s symlink target is not a regular file: %s", label, path)
+		}
+		return nil
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("%s is not a regular file: %s", label, path)
+	}
+	return nil
 }
 
 func parseTOMLKey(raw string) (string, error) {
