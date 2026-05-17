@@ -92,6 +92,9 @@ func loadMonitorAccounts() ([]MonitorAccount, string, error) {
 			collector.warnf("%s", autoWarning)
 		}
 		for _, account := range autoAccounts {
+			if isMulticodexProfileHome(account.CodexHome) {
+				continue
+			}
 			collector.add(account.Label, account.CodexHome, 30, false)
 		}
 	}
@@ -138,6 +141,9 @@ func loadAccountsFromMulticodexConfig() ([]MonitorAccount, string, error) {
 	out := make([]MonitorAccount, 0, len(names))
 	warnings := make([]string, 0)
 	multicodexHome := filepath.Dir(configPath)
+	if info, err := os.Lstat(multicodexHome); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		return nil, "skipping multicodex profiles: multicodex home is a symlink", nil
+	}
 	profilesDir := filepath.Join(multicodexHome, "profiles")
 	for _, name := range names {
 		profile := raw.Profiles[name]
@@ -235,13 +241,33 @@ func monitorConfigUsesFileStore(path string) (bool, error) {
 			return false, nil
 		}
 		parts := strings.SplitN(line, "=", 2)
-		if len(parts) != 2 || strings.TrimSpace(parts[0]) != "cli_auth_credentials_store" {
+		if len(parts) != 2 || monitorTOMLKey(strings.TrimSpace(parts[0])) != "cli_auth_credentials_store" {
 			continue
 		}
 		value := strings.Trim(strings.TrimSpace(parts[1]), `"'`)
 		return value == "file", nil
 	}
 	return false, nil
+}
+
+func monitorTOMLKey(raw string) string {
+	if len(raw) >= 2 && ((raw[0] == '"' && raw[len(raw)-1] == '"') || (raw[0] == '\'' && raw[len(raw)-1] == '\'')) {
+		return strings.Trim(raw[1:len(raw)-1], " ")
+	}
+	return raw
+}
+
+func isMulticodexProfileHome(home string) bool {
+	configPath, err := multicodexConfigPath()
+	if err != nil {
+		return false
+	}
+	profilesDir := filepath.Join(filepath.Dir(configPath), "profiles")
+	rel, err := filepath.Rel(profilesDir, filepath.Clean(home))
+	if err != nil || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || rel == ".." {
+		return false
+	}
+	return strings.HasSuffix(rel, string(os.PathSeparator)+"codex-home")
 }
 
 func monitorStripTOMLComment(line string) string {
@@ -595,14 +621,14 @@ func expandPath(path string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("resolve home directory: %w", err)
 		}
-		return home, nil
+		return filepath.Abs(home)
 	}
 	if strings.HasPrefix(path, "~/") {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return "", fmt.Errorf("resolve home directory: %w", err)
 		}
-		return filepath.Join(home, path[2:]), nil
+		return filepath.Abs(filepath.Join(home, path[2:]))
 	}
-	return path, nil
+	return filepath.Abs(path)
 }

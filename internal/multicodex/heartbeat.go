@@ -318,6 +318,15 @@ func acquireHeartbeatLock(path string) (*os.File, bool, error) {
 		}
 		return nil, false, fmt.Errorf("acquire heartbeat lock: %w", err)
 	}
+	info, err := lockFile.Stat()
+	if err != nil {
+		_ = lockFile.Close()
+		return nil, false, fmt.Errorf("inspect opened heartbeat lock: %w", err)
+	}
+	if fileHasMultipleLinks(info) {
+		_ = lockFile.Close()
+		return nil, false, fmt.Errorf("heartbeat lock path has multiple hard links: %s", path)
+	}
 
 	if err := lockFile.Truncate(0); err == nil {
 		_, _ = lockFile.WriteString(fmt.Sprintf("%d\n", os.Getpid()))
