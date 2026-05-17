@@ -207,6 +207,9 @@ func monitorProfileHomeSafe(profilesDir, name, home string) error {
 		if info.Mode()&os.ModeSymlink != 0 {
 			return fmt.Errorf("%s is a symlink", path)
 		}
+		if path != authPath && info.IsDir() && info.Mode().Perm()&0o077 != 0 {
+			return fmt.Errorf("%s permissions are %o, expected no group/world permissions", path, info.Mode().Perm())
+		}
 		if path == authPath && !info.Mode().IsRegular() {
 			return fmt.Errorf("%s is not a regular file", path)
 		}
@@ -476,6 +479,9 @@ func discoverCodexHomesFromSystem(home string) ([]string, []string, error) {
 		}
 
 		depth := discoveryDepth(cleanHome, path)
+		if path != cleanHome && shouldPruneDiscoveryDir(path, depth) {
+			return filepath.SkipDir
+		}
 		name := d.Name()
 		if (depth == 1 && strings.HasPrefix(name, ".codex")) || (depth >= 1 && depth <= maxDiscoveryDepth && (name == ".codex" || name == "codex-home")) {
 			if dirExists(path) {
@@ -497,6 +503,19 @@ func discoverCodexHomesFromSystem(home string) ([]string, []string, error) {
 	}
 	sort.Strings(out)
 	return out, warnings, nil
+}
+
+func shouldPruneDiscoveryDir(path string, depth int) bool {
+	if depth <= 0 {
+		return false
+	}
+	base := strings.ToLower(filepath.Base(path))
+	switch base {
+	case ".cache", ".git", "caches", "library", "node_modules":
+		return true
+	default:
+		return false
+	}
 }
 
 func discoveryDepth(root, path string) int {

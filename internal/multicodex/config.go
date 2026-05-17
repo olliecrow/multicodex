@@ -48,11 +48,17 @@ func (s *Store) EnsureBaseDirs() error {
 	if err := os.MkdirAll(s.paths.MulticodexHome, 0o700); err != nil {
 		return fmt.Errorf("create multicodex home: %w", err)
 	}
+	if err := os.Chmod(s.paths.MulticodexHome, 0o700); err != nil {
+		return fmt.Errorf("secure multicodex home permissions: %w", err)
+	}
 	if err := ensurePathNotSymlinkIfExists(s.paths.ProfilesDir); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(s.paths.ProfilesDir, 0o700); err != nil {
 		return fmt.Errorf("create profiles dir: %w", err)
+	}
+	if err := os.Chmod(s.paths.ProfilesDir, 0o700); err != nil {
+		return fmt.Errorf("secure profiles dir permissions: %w", err)
 	}
 	return nil
 }

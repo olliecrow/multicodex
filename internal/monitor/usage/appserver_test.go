@@ -1,6 +1,7 @@
 package usage
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -13,7 +14,10 @@ func TestRefreshAuthStateFirstFingerprintNoWarning(t *testing.T) {
 		},
 	}
 
-	warning := s.refreshAuthState()
+	warning, err := s.refreshAuthState()
+	if err != nil {
+		t.Fatalf("refreshAuthState: %v", err)
+	}
 	if warning != "" {
 		t.Fatalf("expected no warning, got %q", warning)
 	}
@@ -30,7 +34,10 @@ func TestRefreshAuthStateUnchangedNoWarning(t *testing.T) {
 		},
 	}
 
-	warning := s.refreshAuthState()
+	warning, err := s.refreshAuthState()
+	if err != nil {
+		t.Fatalf("refreshAuthState: %v", err)
+	}
 	if warning != "" {
 		t.Fatalf("expected no warning, got %q", warning)
 	}
@@ -48,7 +55,10 @@ func TestRefreshAuthStateChangedReturnsWarning(t *testing.T) {
 		session: &appServerSession{},
 	}
 
-	warning := s.refreshAuthState()
+	warning, err := s.refreshAuthState()
+	if err != nil {
+		t.Fatalf("refreshAuthState: %v", err)
+	}
 	if warning == "" {
 		t.Fatalf("expected warning on fingerprint change")
 	}
@@ -69,7 +79,10 @@ func TestRefreshAuthStateErrorAfterKnownFingerprintReturnsWarning(t *testing.T) 
 		session: &appServerSession{},
 	}
 
-	warning := s.refreshAuthState()
+	warning, err := s.refreshAuthState()
+	if err != nil {
+		t.Fatalf("refreshAuthState: %v", err)
+	}
 	if warning == "" {
 		t.Fatalf("expected warning on auth-state error after prior fingerprint")
 	}
@@ -78,6 +91,41 @@ func TestRefreshAuthStateErrorAfterKnownFingerprintReturnsWarning(t *testing.T) 
 	}
 	if s.session != nil {
 		t.Fatalf("expected session reset on auth-state error")
+	}
+}
+
+func TestRefreshAuthStateFirstErrorReturnsError(t *testing.T) {
+	s := &AppServerSource{
+		authFingerprintFn: func() (string, error) {
+			return "", errors.New("unsafe auth")
+		},
+	}
+
+	warning, err := s.refreshAuthState()
+	if err == nil {
+		t.Fatal("expected auth-state error")
+	}
+	if warning != "" {
+		t.Fatalf("expected no warning before a known fingerprint, got %q", warning)
+	}
+}
+
+func TestFetchBlocksAuthStateErrorBeforeStartingSession(t *testing.T) {
+	s := &AppServerSource{
+		authFingerprintFn: func() (string, error) {
+			return "", errors.New("unsafe auth")
+		},
+	}
+
+	_, err := s.Fetch(context.Background())
+	if err == nil {
+		t.Fatal("expected auth-state error")
+	}
+	if !strings.Contains(err.Error(), "unsafe auth") {
+		t.Fatalf("expected unsafe auth error, got %v", err)
+	}
+	if s.session != nil {
+		t.Fatalf("expected app-server session not to start")
 	}
 }
 

@@ -319,6 +319,41 @@ func TestEnsureBaseDirsRejectsSymlinkedMulticodexHome(t *testing.T) {
 	}
 }
 
+func TestEnsureBaseDirsSecuresExistingDirectories(t *testing.T) {
+	root := t.TempDir()
+	multicodexHome := filepath.Join(root, "multicodex")
+	profilesDir := filepath.Join(multicodexHome, "profiles")
+	if err := os.MkdirAll(profilesDir, 0o755); err != nil {
+		t.Fatalf("mkdir existing dirs: %v", err)
+	}
+	if err := os.Chmod(multicodexHome, 0o755); err != nil {
+		t.Fatalf("chmod multicodex home: %v", err)
+	}
+	if err := os.Chmod(profilesDir, 0o755); err != nil {
+		t.Fatalf("chmod profiles dir: %v", err)
+	}
+
+	store := NewStore(Paths{
+		MulticodexHome:   multicodexHome,
+		ConfigPath:       filepath.Join(multicodexHome, "config.json"),
+		ProfilesDir:      profilesDir,
+		DefaultCodexHome: filepath.Join(root, "codex-default"),
+	})
+
+	if err := store.EnsureBaseDirs(); err != nil {
+		t.Fatalf("EnsureBaseDirs: %v", err)
+	}
+	for _, path := range []string{multicodexHome, profilesDir} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stat %s: %v", path, err)
+		}
+		if got := info.Mode().Perm(); got != 0o700 {
+			t.Fatalf("expected %s mode 0700, got %o", path, got)
+		}
+	}
+}
+
 func TestEnsureProfileDirRejectsStoredSymlinkedCodexHomeAlias(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("MULTICODEX_HOME", filepath.Join(root, "multicodex"))

@@ -138,6 +138,30 @@ func TestAcquireHeartbeatLockRejectsSymlink(t *testing.T) {
 	}
 }
 
+func TestAcquireHeartbeatLockRejectsSymlinkedAncestor(t *testing.T) {
+	root := t.TempDir()
+	realDir := filepath.Join(root, "real")
+	if err := os.MkdirAll(realDir, 0o700); err != nil {
+		t.Fatalf("mkdir real dir: %v", err)
+	}
+	linkedDir := filepath.Join(root, "link")
+	if err := os.Symlink(realDir, linkedDir); err != nil {
+		t.Fatalf("symlink lock ancestor: %v", err)
+	}
+	lockPath := filepath.Join(linkedDir, "subdir", "heartbeat.lock")
+
+	_, _, err := acquireHeartbeatLock(lockPath)
+	if err == nil {
+		t.Fatal("expected symlinked lock ancestor to fail")
+	}
+	if !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("expected symlink error, got %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(realDir, "subdir")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("expected setup not to write through symlink ancestor, stat err=%v", statErr)
+	}
+}
+
 func TestAcquireHeartbeatLockRejectsHardLink(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "target")

@@ -77,7 +77,11 @@ func (s *AppServerSource) Fetch(ctx context.Context) (*Summary, error) {
 	defer s.reqMu.Unlock()
 
 	var warnings []string
-	if warning := s.refreshAuthState(); warning != "" {
+	warning, authErr := s.refreshAuthState()
+	if authErr != nil {
+		return nil, authErr
+	}
+	if warning != "" {
 		warnings = append(warnings, warning)
 	}
 
@@ -145,7 +149,7 @@ func (s *AppServerSource) resetSession() {
 	}
 }
 
-func (s *AppServerSource) refreshAuthState() string {
+func (s *AppServerSource) refreshAuthState() (string, error) {
 	fingerprintFn := s.authFingerprintFn
 	if fingerprintFn == nil {
 		fingerprintFn = func() (string, error) {
@@ -156,24 +160,24 @@ func (s *AppServerSource) refreshAuthState() string {
 	fingerprint, err := fingerprintFn()
 	if err != nil {
 		if s.authFingerprint == "" {
-			return ""
+			return "", err
 		}
 		s.resetSession()
 		s.authFingerprint = ""
-		return "auth state changed; restarted app-server session"
+		return "auth state changed; restarted app-server session", nil
 	}
 
 	if s.authFingerprint == "" {
 		s.authFingerprint = fingerprint
-		return ""
+		return "", nil
 	}
 	if s.authFingerprint == fingerprint {
-		return ""
+		return "", nil
 	}
 
 	s.resetSession()
 	s.authFingerprint = fingerprint
-	return "auth state changed; restarted app-server session"
+	return "auth state changed; restarted app-server session", nil
 }
 
 func currentAuthFingerprintForHome(codexHome string) (string, error) {
