@@ -36,6 +36,23 @@ exclude_pattern() {
   fi
 }
 
+filter_allowed_path_placeholders() {
+  local line redacted
+  while IFS= read -r line; do
+    redacted="$(printf '%s\n' "$line" | sed -E "s#${allowed_path_placeholder_regex}#<allowed-path-placeholder>#g")"
+    if [[ "$redacted" =~ $local_path_regex ]]; then
+      printf '%s\n' "$line"
+    fi
+  done
+}
+
+redact_matches() {
+  sed -E \
+    -e "s#${local_path_regex}#<redacted-local-path>#g" \
+    -e "s#${known_token_regex}#<redacted-token>#g" \
+    -e "s#([Aa][Pp][Ii][_-]?[Kk][Ee][Yy]|[Tt][Oo][Kk][Ee][Nn]|[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Ss][Ee][Cc][Rr][Ee][Tt])[[:space:]]*[:=][[:space:]]*[\"']?[^[:space:]\"']+#\\1=<redacted-secret>#g"
+}
+
 failed=0
 for target in "$@"; do
   if [[ ! -f "$target" ]]; then
@@ -44,7 +61,7 @@ for target in "$@"; do
 
   path_matches="$(search_pattern "$local_path_regex" "$target")"
   if [[ -n "$path_matches" ]]; then
-    path_matches="$(printf '%s\n' "$path_matches" | exclude_pattern "$allowed_path_placeholder_regex")"
+    path_matches="$(printf '%s\n' "$path_matches" | filter_allowed_path_placeholders)"
   fi
 
   secret_assignment_matches="$(search_pattern "$secret_assignment_regex" "$target")"
@@ -53,7 +70,7 @@ for target in "$@"; do
   matches="$(printf '%s\n%s\n%s\n' "$path_matches" "$secret_assignment_matches" "$known_token_matches" | sed '/^$/d' | sort -u)"
   if [[ -n "$matches" ]]; then
     echo "policy violation in ${context}: ${target}" >&2
-    echo "$matches" >&2
+    printf '%s\n' "$matches" | redact_matches >&2
     failed=1
   fi
 done

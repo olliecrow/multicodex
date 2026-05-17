@@ -45,6 +45,9 @@ func ensureProfileAuthPathSafe(codexHome string) (string, bool, error) {
 	if info.Mode()&os.ModeSymlink != 0 {
 		return "", false, fmt.Errorf("auth path is a symlink, expected profile-local file: %s", authPath)
 	}
+	if !info.Mode().IsRegular() {
+		return "", false, fmt.Errorf("auth path is not a regular file: %s", authPath)
+	}
 	if info.IsDir() {
 		return "", false, fmt.Errorf("auth path is a directory, expected file: %s", authPath)
 	}
