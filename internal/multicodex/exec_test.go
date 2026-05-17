@@ -574,6 +574,33 @@ func TestWriteSelectedProfileMetadataNoPathIsNoOp(t *testing.T) {
 	}
 }
 
+func TestWriteSelectedProfileMetadataRejectsHardLinkedFile(t *testing.T) {
+	dir := t.TempDir()
+	metadataPath := filepath.Join(dir, "selected-profile.json")
+	linkedPath := filepath.Join(dir, "selected-profile.link")
+	if err := os.WriteFile(metadataPath, []byte("{}\n"), 0o600); err != nil {
+		t.Fatalf("write metadata file: %v", err)
+	}
+	if err := os.Link(metadataPath, linkedPath); err != nil {
+		t.Fatalf("hard link metadata file: %v", err)
+	}
+
+	err := writeSelectedProfileMetadata(metadataPath, execSelectionMetadata{Profile: "alpha"})
+	if err == nil {
+		t.Fatal("expected hard-linked metadata file to fail")
+	}
+	if !strings.Contains(err.Error(), "multiple hard links") {
+		t.Fatalf("expected multiple-hard-links error, got %v", err)
+	}
+	data, readErr := os.ReadFile(metadataPath)
+	if readErr != nil {
+		t.Fatalf("read metadata file: %v", readErr)
+	}
+	if string(data) != "{}\n" {
+		t.Fatalf("expected hard-linked metadata not to be truncated, got %q", string(data))
+	}
+}
+
 func newExecTestApp(t *testing.T) (*App, string) {
 	t.Helper()
 

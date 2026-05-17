@@ -16,6 +16,7 @@
 ## Repository safeguards
 - `.gitignore` must ignore local auth and profile state.
 - Recommended ignore coverage includes targeted current state paths: `**/multicodex/config.json` and `**/multicodex/profiles/`.
+- Legacy `.multicodex/` state paths remain sensitive and should stay ignored.
 - Tests must use synthetic fixtures only.
 - Example files must never include real credentials.
 - CI should run secret scanning before merge.

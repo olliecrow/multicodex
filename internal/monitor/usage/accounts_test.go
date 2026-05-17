@@ -57,6 +57,39 @@ func TestLoadMonitorAccountsUsesConfiguredDefaultCodexHome(t *testing.T) {
 	}
 }
 
+func TestLoadMonitorAccountsUsesActiveCodexHomeAsDefault(t *testing.T) {
+	tmp := t.TempDir()
+	activeHome := filepath.Join(tmp, "active-codex")
+	if err := os.MkdirAll(activeHome, 0o700); err != nil {
+		t.Fatalf("mkdir active home: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(activeHome, "auth.json"), []byte(`{"tokens":{"access_token":"x"}}`), 0o600); err != nil {
+		t.Fatalf("write active auth file: %v", err)
+	}
+	t.Setenv("HOME", tmp)
+	t.Setenv("CODEX_HOME", activeHome)
+	t.Setenv(defaultCodexHomeEnvVar, "")
+	t.Setenv(multicodexHomeEnvVar, filepath.Join(tmp, defaultMulticodexHomeDirName))
+	t.Setenv(accountsFileEnvVar, filepath.Join(tmp, "missing.json"))
+
+	accounts, warning, err := loadMonitorAccounts()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if warning != "" {
+		t.Fatalf("expected no warning, got %q", warning)
+	}
+	if len(accounts) == 0 {
+		t.Fatalf("expected default account")
+	}
+	if accounts[0].Label != "default" {
+		t.Fatalf("expected active CODEX_HOME to be the default account, got label %q", accounts[0].Label)
+	}
+	if accounts[0].CodexHome != normalizeHome(activeHome) {
+		t.Fatalf("expected default codex home %q, got %q", normalizeHome(activeHome), accounts[0].CodexHome)
+	}
+}
+
 func TestLoadMonitorAccountsPrefersConfiguredDefaultOverActiveCodexHome(t *testing.T) {
 	tmp := t.TempDir()
 	configuredHome := filepath.Join(tmp, "custom-default-codex")
@@ -233,6 +266,35 @@ func TestLoadMonitorAccountsSkipsTransientAutoDiscoveredHomes(t *testing.T) {
 	}
 	if transientFound {
 		t.Fatalf("expected transient loopy launch home to be excluded")
+	}
+}
+
+func TestLoadMonitorAccountsDiscoveryDoesNotDescendIntoSymlinkedDirs(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv(multicodexHomeEnvVar, filepath.Join(tmp, defaultMulticodexHomeDirName))
+	t.Setenv(accountsFileEnvVar, filepath.Join(tmp, "missing.json"))
+
+	outsideHome := filepath.Join(t.TempDir(), "outside", "codex-home")
+	if err := os.MkdirAll(outsideHome, 0o755); err != nil {
+		t.Fatalf("mkdir outside home: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(outsideHome, "auth.json"), []byte(`{"tokens":{"access_token":"x"}}`), 0o600); err != nil {
+		t.Fatalf("write outside auth file: %v", err)
+	}
+	if err := os.Symlink(filepath.Dir(outsideHome), filepath.Join(tmp, "linked-outside")); err != nil {
+		t.Fatalf("symlink outside dir: %v", err)
+	}
+
+	accounts, _, err := loadMonitorAccounts()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, account := range accounts {
+		if account.CodexHome == normalizeHome(outsideHome) {
+			t.Fatalf("expected symlinked outside home not to be discovered: %#v", accounts)
+		}
 	}
 }
 

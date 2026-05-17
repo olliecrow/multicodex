@@ -227,6 +227,34 @@ func TestEnsureProfileDirRejectsSymlinkedProfileDir(t *testing.T) {
 	}
 }
 
+func TestEnsureProfileDirRejectsGroupReadableProfileRoot(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("MULTICODEX_HOME", filepath.Join(root, "multicodex"))
+	t.Setenv("MULTICODEX_DEFAULT_CODEX_HOME", filepath.Join(root, "codex-default"))
+
+	paths, err := ResolvePaths()
+	if err != nil {
+		t.Fatalf("ResolvePaths: %v", err)
+	}
+	if err := os.MkdirAll(paths.MulticodexHome, 0o700); err != nil {
+		t.Fatalf("mkdir multicodex home: %v", err)
+	}
+	if err := os.MkdirAll(paths.ProfilesDir, 0o750); err != nil {
+		t.Fatalf("mkdir profiles dir: %v", err)
+	}
+	store := NewStore(paths)
+	profileDir := filepath.Join(paths.ProfilesDir, "work")
+	profile := Profile{Name: "work", CodexHome: filepath.Join(profileDir, "codex-home")}
+
+	err = store.EnsureProfileDir(profile)
+	if err == nil {
+		t.Fatal("expected group-readable profile root to fail")
+	}
+	if !strings.Contains(err.Error(), "expected no group/world permissions") {
+		t.Fatalf("expected private-permissions error, got %v", err)
+	}
+}
+
 func TestCreateProfileRejectsSymlinkedProfileDir(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("MULTICODEX_HOME", filepath.Join(root, "multicodex"))

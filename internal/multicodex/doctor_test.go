@@ -322,6 +322,9 @@ func TestMissingIgnorePatterns(t *testing.T) {
 	full := strings.Join([]string{
 		"**/multicodex/config.json",
 		"**/multicodex/profiles/",
+		"**/.multicodex/config.json",
+		"**/.multicodex/profiles/",
+		".multicodex/",
 		".codex/",
 		"**/auth.json",
 		".env",
@@ -333,14 +336,14 @@ func TestMissingIgnorePatterns(t *testing.T) {
 
 	minimal := ".codex/\n"
 	got := missingIgnorePatterns(minimal)
-	want := []string{"**/multicodex/config.json", "**/multicodex/profiles/", "**/auth.json", ".env", ".env.*"}
+	want := []string{".multicodex/", "**/multicodex/config.json", "**/multicodex/profiles/", "**/.multicodex/config.json", "**/.multicodex/profiles/", "**/auth.json", ".env", ".env.*"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected missing patterns. got=%v want=%v", got, want)
 	}
 
 	minimalNew := "**/multicodex/profiles/\n**/multicodex/config.json\n"
 	got = missingIgnorePatterns(minimalNew)
-	want = []string{".codex/", "**/auth.json", ".env", ".env.*"}
+	want = []string{".codex/", ".multicodex/", "**/.multicodex/config.json", "**/.multicodex/profiles/", "**/auth.json", ".env", ".env.*"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected missing patterns for new dir marker. got=%v want=%v", got, want)
 	}
@@ -355,6 +358,9 @@ func TestIsSensitiveTrackedPath(t *testing.T) {
 	}{
 		{path: "github.com/olliecrow/multicodex/config.json", sensitive: true},
 		{path: "github.com/olliecrow/multicodex/profiles/work/codex-home/config.toml", sensitive: true},
+		{path: ".multicodex/config.json", sensitive: true},
+		{path: ".multicodex/profiles/work/codex-home/config.toml", sensitive: true},
+		{path: "github.com/olliecrow/.multicodex/config.json", sensitive: true},
 		{path: "github.com/olliecrow/multicodex/docs/readme.md", sensitive: false},
 		{path: "foo/.codex/auth.json", sensitive: true},
 		{path: "auth.json", sensitive: true},

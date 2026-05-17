@@ -246,8 +246,8 @@ func ensureExistingDirPrivate(path string) error {
 		}
 		return err
 	}
-	if info.IsDir() && info.Mode().Perm()&0o022 != 0 {
-		return fmt.Errorf("profile path permissions are %o, expected no group/world write bits: %s", info.Mode().Perm(), path)
+	if info.IsDir() && info.Mode().Perm()&0o077 != 0 {
+		return fmt.Errorf("profile path permissions are %o, expected no group/world permissions: %s", info.Mode().Perm(), path)
 	}
 	return nil
 }
