@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -455,27 +456,39 @@ func discoverCodexHomesFromSystem(home string) ([]string, []string, error) {
 	candidates := map[string]struct{}{}
 	var warnings []string
 
-	patterns := []string{
-		filepath.Join(home, ".codex*"),
-	}
-
-	for depth := 1; depth <= 5; depth++ {
-		patterns = append(patterns, homePatternWithSuffix(home, depth, "codex-home"))
-		patterns = append(patterns, homePatternWithSuffix(home, depth, ".codex"))
-	}
-
-	for _, pattern := range patterns {
-		matches, err := filepath.Glob(pattern)
-		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("invalid discovery pattern %q: %v", pattern, err))
-			continue
-		}
-		for _, match := range matches {
-			if !dirExists(match) {
-				continue
+	const maxDiscoveryDepth = 5
+	cleanHome := filepath.Clean(home)
+	err := filepath.WalkDir(cleanHome, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			warnings = append(warnings, fmt.Sprintf("skipping discovery path %q: %v", path, walkErr))
+			if d != nil && d.IsDir() {
+				return filepath.SkipDir
 			}
-			candidates[filepath.Clean(match)] = struct{}{}
+			return nil
 		}
+		if !d.IsDir() {
+			return nil
+		}
+		if path != cleanHome {
+			if d.Type()&os.ModeSymlink != 0 || shouldIgnoreDiscoveredHome(path) {
+				return filepath.SkipDir
+			}
+		}
+
+		depth := discoveryDepth(cleanHome, path)
+		name := d.Name()
+		if (depth == 1 && strings.HasPrefix(name, ".codex")) || (depth >= 1 && depth <= maxDiscoveryDepth && (name == ".codex" || name == "codex-home")) {
+			if dirExists(path) {
+				candidates[filepath.Clean(path)] = struct{}{}
+			}
+		}
+		if depth >= maxDiscoveryDepth {
+			return filepath.SkipDir
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, warnings, err
 	}
 
 	out := make([]string, 0, len(candidates))
@@ -486,14 +499,12 @@ func discoverCodexHomesFromSystem(home string) ([]string, []string, error) {
 	return out, warnings, nil
 }
 
-func homePatternWithSuffix(home string, depth int, suffix string) string {
-	parts := make([]string, 0, depth+2)
-	parts = append(parts, home)
-	for i := 0; i < depth; i++ {
-		parts = append(parts, "*")
+func discoveryDepth(root, path string) int {
+	rel, err := filepath.Rel(root, path)
+	if err != nil || rel == "." {
+		return 0
 	}
-	parts = append(parts, suffix)
-	return filepath.Join(parts...)
+	return len(strings.Split(rel, string(filepath.Separator)))
 }
 
 func labelForDiscoveredHome(codexHome string) string {
@@ -659,6 +670,9 @@ func EnsureMonitorDataDir() error {
 
 func defaultCodexHome() (string, error) {
 	if codexHome := strings.TrimSpace(os.Getenv(defaultCodexHomeEnvVar)); codexHome != "" {
+		return expandPath(codexHome)
+	}
+	if codexHome := strings.TrimSpace(os.Getenv("CODEX_HOME")); codexHome != "" {
 		return expandPath(codexHome)
 	}
 	home, err := os.UserHomeDir()

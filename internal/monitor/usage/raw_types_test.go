@@ -9,7 +9,7 @@ func TestNormalizeSummaryAllowsMissingSecondaryWindow(t *testing.T) {
 			UsedPercent: 7,
 		},
 		Secondary: nil,
-	}, nil, 0, &identityInfo{Email: "crowoy1@gmail.com"}, nil)
+	}, nil, 0, &identityInfo{Email: "user@example.com"}, nil)
 	if err != nil {
 		t.Fatalf("expected missing secondary window to be allowed, got error: %v", err)
 	}
@@ -22,7 +22,7 @@ func TestNormalizeSummaryAllowsMissingSecondaryWindow(t *testing.T) {
 	if summary.SecondaryWindow.UsedPercent != unavailableUsedPercent {
 		t.Fatalf("expected secondary window sentinel, got %d", summary.SecondaryWindow.UsedPercent)
 	}
-	if summary.AccountEmail != "crowoy1@gmail.com" {
+	if summary.AccountEmail != "user@example.com" {
 		t.Fatalf("expected identity email to be preserved, got %q", summary.AccountEmail)
 	}
 }

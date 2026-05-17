@@ -98,7 +98,7 @@ multicodex dry-run
 - Default multicodex state home is `~/multicodex`.
 - You can override the state location with `MULTICODEX_HOME`.
 - Profile auth stays isolated under `~/multicodex/profiles/<name>/codex-home/auth.json`.
-- The multicodex state home, profile directories, profile `codex-home`, profile skills directory, and `auth.json` must be regular profile-local filesystem entries; symlinks fail setup, status, profile execution, and doctor checks.
+- The multicodex state home, profile directories, profile `codex-home`, profile skills directory, and `auth.json` must be regular profile-local filesystem entries with local-user-only directory permissions; symlinks fail setup, status, profile execution, and doctor checks.
 - Profile `auth.json` must not be a hard link to another file.
 - `multicodex heartbeat` rejects lock files that are symlinks or hard links before writing the PID.
 - Profile-scoped CLI, exec, and run sessions keep Codex state, including thread and `/goal` state, under `~/multicodex/profiles/<name>/codex-home/`.
