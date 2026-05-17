@@ -1,6 +1,7 @@
 package multicodex
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -152,6 +153,45 @@ func TestCheckAuthFileRejectsSymlink(t *testing.T) {
 	}
 	if !strings.Contains(check.Details, "auth.json is a symlink") {
 		t.Fatalf("expected symlink detail, got %q", check.Details)
+	}
+}
+
+func TestProfileDoctorChecksSkipLoginStatusWhenAuthFails(t *testing.T) {
+	root := t.TempDir()
+	fakeBin := filepath.Join(root, "bin")
+	if err := os.MkdirAll(fakeBin, 0o700); err != nil {
+		t.Fatalf("mkdir fake bin: %v", err)
+	}
+	logPath := filepath.Join(root, "codex.log")
+	script := "#!/bin/sh\nprintf 'codex login status invoked\\n' > " + shellQuote(logPath) + "\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(fakeBin, "codex"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake codex: %v", err)
+	}
+	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	codexHome := filepath.Join(root, "profile", "codex-home")
+	if err := os.MkdirAll(codexHome, 0o700); err != nil {
+		t.Fatalf("mkdir codex home: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(codexHome, "config.toml"), []byte(generatedProfileConfigContent), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	target := filepath.Join(root, "shared-auth.json")
+	if err := os.WriteFile(target, []byte(`{"tokens":{"access_token":"a"}}`), 0o600); err != nil {
+		t.Fatalf("write target auth file: %v", err)
+	}
+	if err := os.Symlink(target, filepath.Join(codexHome, "auth.json")); err != nil {
+		t.Fatalf("symlink auth file: %v", err)
+	}
+
+	checks := profileDoctorChecks("work", Profile{Name: "work", CodexHome: codexHome}, true)
+	if _, err := os.Stat(logPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected codex login status not to run, stat err=%v", err)
+	}
+	for _, check := range checks {
+		if strings.Contains(check.Name, "login status") {
+			t.Fatalf("expected login status check to be skipped after auth failure, got %v", checks)
+		}
 	}
 }
 

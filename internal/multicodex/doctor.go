@@ -126,9 +126,10 @@ func profileDoctorChecks(name string, profile Profile, codexFound bool) []Doctor
 
 	out = append(out, checkDirExists(prefix+" codex home", profile.CodexHome, true))
 	out = append(out, checkFileStoreConfig(prefix+" config", filepath.Join(profile.CodexHome, "config.toml"), true))
-	out = append(out, checkAuthFile(prefix+" auth", filepath.Join(profile.CodexHome, "auth.json")))
+	authCheck := checkAuthFile(prefix+" auth", filepath.Join(profile.CodexHome, "auth.json"))
+	out = append(out, authCheck)
 
-	if codexFound {
+	if codexFound && authCheck.Status != "fail" {
 		state, account, detail := codexLoginStatus(profile.CodexHome)
 		status := "warn"
 		if state == "logged-in" || state == "ok" {
