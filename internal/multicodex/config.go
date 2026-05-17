@@ -42,8 +42,14 @@ func NewStore(paths Paths) *Store {
 }
 
 func (s *Store) EnsureBaseDirs() error {
+	if err := ensurePathNotSymlinkIfExists(s.paths.MulticodexHome); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(s.paths.MulticodexHome, 0o700); err != nil {
 		return fmt.Errorf("create multicodex home: %w", err)
+	}
+	if err := ensurePathNotSymlinkIfExists(s.paths.ProfilesDir); err != nil {
+		return err
 	}
 	if err := os.MkdirAll(s.paths.ProfilesDir, 0o700); err != nil {
 		return fmt.Errorf("create profiles dir: %w", err)
@@ -146,19 +152,40 @@ func (s *Store) ensureProfileStoragePathSafe(profile Profile) error {
 	if !sameProfilePath(profile.CodexHome, expectedCodexHome) {
 		return fmt.Errorf("profile codex home %s does not match expected profile-local path %s", profile.CodexHome, expectedCodexHome)
 	}
-	for _, path := range []string{s.paths.ProfilesDir, profileDir, expectedCodexHome} {
-		info, err := os.Lstat(path)
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				continue
-			}
-			return fmt.Errorf("inspect profile path %s: %w", path, err)
-		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("profile path is a symlink, expected profile-local directory: %s", path)
+	for _, path := range uniquePaths(s.paths.MulticodexHome, s.paths.ProfilesDir, profileDir, expectedCodexHome, profile.CodexHome) {
+		if err := ensurePathNotSymlinkIfExists(path); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+func ensurePathNotSymlinkIfExists(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("inspect profile path %s: %w", path, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("profile path is a symlink, expected profile-local directory: %s", path)
+	}
+	return nil
+}
+
+func uniquePaths(paths ...string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(paths))
+	for _, path := range paths {
+		key := filepath.Clean(path)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, path)
+	}
+	return out
 }
 
 func sameProfilePath(a, b string) bool {
@@ -171,9 +198,39 @@ func canonicalProfilePath(p string) string {
 		cleaned = abs
 	}
 	if resolved, err := filepath.EvalSymlinks(cleaned); err == nil {
-		cleaned = resolved
+		return filepath.Clean(resolved)
 	}
-	return filepath.Clean(cleaned)
+
+	prefix := cleaned
+	suffix := []string{}
+	for {
+		info, err := os.Lstat(prefix)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				suffix = append([]string{filepath.Base(prefix)}, suffix...)
+				next := filepath.Dir(prefix)
+				if next == prefix {
+					return filepath.Clean(cleaned)
+				}
+				prefix = next
+				continue
+			}
+			return filepath.Clean(cleaned)
+		}
+		if !info.IsDir() {
+			return filepath.Clean(cleaned)
+		}
+		break
+	}
+	resolvedPrefix, err := filepath.EvalSymlinks(prefix)
+	if err != nil {
+		return filepath.Clean(cleaned)
+	}
+	if len(suffix) == 0 {
+		return filepath.Clean(resolvedPrefix)
+	}
+	parts := append([]string{resolvedPrefix}, suffix...)
+	return filepath.Clean(filepath.Join(parts...))
 }
 
 func HasAuthFile(codexHome string) (bool, error) {

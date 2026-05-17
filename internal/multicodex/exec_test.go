@@ -118,8 +118,10 @@ func TestCmdExecFailsWhenSharedConfigDoesNotUseFileStore(t *testing.T) {
 	createExecProfiles(t, app, "alpha")
 	writeDefaultConfig(t, app, "model = \"global\"\n")
 
+	selectorCalled := false
 	originalSelector := defaultExecAccountSelector
 	defaultExecAccountSelector = func(context.Context, []usage.MonitorAccount, int, string) (usage.SelectedAccount, error) {
+		selectorCalled = true
 		return usage.SelectedAccount{Account: usage.MonitorAccount{Label: "alpha"}}, nil
 	}
 	defer func() { defaultExecAccountSelector = originalSelector }()
@@ -134,6 +136,9 @@ func TestCmdExecFailsWhenSharedConfigDoesNotUseFileStore(t *testing.T) {
 	}
 	if !strings.Contains(exitErr.Message, "requires file-backed auth") {
 		t.Fatalf("unexpected error message: %s", exitErr.Message)
+	}
+	if selectorCalled {
+		t.Fatal("expected selector not to run before file-store safety check")
 	}
 	if _, err := os.Stat(logPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected codex to not be invoked, stat err=%v", err)

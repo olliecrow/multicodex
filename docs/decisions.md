@@ -80,8 +80,8 @@ References: `internal/multicodex/status.go`, `internal/multicodex/status_test.go
 Decision: Add doctor leak guards and auth-permission normalization.
 Context: Users need confidence that auth details are handled safely and do not get committed.
 Rationale: Proactive checks for repo leakage plus post-login `0600` permissions reduce accidental disclosure risk.
-Trade-offs: Slightly more checks and warnings in doctor output. Profile `auth.json` and `codex-home` must be regular profile-local filesystem entries; `config.toml` may still be a symlink to shared default config.
-Enforcement: Doctor checks for path isolation, ignore coverage, tracked sensitive files, auth-file symlinks, and symlinked profile homes. Shared profile execution preflight rejects unsafe auth paths before running Codex, and login normalizes regular auth files to `0600`; tests cover helper logic.
+Trade-offs: Slightly more checks and warnings in doctor and status output. The multicodex state home, profile directories, profile `auth.json`, and profile `codex-home` must be regular profile-local filesystem entries; `config.toml` may still be a symlink to shared default config.
+Enforcement: Doctor checks for path isolation, ignore coverage, tracked sensitive files, auth-file symlinks, and symlinked profile homes. Setup, status, shell switching, and shared profile execution preflights reject unsafe profile paths before running Codex, and login normalizes regular auth files to `0600`; tests cover helper logic.
 References: `internal/multicodex/doctor.go`, `internal/multicodex/doctor_test.go`, `internal/multicodex/security.go`, `internal/multicodex/security_test.go`
 
 Decision: Normalize configured paths and path comparisons before using them.
@@ -172,7 +172,7 @@ Decision: Default profile config to the shared global Codex config, while preser
 Context: Users expect Codex feature settings such as search or model defaults to stay consistent across regular Codex usage and multicodex profile usage without copying config files into each profile.
 Rationale: A profile-local symlink to the default Codex `config.toml` keeps settings current automatically as the global config changes, while leaving any non-generated profile-local config file intact preserves an escape hatch for account-specific customization.
 Trade-offs: Auth isolation now depends more directly on the default Codex config using file-backed credentials; profile login must fail clearly when the effective config would not use file-backed auth; doctor output must explain shared-config states clearly.
-Enforcement: New profiles create a `config.toml` symlink to the default Codex config; generated profile configs stay aligned with that symlink policy; manually maintained profile config files are preserved as overrides; `multicodex login` and profile-scoped Codex execution paths reject configs that do not enable file-backed auth.
+Enforcement: New profiles create a `config.toml` symlink to the default Codex config; generated profile configs stay aligned with that symlink policy; manually maintained profile config files are preserved as overrides; `multicodex login`, `multicodex use`, `multicodex status`, and profile-scoped Codex execution paths reject configs that do not enable file-backed auth before exporting profile env or running Codex.
 References: `internal/multicodex/config.go`, `internal/multicodex/config_test.go`, `internal/multicodex/doctor.go`, `README.md`, `docs/implementation-notes.md`
 
 Decision: Present monitor identities and timestamps for operator readability while keeping internal timekeeping canonical.

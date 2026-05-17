@@ -43,7 +43,7 @@ func PrintStatus(store *Store, cfg *Config) error {
 	}
 	sort.Strings(names)
 
-	rows := collectProfileRows(cfg, names)
+	rows := collectProfileRows(store, cfg, names)
 
 	fmt.Println("multicodex status")
 	fmt.Println("profile-local auth status")
@@ -59,12 +59,12 @@ func PrintStatus(store *Store, cfg *Config) error {
 	return nil
 }
 
-func collectProfileRows(cfg *Config, names []string) []profileStatus {
+func collectProfileRows(store *Store, cfg *Config, names []string) []profileStatus {
 	rows := make([]profileStatus, len(names))
 	workers := parallelWorkers(len(names))
 	if workers == 1 {
 		for i, name := range names {
-			rows[i] = buildProfileRow(name, cfg.Profiles[name])
+			rows[i] = buildProfileRow(store, name, cfg.Profiles[name])
 		}
 		return rows
 	}
@@ -80,22 +80,42 @@ func collectProfileRows(cfg *Config, names []string) []profileStatus {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			rows[i] = buildProfileRow(name, profile)
+			rows[i] = buildProfileRow(store, name, profile)
 		}()
 	}
 	wg.Wait()
 	return rows
 }
 
-func buildProfileRow(name string, profile Profile) profileStatus {
+func buildProfileRow(store *Store, name string, profile Profile) profileStatus {
 	row := profileStatus{Name: name}
-	hasAuth, err := HasAuthFile(profile.CodexHome)
+	if err := store.ensureProfileStoragePathSafe(profile); err != nil {
+		row.State = "error"
+		row.Detail = err.Error()
+		return row
+	}
+	if _, err := os.Stat(profile.CodexHome); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			row.State = "missing"
+			row.Detail = "profile codex home not found"
+			return row
+		}
+		row.State = "error"
+		row.Detail = err.Error()
+		return row
+	}
+	_, hasAuth, err := ensureProfileAuthPathSafe(profile.CodexHome)
 	if err != nil {
 		row.State = "error"
 		row.Detail = err.Error()
 		return row
 	}
 	row.AuthFile = hasAuth
+	if err := ensureProfileCodexExecutionReady(store.paths, profile); err != nil {
+		row.State = "error"
+		row.Detail = err.Error()
+		return row
+	}
 	state, account, detail := codexLoginStatus(profile.CodexHome)
 	row.State = state
 	row.Account = account
