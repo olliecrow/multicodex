@@ -33,6 +33,12 @@ Build from source.
 go build -o multicodex ./cmd/multicodex
 ```
 
+Or install from the public module path.
+
+```bash
+go install github.com/olliecrow/multicodex/cmd/multicodex@latest
+```
+
 Optional for shell usage.
 
 ```bash

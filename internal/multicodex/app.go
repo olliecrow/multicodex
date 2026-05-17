@@ -308,9 +308,19 @@ func ensureProfileCodexExecutionReady(paths Paths, profile Profile) error {
 	}
 }
 
-func commandRequiresProfileCodexIsolation(cmd string) bool {
+func commandRequiresProfileCodexIsolation(cmd string, args ...string) bool {
 	base := filepath.Base(strings.TrimSpace(cmd))
-	return base == "codex"
+	if base == "codex" {
+		return true
+	}
+	for _, arg := range args {
+		for _, field := range strings.Fields(arg) {
+			if filepath.Base(strings.Trim(field, `"'`)) == "codex" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (a *App) cmdLoginAll() error {
@@ -406,7 +416,7 @@ func (a *App) cmdRun(args []string) error {
 	}
 	cmd := args[sep+1]
 	cmdArgs := args[sep+2:]
-	if commandRequiresProfileCodexIsolation(cmd) {
+	if commandRequiresProfileCodexIsolation(cmd, cmdArgs...) {
 		if err := ensureProfileCodexExecutionReady(a.store.paths, profile); err != nil {
 			return err
 		}

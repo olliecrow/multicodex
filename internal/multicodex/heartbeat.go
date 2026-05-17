@@ -294,6 +294,16 @@ func parseNonNegativeEnvInt(name string, fallback int) (int, error) {
 }
 
 func acquireHeartbeatLock(path string) (*os.File, bool, error) {
+	if info, err := os.Lstat(filepath.Dir(path)); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return nil, false, fmt.Errorf("heartbeat lock dir is a symlink: %s", filepath.Dir(path))
+		}
+		if !info.IsDir() {
+			return nil, false, fmt.Errorf("heartbeat lock dir is not a directory: %s", filepath.Dir(path))
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, false, fmt.Errorf("inspect heartbeat lock dir: %w", err)
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, false, fmt.Errorf("create heartbeat lock dir: %w", err)
 	}

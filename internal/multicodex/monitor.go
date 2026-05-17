@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/olliecrow/multicodex/internal/monitor/tui"
+	"github.com/olliecrow/multicodex/internal/monitor/usage"
 	"golang.org/x/term"
-	"multicodex/internal/monitor/tui"
-	"multicodex/internal/monitor/usage"
 )
 
 func (a *App) cmdMonitor(args []string) error {

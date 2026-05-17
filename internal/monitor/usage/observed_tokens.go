@@ -298,7 +298,12 @@ func discoverRecentUsageFiles(codexHome string, now time.Time) ([]string, []stri
 			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".jsonl") {
 				continue
 			}
-			files = append(files, filepath.Join(dir, entry.Name()))
+			path := filepath.Join(dir, entry.Name())
+			info, err := os.Lstat(path)
+			if err != nil || !info.Mode().IsRegular() {
+				continue
+			}
+			files = append(files, path)
 		}
 	}
 
