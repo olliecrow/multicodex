@@ -129,11 +129,12 @@ func profileDoctorChecks(paths Paths, name string, profile Profile, codexFound b
 	if homeCheck.Status == "fail" {
 		return out
 	}
-	out = append(out, checkFileStoreConfig(prefix+" config", filepath.Join(profile.CodexHome, "config.toml"), true))
+	configCheck := checkFileStoreConfig(prefix+" config", filepath.Join(profile.CodexHome, "config.toml"), true)
+	out = append(out, configCheck)
 	authCheck := checkAuthFile(prefix+" auth", filepath.Join(profile.CodexHome, "auth.json"))
 	out = append(out, authCheck)
 
-	if codexFound && authCheck.Status != "fail" {
+	if codexFound && configCheck.Status != "fail" && authCheck.Status != "fail" {
 		state, account, detail := codexLoginStatus(profile.CodexHome)
 		status := "warn"
 		if state == "logged-in" || state == "ok" {
@@ -450,6 +451,9 @@ func checkAuthFile(name, path string) DoctorCheck {
 	}
 	if info.IsDir() {
 		return DoctorCheck{Name: name, Status: "fail", Details: "auth.json is a directory"}
+	}
+	if fileHasMultipleLinks(info) {
+		return DoctorCheck{Name: name, Status: "fail", Details: "auth.json has multiple hard links; expected profile-local file"}
 	}
 
 	b, err := os.ReadFile(path)

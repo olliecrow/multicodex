@@ -77,6 +77,71 @@ func TestStoreLoadRejectsInvalidProfileNames(t *testing.T) {
 	}
 }
 
+func TestStoreLoadRejectsMismatchedStoredProfileName(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("MULTICODEX_HOME", filepath.Join(root, "multicodex"))
+	t.Setenv("MULTICODEX_DEFAULT_CODEX_HOME", filepath.Join(root, "codex-default"))
+
+	paths, err := ResolvePaths()
+	if err != nil {
+		t.Fatalf("ResolvePaths: %v", err)
+	}
+	store := NewStore(paths)
+	if err := store.EnsureBaseDirs(); err != nil {
+		t.Fatalf("EnsureBaseDirs: %v", err)
+	}
+	raw := `{"version":1,"profiles":{"work":{"name":"personal","codex_home":"/tmp/personal"}}}`
+	if err := os.WriteFile(paths.ConfigPath, []byte(raw+"\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err = store.Load()
+	if err == nil {
+		t.Fatal("expected mismatched stored profile name to be rejected")
+	}
+	if !strings.Contains(err.Error(), "mismatched name") {
+		t.Fatalf("expected mismatched-name error, got %v", err)
+	}
+}
+
+func TestStoreSaveDoesNotWriteThroughPredictableTempSymlink(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("MULTICODEX_HOME", filepath.Join(root, "multicodex"))
+	t.Setenv("MULTICODEX_DEFAULT_CODEX_HOME", filepath.Join(root, "codex-default"))
+
+	paths, err := ResolvePaths()
+	if err != nil {
+		t.Fatalf("ResolvePaths: %v", err)
+	}
+	store := NewStore(paths)
+	if err := store.EnsureBaseDirs(); err != nil {
+		t.Fatalf("EnsureBaseDirs: %v", err)
+	}
+	victim := filepath.Join(root, "victim")
+	if err := os.WriteFile(victim, []byte("keep me\n"), 0o600); err != nil {
+		t.Fatalf("write victim: %v", err)
+	}
+	tmpPath := paths.ConfigPath + ".tmp"
+	if err := os.Symlink(victim, tmpPath); err != nil {
+		t.Fatalf("symlink temp config: %v", err)
+	}
+
+	err = store.Save(DefaultConfig())
+	if err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	b, readErr := os.ReadFile(victim)
+	if readErr != nil {
+		t.Fatalf("read victim: %v", readErr)
+	}
+	if string(b) != "keep me\n" {
+		t.Fatalf("expected victim not to be overwritten, got %q", string(b))
+	}
+	if _, statErr := os.Stat(paths.ConfigPath); statErr != nil {
+		t.Fatalf("expected config to be written, stat err=%v", statErr)
+	}
+}
+
 func TestCreateProfileLinksProfileConfigToDefaultConfig(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("MULTICODEX_HOME", filepath.Join(root, "multicodex"))
@@ -252,6 +317,66 @@ func TestEnsureProfileDirRejectsStoredSymlinkedCodexHomeAlias(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "profile path is a symlink") {
 		t.Fatalf("expected symlink error, got %v", err)
+	}
+}
+
+func TestEnsureProfileDirRejectsUncleanStoredCodexHome(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("MULTICODEX_HOME", filepath.Join(root, "multicodex"))
+	t.Setenv("MULTICODEX_DEFAULT_CODEX_HOME", filepath.Join(root, "codex-default"))
+
+	paths, err := ResolvePaths()
+	if err != nil {
+		t.Fatalf("ResolvePaths: %v", err)
+	}
+	store := NewStore(paths)
+	uncleanHome := paths.ProfilesDir + string(os.PathSeparator) + "work" + string(os.PathSeparator) + "link" + string(os.PathSeparator) + ".." + string(os.PathSeparator) + "codex-home"
+	profile := Profile{Name: "work", CodexHome: uncleanHome}
+
+	err = store.EnsureProfileDir(profile)
+	if err == nil {
+		t.Fatal("expected unclean stored codex home to fail")
+	}
+	if !strings.Contains(err.Error(), "clean profile-local path") {
+		t.Fatalf("expected clean-path error, got %v", err)
+	}
+}
+
+func TestEnsureProfileDirRejectsSymlinkedSkillsDir(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("MULTICODEX_HOME", filepath.Join(root, "multicodex"))
+	t.Setenv("MULTICODEX_DEFAULT_CODEX_HOME", filepath.Join(root, "codex-default"))
+
+	paths, err := ResolvePaths()
+	if err != nil {
+		t.Fatalf("ResolvePaths: %v", err)
+	}
+	store := NewStore(paths)
+	defaultSkill := filepath.Join(paths.DefaultCodexHome, "skills", "tool")
+	if err := os.MkdirAll(defaultSkill, 0o700); err != nil {
+		t.Fatalf("mkdir default skill: %v", err)
+	}
+	profile := Profile{Name: "work", CodexHome: filepath.Join(paths.ProfilesDir, "work", "codex-home")}
+	if err := os.MkdirAll(profile.CodexHome, 0o700); err != nil {
+		t.Fatalf("mkdir profile codex home: %v", err)
+	}
+	externalSkills := filepath.Join(root, "external-skills")
+	if err := os.MkdirAll(externalSkills, 0o700); err != nil {
+		t.Fatalf("mkdir external skills: %v", err)
+	}
+	if err := os.Symlink(externalSkills, filepath.Join(profile.CodexHome, "skills")); err != nil {
+		t.Fatalf("symlink profile skills: %v", err)
+	}
+
+	err = store.EnsureProfileDir(profile)
+	if err == nil {
+		t.Fatal("expected symlinked profile skills dir to fail")
+	}
+	if !strings.Contains(err.Error(), "profile path is a symlink") {
+		t.Fatalf("expected symlink error, got %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(externalSkills, "tool")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("expected setup not to write through skills symlink, stat err=%v", statErr)
 	}
 }
 

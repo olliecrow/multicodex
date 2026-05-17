@@ -80,8 +80,8 @@ References: `internal/multicodex/status.go`, `internal/multicodex/status_test.go
 Decision: Add doctor leak guards and auth-permission normalization.
 Context: Users need confidence that auth details are handled safely and do not get committed.
 Rationale: Proactive checks for repo leakage plus post-login `0600` permissions reduce accidental disclosure risk.
-Trade-offs: Slightly more checks and warnings in doctor and status output. The multicodex state home, profile directories, profile `auth.json`, and profile `codex-home` must be regular profile-local filesystem entries; `config.toml` may still be a symlink to shared default config.
-Enforcement: Doctor checks for path isolation, ignore coverage, tracked sensitive files, auth-file symlinks, and symlinked profile homes. Setup, status, shell switching, and shared profile execution preflights reject unsafe profile paths before running Codex, and login normalizes regular auth files to `0600`; tests cover helper logic.
+Trade-offs: Slightly more checks and warnings in doctor and status output. The multicodex state home, profile directories, profile `auth.json`, profile `codex-home`, and profile skills directory must be regular profile-local filesystem entries; `config.toml` may still be a symlink to shared default config.
+Enforcement: Doctor checks for path isolation, ignore coverage, tracked sensitive files, auth-file symlinks, auth-file hard links, and symlinked profile homes. Setup, status, shell switching, and shared profile execution preflights reject unsafe profile paths before running Codex; config saves use exclusive temp files; profile skill repair rejects symlinked skill directories; login normalizes regular auth files to `0600`; tests cover helper logic.
 References: `internal/multicodex/doctor.go`, `internal/multicodex/doctor_test.go`, `internal/multicodex/security.go`, `internal/multicodex/security_test.go`
 
 Decision: Normalize configured paths and path comparisons before using them.
