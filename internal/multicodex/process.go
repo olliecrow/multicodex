@@ -42,7 +42,7 @@ func RunShellWithProfile(codexHome, profile string) error {
 }
 
 func RunWithProfile(codexHome, profile, bin string, args []string) error {
-	return runCommandWithEnv(bin, args, withProfileEnv(os.Environ(), codexHome, profile), fmt.Sprintf("command failed: %s", strings.Join(append([]string{bin}, args...), " ")))
+	return runCommandWithEnv(bin, args, withProfileEnv(os.Environ(), codexHome, profile), fmt.Sprintf("command failed: %s", bin))
 }
 
 func RunInteractiveWithProfile(codexHome, profile, bin string, args []string) error {

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
-	"time"
 )
 
 type DoctorReport struct {
@@ -20,11 +19,11 @@ func RunDoctor(ctx context.Context) DoctorReport {
 
 	appSource := NewAppServerSource()
 	defer appSource.Close()
-	checks = append(checks, checkSourceFetch(ctx, appSource, 8*time.Second))
+	checks = append(checks, checkSourceFetch(ctx, appSource))
 
 	oauthSource := NewOAuthSource()
 	defer oauthSource.Close()
-	checks = append(checks, checkSourceFetch(ctx, oauthSource, 8*time.Second))
+	checks = append(checks, checkSourceFetch(ctx, oauthSource))
 
 	return DoctorReport{Checks: checks}
 }
@@ -97,10 +96,7 @@ func checkAuthJSON() DoctorCheck {
 	}
 }
 
-func checkSourceFetch(parent context.Context, source Source, timeout time.Duration) DoctorCheck {
-	ctx, cancel := context.WithTimeout(parent, timeout)
-	defer cancel()
-
+func checkSourceFetch(ctx context.Context, source Source) DoctorCheck {
 	summary, err := source.Fetch(ctx)
 	if err != nil {
 		return DoctorCheck{

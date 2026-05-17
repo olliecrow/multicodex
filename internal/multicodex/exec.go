@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/olliecrow/multicodex/internal/monitor/usage"
@@ -130,7 +131,12 @@ func writeSelectedProfileMetadata(path string, metadata execSelectionMetadata) e
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("inspect selected profile metadata: %w", err)
 	}
-	if err := os.WriteFile(path, append(data, '\n'), 0o600); err != nil {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC|syscall.O_NOFOLLOW, 0o600)
+	if err != nil {
+		return fmt.Errorf("open selected profile metadata: %w", err)
+	}
+	defer f.Close()
+	if _, err := f.Write(append(data, '\n')); err != nil {
 		return fmt.Errorf("write selected profile metadata: %w", err)
 	}
 	return nil
