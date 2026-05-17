@@ -121,6 +121,9 @@ func (s *Store) EnsureProfileDir(profile Profile) error {
 	if profile.CodexHome == "" {
 		return errors.New("profile codex home is empty")
 	}
+	if err := s.ensureProfileStoragePathSafe(profile); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(profile.CodexHome, 0o700); err != nil {
 		return fmt.Errorf("create profile codex home: %w", err)
 	}
@@ -128,6 +131,30 @@ func (s *Store) EnsureProfileDir(profile Profile) error {
 		return err
 	}
 	return s.ensureProfileSkills(profile.CodexHome)
+}
+
+func (s *Store) ensureProfileStoragePathSafe(profile Profile) error {
+	if err := ValidateProfileName(profile.Name); err != nil {
+		return fmt.Errorf("invalid profile name %q: %w", profile.Name, err)
+	}
+	profileDir := filepath.Join(s.paths.ProfilesDir, profile.Name)
+	expectedCodexHome := filepath.Join(profileDir, "codex-home")
+	if filepath.Clean(profile.CodexHome) != filepath.Clean(expectedCodexHome) {
+		return fmt.Errorf("profile codex home %s does not match expected profile-local path %s", profile.CodexHome, expectedCodexHome)
+	}
+	for _, path := range []string{profileDir, expectedCodexHome} {
+		info, err := os.Lstat(path)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return fmt.Errorf("inspect profile path %s: %w", path, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("profile path is a symlink, expected profile-local directory: %s", path)
+		}
+	}
+	return nil
 }
 
 func HasAuthFile(codexHome string) (bool, error) {

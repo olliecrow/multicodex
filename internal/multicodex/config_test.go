@@ -1,6 +1,7 @@
 package multicodex
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -123,6 +124,41 @@ func TestCreateProfileLinksProfileConfigToDefaultConfig(t *testing.T) {
 	}
 	if string(b) != "model = \"gpt-5\"\n" {
 		t.Fatalf("unexpected config.toml content: %q", string(b))
+	}
+}
+
+func TestEnsureProfileDirRejectsSymlinkedProfileDir(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("MULTICODEX_HOME", filepath.Join(root, "multicodex"))
+	t.Setenv("MULTICODEX_DEFAULT_CODEX_HOME", filepath.Join(root, "codex-default"))
+
+	paths, err := ResolvePaths()
+	if err != nil {
+		t.Fatalf("ResolvePaths: %v", err)
+	}
+	store := NewStore(paths)
+	if err := store.EnsureBaseDirs(); err != nil {
+		t.Fatalf("EnsureBaseDirs: %v", err)
+	}
+	realProfileDir := filepath.Join(t.TempDir(), "real-profile")
+	if err := os.MkdirAll(realProfileDir, 0o700); err != nil {
+		t.Fatalf("mkdir real profile dir: %v", err)
+	}
+	profileDir := filepath.Join(paths.ProfilesDir, "work")
+	if err := os.Symlink(realProfileDir, profileDir); err != nil {
+		t.Fatalf("symlink profile dir: %v", err)
+	}
+	profile := Profile{Name: "work", CodexHome: filepath.Join(profileDir, "codex-home")}
+
+	err = store.EnsureProfileDir(profile)
+	if err == nil {
+		t.Fatal("expected symlinked profile dir to fail")
+	}
+	if !strings.Contains(err.Error(), "profile path is a symlink") {
+		t.Fatalf("expected symlink error, got %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(realProfileDir, "codex-home")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("expected setup not to write through symlink, stat err=%v", statErr)
 	}
 }
 
