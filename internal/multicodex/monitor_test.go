@@ -1,9 +1,12 @@
 package multicodex
 
 import (
+	"bytes"
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/olliecrow/multicodex/internal/monitor/usage"
 )
 
 func TestMonitorHelpIncludesDoctorAndTerminalUserInterfaceText(t *testing.T) {
@@ -127,5 +130,24 @@ func TestHelpMonitorTUITopic(t *testing.T) {
 	}
 	if !strings.Contains(out, "multicodex monitor tui") {
 		t.Fatalf("expected monitor tui help topic output, got:\n%s", out)
+	}
+}
+
+func TestPrintMonitorDoctorHumanUsesGenericDegradedReason(t *testing.T) {
+	t.Parallel()
+
+	report := usage.DoctorReport{Checks: []usage.DoctorCheck{
+		{Name: "codex binary", OK: false, Details: "missing"},
+		{Name: "oauth fetch: personal", OK: true, Details: "ok"},
+	}}
+	var buf bytes.Buffer
+	printMonitorDoctorHumanTo(&buf, report)
+
+	out := buf.String()
+	if !strings.Contains(out, "monitor doctor result: PASS (degraded: at least one check failed)") {
+		t.Fatalf("expected generic degraded result, got %q", out)
+	}
+	if strings.Contains(out, "usage source is unavailable") {
+		t.Fatalf("did not expect usage-source-only degraded reason, got %q", out)
 	}
 }

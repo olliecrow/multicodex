@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math/rand"
+	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -480,6 +483,23 @@ func TestReplaceAccountFetchersClosesRemovedHomes(t *testing.T) {
 	}
 }
 
+func TestReplaceAccountFetchersUsesOAuthOnlyByDefault(t *testing.T) {
+	f := &Fetcher{}
+	f.replaceAccountFetchers([]MonitorAccount{
+		{Label: "alpha", CodexHome: "/alpha"},
+	})
+
+	if len(f.accounts) != 1 {
+		t.Fatalf("expected one account fetcher")
+	}
+	if f.accounts[0].primary == nil || f.accounts[0].primary.Name() != "oauth" {
+		t.Fatalf("expected oauth primary source, got %#v", f.accounts[0].primary)
+	}
+	if f.accounts[0].fallback != nil {
+		t.Fatalf("expected no fallback source by default, got %#v", f.accounts[0].fallback)
+	}
+}
+
 func TestRefreshAccountsReloadsAndReusesExistingHomes(t *testing.T) {
 	callCount := 0
 	f := &Fetcher{
@@ -524,6 +544,81 @@ func TestRefreshAccountsReloadsAndReusesExistingHomes(t *testing.T) {
 	}
 	if alpha.primary != reusedPrimary {
 		t.Fatalf("expected existing source to be reused for unchanged home")
+	}
+}
+
+func TestFetcherRefreshesEmptyAccountLoaderOnFetch(t *testing.T) {
+	tmp := t.TempDir()
+	codexHome := filepath.Join(tmp, "profiles", "alpha", "codex-home")
+	if err := os.MkdirAll(codexHome, 0o700); err != nil {
+		t.Fatalf("mkdir codex home: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(codexHome, "auth.json"), []byte(`{"tokens":{"access_token":"test-token"}}`), 0o600); err != nil {
+		t.Fatalf("write auth.json: %v", err)
+	}
+	t.Setenv("CODEX_HOME", codexHome)
+
+	originalTransport := http.DefaultTransport
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if got := req.Header.Get("Authorization"); got != "Bearer test-token" {
+			t.Fatalf("expected bearer token header, got %q", got)
+		}
+		body := `{
+			"email": "alpha@example.com",
+			"plan_type": "pro",
+			"rate_limit": {
+				"primary_window": {"used_percent": 11, "limit_window_seconds": 18000, "reset_at": 1893456000},
+				"secondary_window": {"used_percent": 22, "limit_window_seconds": 604800, "reset_at": 1894060800}
+			}
+		}`
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     make(http.Header),
+			Request:    req,
+		}, nil
+	})
+	t.Cleanup(func() { http.DefaultTransport = originalTransport })
+
+	callCount := 0
+	f := newConfiguredFetcherWithLoader(false, func() ([]MonitorAccount, string, error) {
+		callCount++
+		if callCount == 1 {
+			return nil, "accounts not written yet", nil
+		}
+		return []MonitorAccount{{Label: "alpha", CodexHome: codexHome}}, "", nil
+	})
+	f.accountRefreshInterval = time.Hour
+
+	out, err := f.Fetch(context.Background())
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if callCount != 2 {
+		t.Fatalf("expected Fetch to force-refresh initially empty accounts, got %d loader calls", callCount)
+	}
+	if out.TotalAccounts != 1 || len(out.Accounts) != 1 || out.Accounts[0].Label != "alpha" {
+		t.Fatalf("expected refreshed alpha account, got %+v", out)
+	}
+	if out.PrimaryWindow.UsedPercent != 11 || out.SecondaryWindow.UsedPercent != 22 {
+		t.Fatalf("expected OAuth usage windows from refreshed account, got %+v / %+v", out.PrimaryWindow, out.SecondaryWindow)
+	}
+}
+
+func TestFetcherIncludesLoaderWarningWhenNoAccountsConfigured(t *testing.T) {
+	f := &Fetcher{
+		accountLoader: func() ([]MonitorAccount, string, error) {
+			return nil, "accounts file was empty", nil
+		},
+		accountRefreshInterval: time.Minute,
+	}
+
+	_, err := f.Fetch(context.Background())
+	if err == nil {
+		t.Fatal("expected empty configured fetcher to fail")
+	}
+	if !strings.Contains(err.Error(), "no monitor accounts configured") || !strings.Contains(err.Error(), "accounts file was empty") {
+		t.Fatalf("expected empty-account error to include loader warning, got %v", err)
 	}
 }
 

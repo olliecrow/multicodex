@@ -61,7 +61,7 @@ func TestCmdExecWritesSelectedProfileMetadata(t *testing.T) {
 	}
 	defer func() { defaultExecAccountSelector = originalSelector }()
 
-	metadataPath := filepath.Join(app.store.paths.MulticodexHome, "selected-profile.json")
+	metadataPath := filepath.Join(app.store.paths.MulticodexHome, "run", "selected-profile.json")
 	t.Setenv(envSelectedProfilePath, metadataPath)
 
 	if err := app.Run([]string{"exec", "--skip-git-repo-check", "hello"}); err != nil {
@@ -329,7 +329,7 @@ func TestCmdExecSkipsWeeklyExhaustedProfileUsingDefaultSelector(t *testing.T) {
 	writeExecSelectionProfileData(t, root, "beta", 0, 85, 2*time.Hour)
 	writeExecSelectionProfileData(t, root, "gamma", 50, 10, 30*time.Minute)
 
-	metadataPath := filepath.Join(app.store.paths.MulticodexHome, "selected-profile.json")
+	metadataPath := filepath.Join(app.store.paths.MulticodexHome, "run", "selected-profile.json")
 	t.Setenv(envSelectedProfilePath, metadataPath)
 
 	if err := app.Run([]string{"exec", "--skip-git-repo-check", "hello"}); err != nil {
@@ -510,6 +510,77 @@ func TestCmdExecFallsBackToFirstConfiguredProfileWhenUsageSelectionFails(t *test
 	}
 }
 
+func TestCmdExecSkipsInvalidConfiguredProfileBeforeSelection(t *testing.T) {
+	app, logPath := newExecTestApp(t)
+	createExecProfiles(t, app, "alpha", "beta")
+
+	cfg, err := app.loadConfigIfExists()
+	if err != nil {
+		t.Fatalf("loadConfigIfExists: %v", err)
+	}
+	cfg.Profiles["alpha"] = Profile{Name: "alpha", CodexHome: filepath.Join(t.TempDir(), "outside-codex-home")}
+	if err := app.store.Save(cfg); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	originalSelector := defaultExecAccountSelector
+	defaultExecAccountSelector = func(_ context.Context, accounts []usage.MonitorAccount, _ int, _ string) (usage.SelectedAccount, error) {
+		if len(accounts) != 1 || accounts[0].Label != "beta" {
+			t.Fatalf("expected selector to see only ready beta profile, got %#v", accounts)
+		}
+		return usage.SelectedAccount{Account: usage.MonitorAccount{Label: "beta"}}, nil
+	}
+	defer func() { defaultExecAccountSelector = originalSelector }()
+
+	if err := app.Run([]string{"exec", "--skip-git-repo-check", "hello"}); err != nil {
+		t.Fatalf("exec failed: %v", err)
+	}
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if !strings.Contains(string(data), "profile=beta") {
+		t.Fatalf("expected beta profile in log, got %q", string(data))
+	}
+}
+
+func TestCmdExecFailsBeforeSelectionWhenNoProfilesAreReady(t *testing.T) {
+	app, logPath := newExecTestApp(t)
+	createExecProfiles(t, app, "alpha")
+
+	cfg, err := app.loadConfigIfExists()
+	if err != nil {
+		t.Fatalf("loadConfigIfExists: %v", err)
+	}
+	cfg.Profiles["alpha"] = Profile{Name: "alpha", CodexHome: filepath.Join(t.TempDir(), "outside-codex-home")}
+	if err := app.store.Save(cfg); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	selectorCalled := false
+	originalSelector := defaultExecAccountSelector
+	defaultExecAccountSelector = func(context.Context, []usage.MonitorAccount, int, string) (usage.SelectedAccount, error) {
+		selectorCalled = true
+		return usage.SelectedAccount{}, nil
+	}
+	defer func() { defaultExecAccountSelector = originalSelector }()
+
+	err = app.Run([]string{"exec", "--skip-git-repo-check", "hello"})
+	if err == nil {
+		t.Fatal("expected exec to fail when no profiles are ready")
+	}
+	if selectorCalled {
+		t.Fatal("expected selector not to run when no profiles are ready")
+	}
+	if !strings.Contains(err.Error(), "profile-local path") {
+		t.Fatalf("expected profile-local path error, got %v", err)
+	}
+	if _, statErr := os.Stat(logPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("expected codex not to be invoked, stat err=%v", statErr)
+	}
+}
+
 func TestSelectExecProfilePersistsUsageSelectionMetadata(t *testing.T) {
 	app := newTestAppForCLI(t)
 	createExecProfiles(t, app, "alpha", "beta")
@@ -551,8 +622,12 @@ func TestWriteSelectedProfileMetadataNoPathIsNoOp(t *testing.T) {
 
 func TestWriteSelectedProfileMetadataRejectsHardLinkedFile(t *testing.T) {
 	dir := t.TempDir()
-	metadataPath := filepath.Join(dir, "selected-profile.json")
-	linkedPath := filepath.Join(dir, "selected-profile.link")
+	runDir := filepath.Join(dir, "run")
+	if err := os.MkdirAll(runDir, 0o700); err != nil {
+		t.Fatalf("mkdir run dir: %v", err)
+	}
+	metadataPath := filepath.Join(runDir, "selected-profile.json")
+	linkedPath := filepath.Join(runDir, "selected-profile.link")
 	if err := os.WriteFile(metadataPath, []byte("{}\n"), 0o600); err != nil {
 		t.Fatalf("write metadata file: %v", err)
 	}
@@ -573,6 +648,100 @@ func TestWriteSelectedProfileMetadataRejectsHardLinkedFile(t *testing.T) {
 	}
 	if string(data) != "{}\n" {
 		t.Fatalf("expected hard-linked metadata not to be truncated, got %q", string(data))
+	}
+}
+
+func TestWriteSelectedProfileMetadataRejectsPathOutsideRuntimeRoot(t *testing.T) {
+	root := t.TempDir()
+	metadataPath := filepath.Join(root, "selected-profile.json")
+
+	err := writeSelectedProfileMetadata(Paths{MulticodexHome: root}, metadataPath, execSelectionMetadata{Profile: "alpha"})
+	if err == nil {
+		t.Fatal("expected metadata path outside runtime root to fail")
+	}
+	if !strings.Contains(err.Error(), "must stay under") {
+		t.Fatalf("expected under-runtime-root error, got %v", err)
+	}
+	if _, statErr := os.Stat(metadataPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("expected root-level metadata file not to be created, stat err=%v", statErr)
+	}
+}
+
+func TestWriteSelectedProfileMetadataRelativePathUsesRuntimeRoot(t *testing.T) {
+	root := t.TempDir()
+	if err := writeSelectedProfileMetadata(Paths{MulticodexHome: root}, "selected-profile.json", execSelectionMetadata{Profile: "alpha"}); err != nil {
+		t.Fatalf("writeSelectedProfileMetadata: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "run", "selected-profile.json")); err != nil {
+		t.Fatalf("expected metadata under runtime root: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "selected-profile.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected no root-level metadata file, stat err=%v", err)
+	}
+}
+
+func TestWriteSelectedProfileMetadataSecuresRuntimePaths(t *testing.T) {
+	root := t.TempDir()
+	if err := writeSelectedProfileMetadata(Paths{MulticodexHome: root}, "nested/selected-profile.json", execSelectionMetadata{Profile: "alpha"}); err != nil {
+		t.Fatalf("writeSelectedProfileMetadata: %v", err)
+	}
+	for _, path := range []string{filepath.Join(root, "run"), filepath.Join(root, "run", "nested")} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stat metadata dir %s: %v", path, err)
+		}
+		if got := info.Mode().Perm(); got != 0o700 {
+			t.Fatalf("expected %s mode 0700, got %o", path, got)
+		}
+	}
+	info, err := os.Stat(filepath.Join(root, "run", "nested", "selected-profile.json"))
+	if err != nil {
+		t.Fatalf("stat metadata file: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("expected metadata file mode 0600, got %o", got)
+	}
+}
+
+func TestWriteSelectedProfileMetadataRejectsSymlinkedRuntimeRoot(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(root, "run")); err != nil {
+		t.Fatalf("symlink runtime root: %v", err)
+	}
+
+	err := writeSelectedProfileMetadata(Paths{MulticodexHome: root}, "selected-profile.json", execSelectionMetadata{Profile: "alpha"})
+	if err == nil {
+		t.Fatal("expected symlinked metadata root to fail")
+	}
+	if !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("expected symlink error, got %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(outside, "selected-profile.json")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("expected outside metadata file not to be created, stat err=%v", statErr)
+	}
+}
+
+func TestWriteSelectedProfileMetadataRejectsSymlinkedRuntimeParent(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	runDir := filepath.Join(root, "run")
+	if err := os.MkdirAll(runDir, 0o700); err != nil {
+		t.Fatalf("mkdir run dir: %v", err)
+	}
+	if err := os.Symlink(outside, filepath.Join(runDir, "linked")); err != nil {
+		t.Fatalf("symlink runtime parent: %v", err)
+	}
+
+	err := writeSelectedProfileMetadata(Paths{MulticodexHome: root}, "linked/selected-profile.json", execSelectionMetadata{Profile: "alpha"})
+	if err == nil {
+		t.Fatal("expected symlinked metadata parent to fail")
+	}
+	if !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("expected symlink error, got %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(outside, "selected-profile.json")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("expected outside metadata file not to be created, stat err=%v", statErr)
 	}
 }
 

@@ -47,7 +47,8 @@ func (a *App) cmdExec(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := a.ensureConfiguredProfileAuthPathsSafe(cfg); err != nil {
+	cfg, err = a.execReadyConfig(cfg)
+	if err != nil {
 		return err
 	}
 
@@ -68,25 +69,32 @@ func (a *App) cmdExec(args []string) error {
 	return RunCodexWithProfile(selected.Profile.CodexHome, selected.Name, append([]string{"exec"}, args...))
 }
 
-func (a *App) ensureConfiguredProfileAuthPathsSafe(cfg *Config) error {
+func (a *App) execReadyConfig(cfg *Config) (*Config, error) {
+	ready := DefaultConfig()
+	var firstErr error
 	for _, name := range sortedProfileNames(cfg) {
 		profile := cfg.Profiles[name]
-		if err := a.store.ensureProfileStoragePathSafe(profile); err != nil {
-			return err
-		}
-		if _, err := os.Stat(profile.CodexHome); err != nil {
-			if !os.IsNotExist(err) {
-				return err
-			}
-		}
 		if err := a.store.EnsureProfileDir(profile); err != nil {
-			return err
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
 		}
 		if err := ensureProfileCodexExecutionReady(a.store.paths, profile); err != nil {
-			return err
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
 		}
+		ready.Profiles[name] = profile
 	}
-	return nil
+	if len(ready.Profiles) > 0 {
+		return ready, nil
+	}
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	return ready, nil
 }
 
 func writeSelectedProfileMetadata(paths Paths, path string, metadata execSelectionMetadata) error {
@@ -94,7 +102,8 @@ func writeSelectedProfileMetadata(paths Paths, path string, metadata execSelecti
 	if path == "" {
 		return nil
 	}
-	resolvedPath, err := resolvePathInsideRoot(paths.MulticodexHome, path, "selected profile metadata path")
+	runtimeRoot := selectedProfileMetadataRoot(paths)
+	resolvedPath, err := resolvePathInsideRoot(runtimeRoot, path, "selected profile metadata path")
 	if err != nil {
 		return err
 	}
@@ -105,8 +114,29 @@ func writeSelectedProfileMetadata(paths Paths, path string, metadata execSelecti
 	if err != nil {
 		return fmt.Errorf("marshal selected profile metadata: %w", err)
 	}
+	if err := ensurePathNotSymlinkIfExists(paths.MulticodexHome); err != nil {
+		return err
+	}
+	if err := ensurePathNotSymlinkIfExists(runtimeRoot); err != nil {
+		return err
+	}
+	if err := ensurePathPrefixesBelowRootNotSymlinks(paths.MulticodexHome, filepath.Dir(path)); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create selected profile metadata dir: %w", err)
+	}
+	if err := ensurePathNotSymlinkIfExists(runtimeRoot); err != nil {
+		return err
+	}
+	if err := ensurePathPrefixesBelowRootNotSymlinks(paths.MulticodexHome, filepath.Dir(path)); err != nil {
+		return err
+	}
+	if err := os.Chmod(runtimeRoot, 0o700); err != nil {
+		return fmt.Errorf("secure selected profile metadata root permissions: %w", err)
+	}
+	if err := os.Chmod(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("secure selected profile metadata dir permissions: %w", err)
 	}
 	if info, err := os.Lstat(path); err == nil {
 		if info.Mode()&os.ModeSymlink != 0 {
@@ -148,6 +178,10 @@ func writeSelectedProfileMetadata(paths Paths, path string, metadata execSelecti
 		return fmt.Errorf("replace selected profile metadata: %w", err)
 	}
 	return nil
+}
+
+func selectedProfileMetadataRoot(paths Paths) string {
+	return filepath.Join(paths.MulticodexHome, "run")
 }
 
 func execArgsAreHelpRequest(args []string) bool {

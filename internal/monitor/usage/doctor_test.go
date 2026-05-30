@@ -27,6 +27,14 @@ func TestDoctorReportStatus(t *testing.T) {
 			want: "degraded",
 		},
 		{
+			name: "degraded with setup failure",
+			report: DoctorReport{Checks: []DoctorCheck{
+				{Name: "codex binary", OK: false},
+				{Name: "oauth fetch: personal", OK: true},
+			}},
+			want: "degraded",
+		},
+		{
 			name: "failed",
 			report: DoctorReport{Checks: []DoctorCheck{
 				{Name: "account candidates", OK: true},

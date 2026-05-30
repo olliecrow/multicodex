@@ -65,7 +65,7 @@ func (r DoctorReport) Healthy() bool {
 }
 
 func (r DoctorReport) Status() string {
-	var fetchOK, fetchFailed bool
+	var fetchOK, fetchFailed, setupFailed bool
 	for _, c := range r.Checks {
 		if strings.Contains(c.Name, " fetch") {
 			if c.OK {
@@ -73,10 +73,12 @@ func (r DoctorReport) Status() string {
 			} else {
 				fetchFailed = true
 			}
+		} else if !c.OK {
+			setupFailed = true
 		}
 	}
 	switch {
-	case fetchOK && !fetchFailed:
+	case fetchOK && !fetchFailed && !setupFailed:
 		return "healthy"
 	case fetchOK:
 		return "degraded"

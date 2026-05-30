@@ -78,7 +78,7 @@ multicodex dry-run
 - Override the state location with `MULTICODEX_HOME`.
 - Profile auth stays under `~/multicodex/profiles/<name>/codex-home/auth.json`.
 - Profile sessions, threads, and `/goal` state stay under that profile's `codex-home`.
-- Multicodex state directories, profile directories, profile `codex-home`, profile skills directories, `auth.json`, selected-profile metadata, heartbeat lock files, and config lock files must be profile-local regular filesystem entries with local-user-only directory permissions. Symlinks and hard links are rejected where they could cross account boundaries.
+- Multicodex state directories, profile directories, profile `codex-home`, profile skills directories, `auth.json`, selected-profile metadata under `MULTICODEX_HOME/run`, heartbeat lock files, and config lock files must be profile-local regular filesystem entries with local-user-only directory permissions. Symlinks and hard links are rejected where they could cross account boundaries.
 - Profile `config.toml` defaults to a symlink from `~/multicodex/profiles/<name>/codex-home/config.toml` to the default Codex config at `~/.codex/config.toml`.
 - Profile skills fill in missing top-level entries from `~/.codex/skills` using symlinks. Manual top-level profile skill overrides are left in place.
 - To use a per-profile Codex config, replace the profile `config.toml` symlink with a regular profile-local `config.toml` file that still enables file-backed auth.
