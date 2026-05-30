@@ -142,7 +142,7 @@ func codexLoginStatus(codexHome string) (state, account, detail string) {
 
 	cmd := exec.CommandContext(ctx, "codex", "login", "status")
 	cmd.WaitDelay = 500 * time.Millisecond
-	cmd.Env = withProfileEnv(os.Environ(), codexHome, "")
+	cmd.Env = profileCodexEnv(os.Environ(), codexHome, "")
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out

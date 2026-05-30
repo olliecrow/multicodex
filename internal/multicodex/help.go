@@ -20,9 +20,7 @@ var commandSummaries = []struct {
 	{Name: "add <name>", Summary: "add a named account profile"},
 	{Name: "login <name> [codex login args]", Summary: "login profile using official codex flow"},
 	{Name: "login-all", Summary: "run login for every known profile"},
-	{Name: "use <name> [--shell]", Summary: "switch profile in current terminal context"},
 	{Name: "cli <name> [codex args...]", Summary: "run the interactive Codex CLI with one profile"},
-	{Name: "run <name> -- <command...>", Summary: "run one command in profile context"},
 	{Name: "exec [codex exec args]", Summary: "run codex exec on the best available profile"},
 	{Name: "status", Summary: "show all profile auth states"},
 	{Name: "heartbeat", Summary: "send a minimal keepalive hello for logged-in profiles"},
@@ -50,7 +48,7 @@ var commandHelpByName = map[string]commandHelp{
 		Description: "Create a named profile with an isolated profile CODEX_HOME.",
 		Examples: []string{
 			"multicodex add personal",
-			"multicodex add me@example.com",
+			"multicodex add work",
 		},
 	},
 	"login": {
@@ -68,32 +66,17 @@ var commandHelpByName = map[string]commandHelp{
 			"multicodex login-all",
 		},
 	},
-	"use": {
-		Usage:       "multicodex use <name> [--shell]",
-		Description: "Set profile context in your current terminal with shell exports, or open a profile-bound subshell.",
-		Examples: []string{
-			`eval "$(multicodex use personal)"`,
-			"multicodex use personal --shell",
-		},
-	},
 	"cli": {
 		Usage:       "multicodex cli <name> [codex args...]",
-		Description: "Run the interactive Codex CLI with the selected profile. This uses the same default args as the local c alias: search on, gpt-5.5, medium reasoning, and no sandbox or approval prompts.",
+		Description: "Run the interactive Codex CLI with the selected profile. Codex defaults such as model, reasoning, approvals, and sandbox come from the shared Codex config unless you pass explicit Codex args.",
 		Examples: []string{
 			"multicodex cli personal",
 			`multicodex cli work "check this repo"`,
 		},
 	},
-	"run": {
-		Usage:       "multicodex run <name> -- <command...>",
-		Description: "Run one command in a selected profile context without changing your current shell.",
-		Examples: []string{
-			"multicodex run personal -- codex login status",
-		},
-	},
 	"exec": {
 		Usage:       "multicodex exec [codex exec args]",
-		Description: "Run `codex exec` after automatically selecting the best available configured profile. Profiles below 40% five-hour usage are eligible unless their weekly window is known to be exhausted, and multicodex picks the eligible profile whose weekly reset is soonest. When no profile is eligible, it picks a random accessible profile for that call. If usage data is unavailable for every profile, it picks a random configured profile.",
+		Description: "Run `codex exec` after automatically selecting the best available configured profile. Profiles below 40% five-hour usage are eligible unless their weekly window is known to be exhausted, and multicodex picks the eligible profile whose weekly reset is soonest. If usage data is unavailable, multicodex falls back to the first configured profile after profile safety checks pass.",
 		Examples: []string{
 			`multicodex exec -s read-only "Summarize the README in 3 bullets."`,
 			"multicodex exec --skip-git-repo-check -C /path/to/repo \"Review the latest diff.\"",
@@ -114,8 +97,8 @@ var commandHelpByName = map[string]commandHelp{
 		},
 	},
 	"monitor": {
-		Usage:       "multicodex monitor [--interval 60s] [--timeout 60s] [--no-color] [--no-alt-screen]",
-		Description: "Run the live subscription-usage terminal UI. The monitor builds account candidates from monitor-owned account overrides, multicodex profiles, the default Codex home, the active CODEX_HOME, and compatible discovered Codex homes. If one refresh loses official window data for every account, the last good official window cards stay visible and are marked stale.",
+		Usage:       "multicodex monitor [--interval 60s] [--timeout 60s] [--no-color] [--no-alt-screen] [--include-default] [--include-active] [--discover]",
+		Description: "Run the live subscription-usage terminal UI. By default, the monitor reads explicit monitor account overrides and configured multicodex profiles. Default Codex home, active CODEX_HOME, and filesystem discovery are opt-in. If one refresh loses official window data for every account, the last good official window cards stay visible and are marked stale.",
 		Examples: []string{
 			"multicodex monitor",
 			"multicodex monitor --interval 30s",
@@ -123,15 +106,15 @@ var commandHelpByName = map[string]commandHelp{
 		},
 	},
 	"monitor doctor": {
-		Usage:       "multicodex monitor doctor [--json] [--timeout 60s]",
-		Description: "Run read-only monitor checks against the active/default Codex account data sources. The command succeeds when at least one usage source works and reports degraded status when a source is unavailable.",
+		Usage:       "multicodex monitor doctor [--json] [--timeout 60s] [--include-default] [--include-active] [--discover] [--app-server]",
+		Description: "Run read-only monitor checks against explicit monitor account overrides and configured multicodex profiles. Default Codex home, active CODEX_HOME, filesystem discovery, and app-server checks are opt-in. The command succeeds when at least one usage source works and reports degraded status when a source is unavailable.",
 		Examples: []string{
 			"multicodex monitor doctor",
 			"multicodex monitor doctor --json",
 		},
 	},
 	"monitor tui": {
-		Usage:       "multicodex monitor tui [--interval 60s] [--timeout 60s] [--no-color] [--no-alt-screen]",
+		Usage:       "multicodex monitor tui [--interval 60s] [--timeout 60s] [--no-color] [--no-alt-screen] [--include-default] [--include-active] [--discover]",
 		Description: "Explicit alias for the live subscription-usage terminal UI. This behaves the same as `multicodex monitor` with no monitor subcommand.",
 		Examples: []string{
 			"multicodex monitor tui",
@@ -160,7 +143,7 @@ var commandHelpByName = map[string]commandHelp{
 		Description: "Preview commands and filesystem operations without making changes.",
 		Examples: []string{
 			"multicodex dry-run",
-			"multicodex dry-run run personal -- codex login status",
+			"multicodex dry-run login personal",
 		},
 	},
 	"completion": {
@@ -205,7 +188,6 @@ func printHelp() {
 	fmt.Println("Examples:")
 	fmt.Println("  multicodex init")
 	fmt.Println("  multicodex add personal")
-	fmt.Println(`  eval "$(multicodex use personal)"`)
 	fmt.Println("  multicodex cli personal")
 	fmt.Println("  multicodex monitor")
 	fmt.Println("  multicodex heartbeat")

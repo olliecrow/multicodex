@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -59,7 +61,7 @@ func TestCmdExecWritesSelectedProfileMetadata(t *testing.T) {
 	}
 	defer func() { defaultExecAccountSelector = originalSelector }()
 
-	metadataPath := filepath.Join(t.TempDir(), "selected-profile.json")
+	metadataPath := filepath.Join(app.store.paths.MulticodexHome, "selected-profile.json")
 	t.Setenv(envSelectedProfilePath, metadataPath)
 
 	if err := app.Run([]string{"exec", "--skip-git-repo-check", "hello"}); err != nil {
@@ -327,7 +329,7 @@ func TestCmdExecSkipsWeeklyExhaustedProfileUsingDefaultSelector(t *testing.T) {
 	writeExecSelectionProfileData(t, root, "beta", 0, 85, 2*time.Hour)
 	writeExecSelectionProfileData(t, root, "gamma", 50, 10, 30*time.Minute)
 
-	metadataPath := filepath.Join(t.TempDir(), "selected-profile.json")
+	metadataPath := filepath.Join(app.store.paths.MulticodexHome, "selected-profile.json")
 	t.Setenv(envSelectedProfilePath, metadataPath)
 
 	if err := app.Run([]string{"exec", "--skip-git-repo-check", "hello"}); err != nil {
@@ -421,7 +423,7 @@ func TestCmdExecTreatsFlagsAfterTerminatorAsPromptText(t *testing.T) {
 	}
 }
 
-func TestSelectExecProfileFallsBackToRandomProfileWhenSelectionFails(t *testing.T) {
+func TestSelectExecProfileFallsBackToFirstConfiguredProfileWhenSelectionFails(t *testing.T) {
 	app := newTestAppForCLI(t)
 	createExecProfiles(t, app, "alpha", "beta")
 
@@ -430,26 +432,17 @@ func TestSelectExecProfileFallsBackToRandomProfileWhenSelectionFails(t *testing.
 		t.Fatalf("loadConfigIfExists: %v", err)
 	}
 
-	originalChooser := chooseRandomProfileName
-	chooseRandomProfileName = func(names []string) string {
-		if len(names) != 2 {
-			t.Fatalf("expected 2 names, got %d", len(names))
-		}
-		return "beta"
-	}
-	defer func() { chooseRandomProfileName = originalChooser }()
-
 	selected, err := app.selectExecProfile(cfg, func(context.Context, []usage.MonitorAccount, int, string) (usage.SelectedAccount, error) {
 		return usage.SelectedAccount{}, errors.New("boom")
 	}, "")
 	if err != nil {
 		t.Fatalf("selectExecProfile: %v", err)
 	}
-	if selected.Name != "beta" {
-		t.Fatalf("expected beta random fallback, got %q", selected.Name)
+	if selected.Name != "alpha" {
+		t.Fatalf("expected alpha configured fallback, got %q", selected.Name)
 	}
-	if selected.Metadata.SelectionSource != "random_profile_fallback" {
-		t.Fatalf("expected random fallback selection source, got %q", selected.Metadata.SelectionSource)
+	if selected.Metadata.SelectionSource != "configured_profile_fallback" {
+		t.Fatalf("expected configured fallback selection source, got %q", selected.Metadata.SelectionSource)
 	}
 }
 
@@ -462,15 +455,6 @@ func TestSelectExecProfileFallsBackToOnlyProfileWhenSelectionFails(t *testing.T)
 		t.Fatalf("loadConfigIfExists: %v", err)
 	}
 
-	originalChooser := chooseRandomProfileName
-	chooseRandomProfileName = func(names []string) string {
-		if len(names) != 1 {
-			t.Fatalf("expected 1 name, got %d", len(names))
-		}
-		return names[0]
-	}
-	defer func() { chooseRandomProfileName = originalChooser }()
-
 	selected, err := app.selectExecProfile(cfg, func(context.Context, []usage.MonitorAccount, int, string) (usage.SelectedAccount, error) {
 		return usage.SelectedAccount{}, errors.New("boom")
 	}, "")
@@ -480,8 +464,8 @@ func TestSelectExecProfileFallsBackToOnlyProfileWhenSelectionFails(t *testing.T)
 	if selected.Name != "alpha" {
 		t.Fatalf("expected alpha fallback, got %q", selected.Name)
 	}
-	if selected.Metadata.SelectionSource != "random_profile_fallback" {
-		t.Fatalf("expected random fallback selection source, got %q", selected.Metadata.SelectionSource)
+	if selected.Metadata.SelectionSource != "configured_profile_fallback" {
+		t.Fatalf("expected configured fallback selection source, got %q", selected.Metadata.SelectionSource)
 	}
 }
 
@@ -502,7 +486,7 @@ func TestSelectExecProfileReturnsErrorForSparkModelWhenNoModelWindowAvailable(t 
 	}
 }
 
-func TestCmdExecFallsBackToRandomProfileWhenUsageSelectionFails(t *testing.T) {
+func TestCmdExecFallsBackToFirstConfiguredProfileWhenUsageSelectionFails(t *testing.T) {
 	app, logPath := newExecTestApp(t)
 	createExecProfiles(t, app, "alpha", "beta")
 
@@ -511,15 +495,6 @@ func TestCmdExecFallsBackToRandomProfileWhenUsageSelectionFails(t *testing.T) {
 		return usage.SelectedAccount{}, errors.New("boom")
 	}
 	defer func() { defaultExecAccountSelector = originalSelector }()
-
-	originalChooser := chooseRandomProfileName
-	chooseRandomProfileName = func(names []string) string {
-		if len(names) != 2 {
-			t.Fatalf("expected 2 names, got %d", len(names))
-		}
-		return "beta"
-	}
-	defer func() { chooseRandomProfileName = originalChooser }()
 
 	if err := app.Run([]string{"exec", "--skip-git-repo-check", "hello"}); err != nil {
 		t.Fatalf("exec failed: %v", err)
@@ -530,8 +505,8 @@ func TestCmdExecFallsBackToRandomProfileWhenUsageSelectionFails(t *testing.T) {
 		t.Fatalf("read log: %v", err)
 	}
 	log := string(data)
-	if !strings.Contains(log, "profile=beta") {
-		t.Fatalf("expected beta profile in log, got %q", log)
+	if !strings.Contains(log, "profile=alpha") {
+		t.Fatalf("expected alpha profile in log, got %q", log)
 	}
 }
 
@@ -569,7 +544,7 @@ func TestSelectExecProfilePersistsUsageSelectionMetadata(t *testing.T) {
 }
 
 func TestWriteSelectedProfileMetadataNoPathIsNoOp(t *testing.T) {
-	if err := writeSelectedProfileMetadata("", execSelectionMetadata{Profile: "alpha"}); err != nil {
+	if err := writeSelectedProfileMetadata(Paths{MulticodexHome: t.TempDir()}, "", execSelectionMetadata{Profile: "alpha"}); err != nil {
 		t.Fatalf("writeSelectedProfileMetadata without path failed: %v", err)
 	}
 }
@@ -585,7 +560,7 @@ func TestWriteSelectedProfileMetadataRejectsHardLinkedFile(t *testing.T) {
 		t.Fatalf("hard link metadata file: %v", err)
 	}
 
-	err := writeSelectedProfileMetadata(metadataPath, execSelectionMetadata{Profile: "alpha"})
+	err := writeSelectedProfileMetadata(Paths{MulticodexHome: dir}, metadataPath, execSelectionMetadata{Profile: "alpha"})
 	if err == nil {
 		t.Fatal("expected hard-linked metadata file to fail")
 	}
@@ -598,6 +573,22 @@ func TestWriteSelectedProfileMetadataRejectsHardLinkedFile(t *testing.T) {
 	}
 	if string(data) != "{}\n" {
 		t.Fatalf("expected hard-linked metadata not to be truncated, got %q", string(data))
+	}
+}
+
+func TestWriteSelectedProfileMetadataRejectsPathOutsideMulticodexHome(t *testing.T) {
+	root := t.TempDir()
+	outsidePath := filepath.Join(t.TempDir(), "selected-profile.json")
+
+	err := writeSelectedProfileMetadata(Paths{MulticodexHome: root}, outsidePath, execSelectionMetadata{Profile: "alpha"})
+	if err == nil {
+		t.Fatal("expected outside metadata path to fail")
+	}
+	if !strings.Contains(err.Error(), "must stay under") {
+		t.Fatalf("expected under-root error, got %v", err)
+	}
+	if _, statErr := os.Stat(outsidePath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("expected outside metadata file not to be created, stat err=%v", statErr)
 	}
 }
 
@@ -710,6 +701,9 @@ exit 1
 	}
 	t.Setenv("PATH", fakeBin+":"+os.Getenv("PATH"))
 	t.Setenv("MULTICODEX_FAKE_CODEX_LOG", logPath)
+	originalTransport := http.DefaultTransport
+	http.DefaultTransport = execSelectionOAuthTransport{root: root}
+	t.Cleanup(func() { http.DefaultTransport = originalTransport })
 
 	app, err := NewApp()
 	if err != nil {
@@ -717,6 +711,58 @@ exit 1
 	}
 	writeDefaultFileStoreConfig(t, app)
 	return app, logPath, root
+}
+
+type execSelectionOAuthTransport struct {
+	root string
+}
+
+func (t execSelectionOAuthTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	token := strings.TrimSpace(strings.TrimPrefix(req.Header.Get("Authorization"), "Bearer "))
+	if !strings.HasPrefix(token, "token-") {
+		return &http.Response{
+			StatusCode: http.StatusUnauthorized,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(`{"error":"bad token"}`)),
+			Request:    req,
+		}, nil
+	}
+	name := strings.TrimPrefix(token, "token-")
+	usagePath := filepath.Join(t.root, "multi", "profiles", name, "codex-home", "usage.json")
+	data, err := os.ReadFile(usagePath)
+	if err != nil {
+		return nil, err
+	}
+	var usage struct {
+		PrimaryUsedPercent int    `json:"primary_used_percent"`
+		WeeklyUsedPercent  int    `json:"weekly_used_percent"`
+		Email              string `json:"email"`
+		PrimaryResetsAt    int64  `json:"primary_resets_at"`
+		SecondaryResetsAt  int64  `json:"secondary_resets_at"`
+	}
+	if err := json.Unmarshal(data, &usage); err != nil {
+		return nil, err
+	}
+	body := fmt.Sprintf(`{
+  "email": %q,
+  "plan_type": "pro",
+  "rate_limit": {
+    "primary_window": {"used_percent": %d, "limit_window_seconds": 18000, "reset_at": %d},
+    "secondary_window": {"used_percent": %d, "limit_window_seconds": 604800, "reset_at": %d}
+  }
+}`,
+		usage.Email,
+		usage.PrimaryUsedPercent,
+		usage.PrimaryResetsAt,
+		usage.WeeklyUsedPercent,
+		usage.SecondaryResetsAt,
+	)
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Request:    req,
+	}, nil
 }
 
 func createExecProfiles(t *testing.T, app *App, names ...string) {

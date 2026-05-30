@@ -60,6 +60,20 @@ func TestMonitorUnknownSubcommand(t *testing.T) {
 	}
 }
 
+func TestMonitorDoctorHelpFlagSucceeds(t *testing.T) {
+	app := newTestAppForCLI(t)
+	if err := app.Run([]string{"monitor", "doctor", "--help"}); err != nil {
+		t.Fatalf("monitor doctor --help failed: %v", err)
+	}
+}
+
+func TestMonitorTUIHelpFlagSucceeds(t *testing.T) {
+	app := newTestAppForCLI(t)
+	if err := app.Run([]string{"monitor", "tui", "--help"}); err != nil {
+		t.Fatalf("monitor tui --help failed: %v", err)
+	}
+}
+
 func TestMonitorRequiresTTY(t *testing.T) {
 	app := newTestAppForCLI(t)
 	_, err := captureStdout(t, func() error {

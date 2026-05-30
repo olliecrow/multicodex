@@ -49,17 +49,27 @@ type tokenEstimator interface {
 }
 
 func NewDefaultFetcher() *Fetcher {
-	return newConfiguredFetcher(true)
+	return NewDefaultFetcherWithAccountOptions(MonitorAccountOptions{})
+}
+
+func NewDefaultFetcherWithAccountOptions(options MonitorAccountOptions) *Fetcher {
+	return newConfiguredFetcherWithLoader(true, func() ([]MonitorAccount, string, error) {
+		return loadMonitorAccountsWithOptions(options)
+	})
 }
 
 func NewSnapshotFetcher() *Fetcher {
-	return newConfiguredFetcher(false)
+	return newConfiguredFetcherWithLoader(false, loadMonitorAccounts)
 }
 
 func newConfiguredFetcher(asyncObserved bool) *Fetcher {
+	return newConfiguredFetcherWithLoader(asyncObserved, loadMonitorAccounts)
+}
+
+func newConfiguredFetcherWithLoader(asyncObserved bool, loader func() ([]MonitorAccount, string, error)) *Fetcher {
 	f := &Fetcher{
 		observed:               newObservedTokenEstimator(60*time.Second, asyncObserved),
-		accountLoader:          loadMonitorAccounts,
+		accountLoader:          loader,
 		accountRefreshInterval: 60 * time.Second,
 	}
 	f.refreshAccounts(time.Now().UTC(), true)
@@ -69,6 +79,9 @@ func newConfiguredFetcher(asyncObserved bool) *Fetcher {
 func (f *Fetcher) Fetch(ctx context.Context) (*Summary, error) {
 	if len(f.accounts) > 0 {
 		return f.fetchMultiAccount(ctx)
+	}
+	if f.accountLoader != nil {
+		return nil, fmt.Errorf("no monitor accounts configured")
 	}
 	return f.fetchSingle(ctx)
 }
@@ -373,12 +386,6 @@ func (f *Fetcher) refreshAccounts(now time.Time, force bool) {
 		f.initializationNote = err.Error()
 		return
 	}
-	if len(accounts) == 0 {
-		home, homeErr := defaultCodexHome()
-		if homeErr == nil {
-			accounts = []MonitorAccount{{Label: "default", CodexHome: home}}
-		}
-	}
 
 	f.initializationNote = warning
 	f.replaceAccountFetchers(accounts)
@@ -410,9 +417,8 @@ func (f *Fetcher) replaceAccountFetchers(accounts []MonitorAccount) {
 		}
 
 		next = append(next, accountFetcher{
-			account:  account,
-			primary:  NewAppServerSourceForHome(home),
-			fallback: NewOAuthSourceForHome(home),
+			account: account,
+			primary: NewOAuthSourceForHome(home),
 		})
 		usedHomes[home] = struct{}{}
 	}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 )
 
@@ -60,4 +61,34 @@ func ensureProfileAuthPathSafe(codexHome string) (string, bool, error) {
 func fileHasMultipleLinks(info os.FileInfo) bool {
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	return ok && stat.Nlink > 1
+}
+
+func resolvePathInsideRoot(root, rawPath, label string) (string, error) {
+	root = strings.TrimSpace(root)
+	rawPath = strings.TrimSpace(rawPath)
+	if root == "" {
+		return "", fmt.Errorf("%s root is empty", label)
+	}
+	if rawPath == "" {
+		return "", fmt.Errorf("%s is empty", label)
+	}
+	if !filepath.IsAbs(rawPath) {
+		rawPath = filepath.Join(root, rawPath)
+	}
+	rootAbs, err := filepath.Abs(filepath.Clean(root))
+	if err != nil {
+		return "", fmt.Errorf("resolve %s root: %w", label, err)
+	}
+	pathAbs, err := filepath.Abs(filepath.Clean(rawPath))
+	if err != nil {
+		return "", fmt.Errorf("resolve %s: %w", label, err)
+	}
+	rel, err := filepath.Rel(rootAbs, pathAbs)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("%s must stay under %s", label, rootAbs)
+	}
+	if rel == "." {
+		return "", fmt.Errorf("%s must be a file under %s", label, rootAbs)
+	}
+	return pathAbs, nil
 }

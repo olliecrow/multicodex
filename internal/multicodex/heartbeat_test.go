@@ -257,7 +257,6 @@ exit 1
 	defer func() { codexHeartbeatTimeout = prev }()
 
 	detail, err := runCodexHeartbeat(profileHome, heartbeatSettings{
-		Prompt:   heartbeatPrompt,
 		Timeout:  codexHeartbeatTimeout,
 		Retries:  heartbeatRetryCount,
 		Backoff:  heartbeatBackoff,
@@ -300,7 +299,6 @@ exit 1
 	t.Setenv("PATH", fakeBin+":"+os.Getenv("PATH"))
 
 	detail, err := runCodexHeartbeat(profileHome, heartbeatSettings{
-		Prompt:   heartbeatPrompt,
 		Timeout:  codexHeartbeatTimeout,
 		Retries:  heartbeatRetryCount,
 		Backoff:  heartbeatBackoff,
@@ -362,7 +360,6 @@ exit 1
 	}
 
 	detail, err := runCodexHeartbeatWithRetries(profileHome, heartbeatSettings{
-		Prompt:   heartbeatPrompt,
 		Timeout:  codexHeartbeatTimeout,
 		Retries:  1,
 		Backoff:  0,
@@ -405,6 +402,19 @@ exit 1
 	}
 	if gotCanonical != wantCanonical {
 		t.Fatalf("expected heartbeat cwd %q, got %q", wantCanonical, gotCanonical)
+	}
+}
+
+func TestLoadHeartbeatSettingsRejectsLockPathOutsideMulticodexHome(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("MULTICODEX_HEARTBEAT_LOCK_PATH", filepath.Join(t.TempDir(), "heartbeat.lock"))
+
+	_, err := loadHeartbeatSettings(Paths{MulticodexHome: root})
+	if err == nil {
+		t.Fatal("expected outside heartbeat lock path to fail")
+	}
+	if !strings.Contains(err.Error(), "must stay under") {
+		t.Fatalf("expected under-root error, got %v", err)
 	}
 }
 

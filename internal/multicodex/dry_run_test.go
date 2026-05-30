@@ -22,14 +22,17 @@ func TestRenderDryRunOverview(t *testing.T) {
 			t.Fatalf("missing %q in output", want)
 		}
 	}
+	if strings.Contains(text, "work") {
+		t.Fatalf("overview should avoid printing profile names, got %q", text)
+	}
 }
 
-func TestRenderDryRunUseUnknown(t *testing.T) {
+func TestRenderDryRunLoginUnknown(t *testing.T) {
 	t.Parallel()
 
 	store := NewStore(Paths{})
 	cfg := DefaultConfig()
-	_, err := RenderDryRun(store, cfg, []string{"use", "missing"})
+	_, err := RenderDryRun(store, cfg, []string{"login", "missing"})
 	if err == nil {
 		t.Fatalf("expected error")
 	}
@@ -44,7 +47,7 @@ func TestRenderDryRunRejectsUnsupportedOperation(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error")
 	}
-	if !strings.Contains(err.Error(), "usage: multicodex dry-run [use|login|run]") {
+	if !strings.Contains(err.Error(), "usage: multicodex dry-run [login]") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

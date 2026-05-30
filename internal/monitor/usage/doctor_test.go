@@ -13,24 +13,24 @@ func TestDoctorReportStatus(t *testing.T) {
 		{
 			name: "healthy",
 			report: DoctorReport{Checks: []DoctorCheck{
-				{Name: "app-server fetch", OK: true},
-				{Name: "oauth fetch", OK: true},
+				{Name: "oauth fetch: personal", OK: true},
+				{Name: "oauth fetch: work", OK: true},
 			}},
 			want: "healthy",
 		},
 		{
 			name: "degraded",
 			report: DoctorReport{Checks: []DoctorCheck{
-				{Name: "app-server fetch", OK: true},
-				{Name: "oauth fetch", OK: false},
+				{Name: "oauth fetch: personal", OK: true},
+				{Name: "oauth fetch: work", OK: false},
 			}},
 			want: "degraded",
 		},
 		{
 			name: "failed",
 			report: DoctorReport{Checks: []DoctorCheck{
-				{Name: "app-server fetch", OK: false},
-				{Name: "oauth fetch", OK: false},
+				{Name: "account candidates", OK: true},
+				{Name: "oauth fetch: personal", OK: false},
 			}},
 			want: "failed",
 		},

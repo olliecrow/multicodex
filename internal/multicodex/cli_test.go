@@ -9,11 +9,11 @@ import (
 	"testing"
 )
 
-func TestCmdCLIRunsInteractiveCodexWithProfileDefaults(t *testing.T) {
+func TestCmdCLIRunsInteractiveCodexWithProfileEnv(t *testing.T) {
 	app, logPath := newExecTestApp(t)
-	createExecProfiles(t, app, "crowoy")
+	createExecProfiles(t, app, "primary")
 
-	if err := app.Run([]string{"cli", "crowoy", "check this repo"}); err != nil {
+	if err := app.Run([]string{"cli", "primary", "check this repo"}); err != nil {
 		t.Fatalf("cli failed: %v", err)
 	}
 
@@ -22,14 +22,14 @@ func TestCmdCLIRunsInteractiveCodexWithProfileDefaults(t *testing.T) {
 		t.Fatalf("read log: %v", err)
 	}
 	log := string(data)
-	if !strings.Contains(log, "profile=crowoy") {
-		t.Fatalf("expected crowoy profile in log, got %q", log)
+	if !strings.Contains(log, "profile=primary") {
+		t.Fatalf("expected primary profile in log, got %q", log)
 	}
-	wantCodexHome := filepath.Join(app.store.paths.ProfilesDir, "crowoy", "codex-home")
+	wantCodexHome := filepath.Join(app.store.paths.ProfilesDir, "primary", "codex-home")
 	if !strings.Contains(log, "codex_home="+wantCodexHome) {
-		t.Fatalf("expected crowoy CODEX_HOME in log, got %q", log)
+		t.Fatalf("expected primary CODEX_HOME in log, got %q", log)
 	}
-	wantArgs := "--search --dangerously-bypass-approvals-and-sandbox -m gpt-5.5 -c model_reasoning_effort=medium check this repo"
+	wantArgs := "check this repo"
 	if !strings.Contains(log, "args="+wantArgs) {
 		t.Fatalf("expected cli args %q in log, got %q", wantArgs, log)
 	}
@@ -37,10 +37,10 @@ func TestCmdCLIRunsInteractiveCodexWithProfileDefaults(t *testing.T) {
 
 func TestCmdCLIFailsWhenSharedConfigDoesNotUseFileStore(t *testing.T) {
 	app, logPath := newExecTestApp(t)
-	createExecProfiles(t, app, "crowoy")
+	createExecProfiles(t, app, "primary")
 	writeDefaultConfig(t, app, "model = \"global\"\n")
 
-	err := app.Run([]string{"cli", "crowoy"})
+	err := app.Run([]string{"cli", "primary"})
 	var exitErr *ExitError
 	if !errors.As(err, &exitErr) {
 		t.Fatalf("expected ExitError, got %T (%v)", err, err)

@@ -8,10 +8,12 @@
 ## Secret handling rules
 - Never print auth tokens, refresh tokens, or raw credential blobs.
 - Never commit auth files or secret-bearing local state.
+- Never copy, sync, transmit, transfer, or share Codex auth files or auth details between machines. Each machine must sign in through the official Codex login flow.
 - Keep auth directories permissioned to the local user only.
 - Use atomic writes to prevent partial secret files.
 - Zero secret data from logs and diagnostics by default.
 - Heartbeat output must never echo raw `codex exec` stdout or stderr on failures.
+- Profile-scoped Codex subprocesses must scrub inherited Codex/OpenAI account override environment variables before setting the selected profile `CODEX_HOME`.
 
 ## Repository safeguards
 - `.gitignore` must ignore local auth and profile state.
@@ -32,3 +34,4 @@
 ## Global auth boundary
 - Multicodex must not change, restore, back up, symlink, lock, or otherwise manage the shared default Codex auth account.
 - The system default Codex account is managed by normal Codex tooling outside multicodex.
+- Monitor defaults must stay profile-focused. Default Codex home, active `CODEX_HOME`, filesystem discovery, and app-server checks require explicit monitor flags.

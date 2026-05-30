@@ -4,17 +4,6 @@ import (
 	"fmt"
 )
 
-func defaultInteractiveCodexArgs() []string {
-	return []string{
-		"--search",
-		"--dangerously-bypass-approvals-and-sandbox",
-		"-m",
-		"gpt-5.5",
-		"-c",
-		"model_reasoning_effort=medium",
-	}
-}
-
 func (a *App) cmdCLI(args []string) error {
 	if len(args) < 1 {
 		return &ExitError{Code: 2, Message: "usage: multicodex cli <name> [codex args...]"}
@@ -39,7 +28,5 @@ func (a *App) cmdCLI(args []string) error {
 		return err
 	}
 
-	cmdArgs := defaultInteractiveCodexArgs()
-	cmdArgs = append(cmdArgs, args[1:]...)
-	return RunInteractiveWithProfile(profile.CodexHome, name, "codex", cmdArgs)
+	return RunInteractiveCodexWithProfile(profile.CodexHome, name, args[1:])
 }

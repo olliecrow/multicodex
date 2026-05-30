@@ -9,7 +9,7 @@ GitHub vulnerability alerts and automated security fixes are enabled as the defa
 
 Please do not open a public GitHub issue for suspected vulnerabilities.
 
-Report security concerns privately to `GitHub private vulnerability reporting` and include:
+Report security concerns privately through GitHub private vulnerability reporting when available, and include:
 
 - repository name
 - affected version, commit, or environment

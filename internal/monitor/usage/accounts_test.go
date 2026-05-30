@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestLoadMonitorAccountsDefaultsWhenFileMissing(t *testing.T) {
+func TestLoadMonitorAccountsEmptyWhenFileMissingAndNoProfiles(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("CODEX_HOME", "")
@@ -15,6 +15,64 @@ func TestLoadMonitorAccountsDefaultsWhenFileMissing(t *testing.T) {
 	t.Setenv(accountsFileEnvVar, filepath.Join(tmp, "missing.json"))
 
 	accounts, warning, err := loadMonitorAccounts()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if warning != "" {
+		t.Fatalf("expected no warning, got %q", warning)
+	}
+	if len(accounts) != 0 {
+		t.Fatalf("expected no default monitor accounts, got %#v", accounts)
+	}
+}
+
+func TestLoadMonitorAccountsDoesNotIncludeOptionalHomesByDefault(t *testing.T) {
+	tmp := t.TempDir()
+	defaultHome := filepath.Join(tmp, ".codex")
+	activeHome := filepath.Join(tmp, "active-codex")
+	discoveredHome := filepath.Join(tmp, "profiles", "work", "codex-home")
+	for _, home := range []string{defaultHome, activeHome, discoveredHome} {
+		if err := os.MkdirAll(home, 0o700); err != nil {
+			t.Fatalf("mkdir codex home: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(home, "auth.json"), []byte(`{"tokens":{"access_token":"x"}}`), 0o600); err != nil {
+			t.Fatalf("write auth file: %v", err)
+		}
+	}
+	t.Setenv("HOME", tmp)
+	t.Setenv("CODEX_HOME", activeHome)
+	t.Setenv(defaultCodexHomeEnvVar, defaultHome)
+	t.Setenv(multicodexHomeEnvVar, filepath.Join(tmp, defaultMulticodexHomeDirName))
+	t.Setenv(accountsFileEnvVar, filepath.Join(tmp, "missing.json"))
+
+	accounts, warning, err := loadMonitorAccounts()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if warning != "" {
+		t.Fatalf("expected no warning, got %q", warning)
+	}
+	if len(accounts) != 0 {
+		t.Fatalf("expected no optional homes by default, got %#v", accounts)
+	}
+}
+
+func TestLoadMonitorAccountsUsesConfiguredDefaultCodexHome(t *testing.T) {
+	tmp := t.TempDir()
+	configuredHome := filepath.Join(tmp, "custom-default-codex")
+	if err := os.MkdirAll(configuredHome, 0o700); err != nil {
+		t.Fatalf("mkdir configured home: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configuredHome, "auth.json"), []byte(`{"tokens":{"access_token":"x"}}`), 0o600); err != nil {
+		t.Fatalf("write configured auth: %v", err)
+	}
+	t.Setenv("HOME", tmp)
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv(defaultCodexHomeEnvVar, configuredHome)
+	t.Setenv(multicodexHomeEnvVar, filepath.Join(tmp, defaultMulticodexHomeDirName))
+	t.Setenv(accountsFileEnvVar, filepath.Join(tmp, "missing.json"))
+
+	accounts, warning, err := loadMonitorAccountsWithOptions(MonitorAccountOptions{IncludeDefault: true})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -22,42 +80,17 @@ func TestLoadMonitorAccountsDefaultsWhenFileMissing(t *testing.T) {
 		t.Fatalf("expected no warning, got %q", warning)
 	}
 	if len(accounts) != 1 {
-		t.Fatalf("expected 1 account, got %d", len(accounts))
+		t.Fatalf("expected one default account, got %#v", accounts)
 	}
 	if accounts[0].Label != "default" {
 		t.Fatalf("expected default label, got %q", accounts[0].Label)
 	}
-	expectedHome := filepath.Join(tmp, ".codex")
-	if accounts[0].CodexHome != expectedHome {
-		t.Fatalf("expected default codex home %q, got %q", expectedHome, accounts[0].CodexHome)
+	if accounts[0].CodexHome != normalizeHome(configuredHome) {
+		t.Fatalf("expected configured default codex home %q, got %q", normalizeHome(configuredHome), accounts[0].CodexHome)
 	}
 }
 
-func TestLoadMonitorAccountsUsesConfiguredDefaultCodexHome(t *testing.T) {
-	tmp := t.TempDir()
-	configuredHome := filepath.Join(tmp, "custom-default-codex")
-	t.Setenv("HOME", tmp)
-	t.Setenv("CODEX_HOME", "")
-	t.Setenv(defaultCodexHomeEnvVar, configuredHome)
-	t.Setenv(multicodexHomeEnvVar, filepath.Join(tmp, defaultMulticodexHomeDirName))
-	t.Setenv(accountsFileEnvVar, filepath.Join(tmp, "missing.json"))
-
-	accounts, warning, err := loadMonitorAccounts()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if warning != "" {
-		t.Fatalf("expected no warning, got %q", warning)
-	}
-	if len(accounts) == 0 {
-		t.Fatalf("expected default account")
-	}
-	if accounts[0].CodexHome != configuredHome {
-		t.Fatalf("expected configured default codex home %q, got %q", configuredHome, accounts[0].CodexHome)
-	}
-}
-
-func TestLoadMonitorAccountsUsesActiveCodexHomeAsDefault(t *testing.T) {
+func TestLoadMonitorAccountsIncludesActiveCodexHomeWhenRequested(t *testing.T) {
 	tmp := t.TempDir()
 	activeHome := filepath.Join(tmp, "active-codex")
 	if err := os.MkdirAll(activeHome, 0o700); err != nil {
@@ -72,21 +105,21 @@ func TestLoadMonitorAccountsUsesActiveCodexHomeAsDefault(t *testing.T) {
 	t.Setenv(multicodexHomeEnvVar, filepath.Join(tmp, defaultMulticodexHomeDirName))
 	t.Setenv(accountsFileEnvVar, filepath.Join(tmp, "missing.json"))
 
-	accounts, warning, err := loadMonitorAccounts()
+	accounts, warning, err := loadMonitorAccountsWithOptions(MonitorAccountOptions{IncludeActive: true})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if warning != "" {
 		t.Fatalf("expected no warning, got %q", warning)
 	}
-	if len(accounts) == 0 {
-		t.Fatalf("expected default account")
+	if len(accounts) != 1 {
+		t.Fatalf("expected one active account, got %#v", accounts)
 	}
-	if accounts[0].Label != "default" {
-		t.Fatalf("expected active CODEX_HOME to be the default account, got label %q", accounts[0].Label)
+	if accounts[0].Label != "active" {
+		t.Fatalf("expected active CODEX_HOME label active, got %q", accounts[0].Label)
 	}
 	if accounts[0].CodexHome != normalizeHome(activeHome) {
-		t.Fatalf("expected default codex home %q, got %q", normalizeHome(activeHome), accounts[0].CodexHome)
+		t.Fatalf("expected active codex home %q, got %q", normalizeHome(activeHome), accounts[0].CodexHome)
 	}
 }
 
@@ -106,7 +139,10 @@ func TestLoadMonitorAccountsPrefersConfiguredDefaultOverActiveCodexHome(t *testi
 	t.Setenv(multicodexHomeEnvVar, filepath.Join(tmp, defaultMulticodexHomeDirName))
 	t.Setenv(accountsFileEnvVar, filepath.Join(tmp, "missing.json"))
 
-	accounts, _, err := loadMonitorAccounts()
+	accounts, _, err := loadMonitorAccountsWithOptions(MonitorAccountOptions{
+		IncludeDefault: true,
+		IncludeActive:  true,
+	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -180,8 +216,8 @@ func TestLoadMonitorAccountsWarnsOnEmptyAccounts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(accounts) != 1 || accounts[0].Label != "default" {
-		t.Fatalf("expected fallback default account")
+	if len(accounts) != 0 {
+		t.Fatalf("expected no fallback default account, got %#v", accounts)
 	}
 	if warning == "" {
 		t.Fatalf("expected warning for empty accounts list")
@@ -203,7 +239,7 @@ func TestLoadMonitorAccountsAutoDiscoversSystemCodexHomes(t *testing.T) {
 		t.Fatalf("write auth file: %v", err)
 	}
 
-	accounts, _, err := loadMonitorAccounts()
+	accounts, _, err := loadMonitorAccountsWithOptions(MonitorAccountOptions{Discover: true})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -246,7 +282,7 @@ func TestLoadMonitorAccountsSkipsTransientAutoDiscoveredHomes(t *testing.T) {
 		t.Fatalf("write transient auth file: %v", err)
 	}
 
-	accounts, _, err := loadMonitorAccounts()
+	accounts, _, err := loadMonitorAccountsWithOptions(MonitorAccountOptions{Discover: true})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -287,7 +323,7 @@ func TestLoadMonitorAccountsDiscoveryDoesNotDescendIntoSymlinkedDirs(t *testing.
 		t.Fatalf("symlink outside dir: %v", err)
 	}
 
-	accounts, _, err := loadMonitorAccounts()
+	accounts, _, err := loadMonitorAccountsWithOptions(MonitorAccountOptions{Discover: true})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -320,7 +356,7 @@ func TestLoadMonitorAccountsDiscoveryPrunesLargeCommonDirs(t *testing.T) {
 		t.Fatalf("write stable auth file: %v", err)
 	}
 
-	accounts, _, err := loadMonitorAccounts()
+	accounts, _, err := loadMonitorAccountsWithOptions(MonitorAccountOptions{Discover: true})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
