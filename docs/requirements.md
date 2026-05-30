@@ -6,7 +6,7 @@
 - User can create named account profiles.
 - User can log in to one or all configured profiles.
 - Default behavior must not alter the system default Codex session.
-- User can switch account for current terminal only.
+- User can launch Codex CLI or Codex exec with configured profile accounts without switching the system default Codex account.
 - Multicodex does not switch, restore, or manage the default Codex account.
 - Status view shows status for all configured profiles.
 - User can view live subscription usage across compatible local accounts from the same CLI.
@@ -36,7 +36,7 @@
 - Compatible with official Codex CLI login flows.
 - No dependence on API-key-only mode for core workflow.
 - Preserve regular Codex CLI behavior.
-- Profile-scoped multicodex runs should inherit current global Codex config by default unless the user explicitly creates a per-profile override.
+- Profile-scoped Codex launches should inherit current global Codex config by default unless the user explicitly creates a per-profile override.
 
 ## Constraints
 - No third-party credential services.

@@ -142,6 +142,46 @@ func TestStoreSaveDoesNotWriteThroughPredictableTempSymlink(t *testing.T) {
 	}
 }
 
+func TestStoreWithConfigLockRejectsSymlinkedLockFile(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("MULTICODEX_HOME", filepath.Join(root, "multicodex"))
+	t.Setenv("MULTICODEX_DEFAULT_CODEX_HOME", filepath.Join(root, "codex-default"))
+
+	paths, err := ResolvePaths()
+	if err != nil {
+		t.Fatalf("ResolvePaths: %v", err)
+	}
+	store := NewStore(paths)
+	if err := store.EnsureBaseDirs(); err != nil {
+		t.Fatalf("EnsureBaseDirs: %v", err)
+	}
+	victim := filepath.Join(root, "victim.lock")
+	if err := os.WriteFile(victim, []byte("keep me\n"), 0o600); err != nil {
+		t.Fatalf("write victim: %v", err)
+	}
+	if err := os.Symlink(victim, filepath.Join(paths.MulticodexHome, "config.lock")); err != nil {
+		t.Fatalf("symlink config lock: %v", err)
+	}
+
+	err = store.WithConfigLock(func() error {
+		t.Fatal("expected lock callback not to run")
+		return nil
+	})
+	if err == nil {
+		t.Fatal("expected symlinked config lock to fail")
+	}
+	if !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("expected symlink error, got %v", err)
+	}
+	b, readErr := os.ReadFile(victim)
+	if readErr != nil {
+		t.Fatalf("read victim: %v", readErr)
+	}
+	if string(b) != "keep me\n" {
+		t.Fatalf("expected victim not to be overwritten, got %q", string(b))
+	}
+}
+
 func TestCreateProfileLinksProfileConfigToDefaultConfig(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("MULTICODEX_HOME", filepath.Join(root, "multicodex"))
@@ -586,6 +626,44 @@ func TestEnsureProfileDirPreservesManualProfileConfig(t *testing.T) {
 	}
 }
 
+func TestEnsureProfileDirRejectsProfileConfigSymlinkOutsideDefaultConfig(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("MULTICODEX_HOME", filepath.Join(root, "multicodex"))
+	t.Setenv("MULTICODEX_DEFAULT_CODEX_HOME", filepath.Join(root, "codex-default"))
+
+	paths, err := ResolvePaths()
+	if err != nil {
+		t.Fatalf("ResolvePaths: %v", err)
+	}
+	store := NewStore(paths)
+	if err := os.MkdirAll(paths.DefaultCodexHome, 0o700); err != nil {
+		t.Fatalf("mkdir default codex home: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(paths.DefaultCodexHome, "config.toml"), []byte("model = \"shared\"\n"), 0o600); err != nil {
+		t.Fatalf("write default config: %v", err)
+	}
+
+	profile := Profile{Name: "work", CodexHome: filepath.Join(paths.ProfilesDir, "work", "codex-home")}
+	if err := os.MkdirAll(profile.CodexHome, 0o700); err != nil {
+		t.Fatalf("mkdir profile codex home: %v", err)
+	}
+	otherConfig := filepath.Join(root, "other-config.toml")
+	if err := os.WriteFile(otherConfig, []byte("model = \"other\"\n"), 0o600); err != nil {
+		t.Fatalf("write other config: %v", err)
+	}
+	if err := os.Symlink(otherConfig, filepath.Join(profile.CodexHome, "config.toml")); err != nil {
+		t.Fatalf("symlink profile config: %v", err)
+	}
+
+	err = store.EnsureProfileDir(profile)
+	if err == nil {
+		t.Fatal("expected unsafe profile config symlink to fail")
+	}
+	if !strings.Contains(err.Error(), "must point to default Codex config") {
+		t.Fatalf("expected default config symlink error, got %v", err)
+	}
+}
+
 func TestEnsureProfileDirLinksMissingDefaultSkillsEntries(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("MULTICODEX_HOME", filepath.Join(root, "multicodex"))
@@ -672,6 +750,78 @@ func TestEnsureProfileDirPreservesManualProfileSkillOverride(t *testing.T) {
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
 		t.Fatalf("expected manual profile skill override to remain a directory")
+	}
+}
+
+func TestEnsureProfileDirRejectsProfileSkillSymlinkOutsideDefaultSkills(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("MULTICODEX_HOME", filepath.Join(root, "multicodex"))
+	t.Setenv("MULTICODEX_DEFAULT_CODEX_HOME", filepath.Join(root, "codex-default"))
+
+	paths, err := ResolvePaths()
+	if err != nil {
+		t.Fatalf("ResolvePaths: %v", err)
+	}
+	store := NewStore(paths)
+	if err := os.MkdirAll(filepath.Join(paths.DefaultCodexHome, "skills", "battletest"), 0o700); err != nil {
+		t.Fatalf("mkdir default battletest skill: %v", err)
+	}
+
+	profile := Profile{Name: "work", CodexHome: filepath.Join(paths.ProfilesDir, "work", "codex-home")}
+	profileSkillDir := filepath.Join(profile.CodexHome, "skills")
+	if err := os.MkdirAll(profileSkillDir, 0o700); err != nil {
+		t.Fatalf("mkdir profile skills: %v", err)
+	}
+	otherSkill := filepath.Join(root, "other-skill")
+	if err := os.MkdirAll(otherSkill, 0o700); err != nil {
+		t.Fatalf("mkdir other skill: %v", err)
+	}
+	if err := os.Symlink(otherSkill, filepath.Join(profileSkillDir, "battletest")); err != nil {
+		t.Fatalf("symlink profile skill: %v", err)
+	}
+
+	err = store.EnsureProfileDir(profile)
+	if err == nil {
+		t.Fatal("expected unsafe profile skill symlink to fail")
+	}
+	if !strings.Contains(err.Error(), "must point under default skills directory") {
+		t.Fatalf("expected default skills symlink error, got %v", err)
+	}
+}
+
+func TestEnsureProfileDirRemovesStaleManagedProfileSkillSymlink(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("MULTICODEX_HOME", filepath.Join(root, "multicodex"))
+	t.Setenv("MULTICODEX_DEFAULT_CODEX_HOME", filepath.Join(root, "codex-default"))
+
+	paths, err := ResolvePaths()
+	if err != nil {
+		t.Fatalf("ResolvePaths: %v", err)
+	}
+	store := NewStore(paths)
+	defaultSkillsPath := filepath.Join(paths.DefaultCodexHome, "skills")
+	if err := os.MkdirAll(filepath.Join(defaultSkillsPath, "kept"), 0o700); err != nil {
+		t.Fatalf("mkdir default kept skill: %v", err)
+	}
+
+	profile := Profile{Name: "work", CodexHome: filepath.Join(paths.ProfilesDir, "work", "codex-home")}
+	profileSkillDir := filepath.Join(profile.CodexHome, "skills")
+	if err := os.MkdirAll(profileSkillDir, 0o700); err != nil {
+		t.Fatalf("mkdir profile skills: %v", err)
+	}
+	staleProfilePath := filepath.Join(profileSkillDir, "removed")
+	if err := os.Symlink(filepath.Join(defaultSkillsPath, "removed"), staleProfilePath); err != nil {
+		t.Fatalf("symlink stale profile skill: %v", err)
+	}
+
+	if err := store.EnsureProfileDir(profile); err != nil {
+		t.Fatalf("EnsureProfileDir: %v", err)
+	}
+	if _, err := os.Lstat(staleProfilePath); !os.IsNotExist(err) {
+		t.Fatalf("expected stale managed skill link removed, stat err=%v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(profileSkillDir, "kept")); err != nil {
+		t.Fatalf("expected kept skill link: %v", err)
 	}
 }
 

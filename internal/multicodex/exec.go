@@ -2,14 +2,11 @@ package multicodex
 
 import (
 	"context"
-	cryptorand "crypto/rand"
 	"encoding/json"
 	"fmt"
-	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/olliecrow/multicodex/internal/monitor/usage"
@@ -40,24 +37,9 @@ var defaultExecAccountSelector execAccountSelector = func(ctx context.Context, a
 	return usage.SelectBestAccountForModel(ctx, accounts, maxPrimaryUsedPercent, model)
 }
 
-var chooseRandomProfileName = func(names []string) string {
-	if len(names) == 0 {
-		return ""
-	}
-	if len(names) == 1 {
-		return names[0]
-	}
-
-	n, err := cryptorand.Int(cryptorand.Reader, big.NewInt(int64(len(names))))
-	if err != nil {
-		return names[0]
-	}
-	return names[int(n.Int64())]
-}
-
 func (a *App) cmdExec(args []string) error {
 	if execArgsAreHelpRequest(args) {
-		return runCommandWithEnv("codex", append([]string{"exec"}, args...), withCodexHomeEnv(os.Environ(), ""), fmt.Sprintf("command failed: %s", strings.Join(append([]string{"codex", "exec"}, args...), " ")))
+		return runCommandWithEnv("codex", append([]string{"exec"}, args...), neutralCodexEnv(os.Environ()), fmt.Sprintf("command failed: %s", strings.Join(append([]string{"codex", "exec"}, args...), " ")))
 	}
 	model := parseModelFromExecArgs(args)
 
@@ -79,11 +61,11 @@ func (a *App) cmdExec(args []string) error {
 	if err := ensureProfileCodexExecutionReady(a.store.paths, selected.Profile); err != nil {
 		return err
 	}
-	if err := writeSelectedProfileMetadata(os.Getenv(envSelectedProfilePath), selected.Metadata); err != nil {
+	if err := writeSelectedProfileMetadata(a.store.paths, os.Getenv(envSelectedProfilePath), selected.Metadata); err != nil {
 		return err
 	}
 
-	return RunWithProfile(selected.Profile.CodexHome, selected.Name, "codex", append([]string{"exec"}, args...))
+	return RunCodexWithProfile(selected.Profile.CodexHome, selected.Name, append([]string{"exec"}, args...))
 }
 
 func (a *App) ensureConfiguredProfileAuthPathsSafe(cfg *Config) error {
@@ -107,16 +89,24 @@ func (a *App) ensureConfiguredProfileAuthPathsSafe(cfg *Config) error {
 	return nil
 }
 
-func writeSelectedProfileMetadata(path string, metadata execSelectionMetadata) error {
+func writeSelectedProfileMetadata(paths Paths, path string, metadata execSelectionMetadata) error {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return nil
 	}
+	resolvedPath, err := resolvePathInsideRoot(paths.MulticodexHome, path, "selected profile metadata path")
+	if err != nil {
+		return err
+	}
+	path = resolvedPath
 	metadata.Profile = strings.TrimSpace(metadata.Profile)
 	metadata.SelectionSource = strings.TrimSpace(metadata.SelectionSource)
 	data, err := json.Marshal(metadata)
 	if err != nil {
 		return fmt.Errorf("marshal selected profile metadata: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("create selected profile metadata dir: %w", err)
 	}
 	if info, err := os.Lstat(path); err == nil {
 		if info.Mode()&os.ModeSymlink != 0 {
@@ -131,32 +121,31 @@ func writeSelectedProfileMetadata(path string, metadata execSelectionMetadata) e
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("inspect selected profile metadata: %w", err)
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0o600)
+	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp.")
 	if err != nil {
-		return fmt.Errorf("open selected profile metadata: %w", err)
+		return fmt.Errorf("create selected profile metadata temp: %w", err)
 	}
-	defer f.Close()
-	openedInfo, err := f.Stat()
-	if err != nil {
-		return fmt.Errorf("inspect opened selected profile metadata: %w", err)
-	}
-	if fileHasMultipleLinks(openedInfo) {
-		return fmt.Errorf("selected profile metadata path has multiple hard links: %s", path)
-	}
-	if !openedInfo.Mode().IsRegular() {
-		return fmt.Errorf("selected profile metadata path is not a regular file: %s", path)
-	}
-	if err := f.Chmod(0o600); err != nil {
+	tmpPath := tmp.Name()
+	tmpClosed := false
+	defer func() {
+		if !tmpClosed {
+			_ = tmp.Close()
+		}
+		_ = os.Remove(tmpPath)
+	}()
+	if err := tmp.Chmod(0o600); err != nil {
 		return fmt.Errorf("set selected profile metadata permissions: %w", err)
 	}
-	if err := f.Truncate(0); err != nil {
-		return fmt.Errorf("truncate selected profile metadata: %w", err)
-	}
-	if _, err := f.Seek(0, 0); err != nil {
-		return fmt.Errorf("seek selected profile metadata: %w", err)
-	}
-	if _, err := f.Write(append(data, '\n')); err != nil {
+	if _, err := tmp.Write(append(data, '\n')); err != nil {
 		return fmt.Errorf("write selected profile metadata: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		tmpClosed = true
+		return fmt.Errorf("close selected profile metadata: %w", err)
+	}
+	tmpClosed = true
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("replace selected profile metadata: %w", err)
 	}
 	return nil
 }
@@ -212,13 +201,13 @@ func (a *App) selectExecProfile(cfg *Config, selector execAccountSelector, model
 		}
 	}
 
-	first := chooseRandomProfileName(names)
+	first := names[0]
 	return execSelection{
 		Name:    first,
 		Profile: cfg.Profiles[first],
 		Metadata: execSelectionMetadata{
 			Profile:         first,
-			SelectionSource: "random_profile_fallback",
+			SelectionSource: "configured_profile_fallback",
 		},
 	}, nil
 }

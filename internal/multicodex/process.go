@@ -15,46 +15,23 @@ var isInteractiveTerminalAttached = func() bool {
 }
 
 func RunCodexLogin(codexHome string, extraArgs []string) error {
-	return runCommandWithEnv("codex", append([]string{"login"}, extraArgs...), withProfileEnv(os.Environ(), codexHome, ""), "codex login failed")
+	return runCommandWithEnv("codex", append([]string{"login"}, extraArgs...), profileCodexEnv(os.Environ(), codexHome, ""), "codex login failed")
 }
 
-func RunCommand(bin string, args []string) error {
-	return runCommandWithEnv(bin, args, nil, fmt.Sprintf("command failed: %s", strings.Join(append([]string{bin}, args...), " ")))
+func RunCodexWithProfile(codexHome, profile string, args []string) error {
+	return runCommandWithEnv("codex", args, profileCodexEnv(os.Environ(), codexHome, profile), "codex command failed")
 }
 
-func RunShellWithProfile(codexHome, profile string) error {
-	shell := os.Getenv("SHELL")
-	if shell == "" {
-		shell = "/bin/sh"
-	}
-	cmd := exec.Command(shell)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Env = withProfileEnv(os.Environ(), codexHome, profile)
-	if err := cmd.Run(); err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			return &ExitError{Code: ee.ExitCode(), Message: "profile shell exited with error"}
-		}
-		return fmt.Errorf("run profile shell: %w", err)
-	}
-	return nil
-}
-
-func RunWithProfile(codexHome, profile, bin string, args []string) error {
-	return runCommandWithEnv(bin, args, withProfileEnv(os.Environ(), codexHome, profile), fmt.Sprintf("command failed: %s", bin))
-}
-
-func RunInteractiveWithProfile(codexHome, profile, bin string, args []string) error {
-	env := withProfileEnv(os.Environ(), codexHome, profile)
+func RunInteractiveCodexWithProfile(codexHome, profile string, args []string) error {
+	env := profileCodexEnv(os.Environ(), codexHome, profile)
 	if isInteractiveTerminalAttached() {
-		path, err := execLookPath(bin)
+		path, err := execLookPath("codex")
 		if err != nil {
-			return fmt.Errorf("find command %s: %w", bin, err)
+			return fmt.Errorf("find command codex: %w", err)
 		}
-		return syscallExec(path, append([]string{bin}, args...), env)
+		return syscallExec(path, append([]string{"codex"}, args...), env)
 	}
-	return runCommandWithEnv(bin, args, env, fmt.Sprintf("command failed: %s", strings.Join(append([]string{bin}, args...), " ")))
+	return runCommandWithEnv("codex", args, env, fmt.Sprintf("codex command failed: %s", strings.Join(append([]string{"codex"}, args...), " ")))
 }
 
 func runCommandWithEnv(bin string, args []string, env []string, exitMessage string) error {
@@ -85,18 +62,26 @@ func fileIsTerminal(f *os.File) bool {
 	return info.Mode()&os.ModeCharDevice != 0
 }
 
-func withProfileEnv(base []string, codexHome, profile string) []string {
-	env := withCodexHomeEnv(base, codexHome)
+func profileCodexEnv(base []string, codexHome, profile string) []string {
+	env := sanitizedCodexEnv(base, codexHome)
 	if profile != "" {
 		env = append(env, "MULTICODEX_ACTIVE_PROFILE="+profile)
 	}
 	return env
 }
 
-func withCodexHomeEnv(base []string, codexHome string) []string {
+func neutralCodexEnv(base []string) []string {
+	return sanitizedCodexEnv(base, "")
+}
+
+func sanitizedCodexEnv(base []string, codexHome string) []string {
 	env := make([]string, 0, len(base)+2)
 	for _, kv := range base {
-		if strings.HasPrefix(kv, "CODEX_HOME=") || strings.HasPrefix(kv, "MULTICODEX_ACTIVE_PROFILE=") {
+		key, _, ok := strings.Cut(kv, "=")
+		if !ok {
+			continue
+		}
+		if codexEnvVarShouldBeStripped(key) {
 			continue
 		}
 		env = append(env, kv)
@@ -107,15 +92,31 @@ func withCodexHomeEnv(base []string, codexHome string) []string {
 	return env
 }
 
-func RenderShellExports(codexHome, profile string) string {
-	var b strings.Builder
-	b.WriteString("export CODEX_HOME=")
-	b.WriteString(shellQuoteValue(codexHome))
-	b.WriteString("\n")
-	b.WriteString("export MULTICODEX_ACTIVE_PROFILE=")
-	b.WriteString(shellQuoteValue(profile))
-	b.WriteString("\n")
-	return b.String()
+func codexEnvVarShouldBeStripped(key string) bool {
+	switch key {
+	case "CODEX_HOME",
+		"MULTICODEX_ACTIVE_PROFILE",
+		"MULTICODEX_SELECTED_PROFILE_PATH",
+		"MULTICODEX_HEARTBEAT_LOCK_PATH",
+		"MULTICODEX_HEARTBEAT_PROMPT",
+		"OPENAI_API_KEY",
+		"OPENAI_ORG_ID",
+		"OPENAI_ORGANIZATION",
+		"OPENAI_PROJECT",
+		"OPENAI_BASE_URL",
+		"OPENAI_API_BASE",
+		"OPENAI_HOST",
+		"CODEX_API_KEY",
+		"CODEX_AUTH_TOKEN",
+		"CODEX_ACCESS_TOKEN",
+		"CODEX_REFRESH_TOKEN",
+		"CODEX_TOKEN",
+		"CODEX_BASE_URL",
+		"CODEX_API_BASE":
+		return true
+	default:
+		return false
+	}
 }
 
 func shellQuoteValue(value string) string {

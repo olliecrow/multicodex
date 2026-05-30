@@ -1,121 +1,106 @@
 # Command Specification
 
-## Command set
+## Command Set
+
 - `multicodex init`
 - `multicodex add <name>`
 - `multicodex login <name> [codex login args]`
 - `multicodex login-all`
-- `multicodex use <name> [--shell]`
 - `multicodex cli <name> [codex args...]`
-- `multicodex run <name> -- <command...>`
 - `multicodex exec [codex exec args]`
 - `multicodex status`
 - `multicodex heartbeat`
 - `multicodex monitor [flags]`
-- `multicodex monitor help`
 - `multicodex monitor tui [flags]`
-- `multicodex monitor doctor [--json] [--timeout 60s]`
+- `multicodex monitor doctor [flags]`
 - `multicodex monitor completion [shell]`
 - `multicodex doctor [--json] [--timeout 8s]`
-- `multicodex dry-run [operation]`
+- `multicodex dry-run [login]`
 - `multicodex completion <bash|zsh|fish>`
 - `multicodex help [command [subcommand]]`
 - `multicodex version` and `multicodex --version`
 
-## Behavior contract
+Multicodex intentionally has no command for changing the shared default Codex account.
+
+## Behavior Contract
 
 `multicodex init`
-- Creates local multicodex home and metadata only.
+- Creates local multicodex metadata only.
 - Uses `MULTICODEX_HOME` when set, otherwise defaults to `~/multicodex`.
-- Does not modify existing Codex default auth.
+- Does not modify existing default Codex auth.
 
 `multicodex add <name>`
 - Registers a named profile.
-- Creates a profile directory with secure permissions.
-- Defaults the profile `config.toml` to the current default Codex `config.toml` so shared settings stay in sync.
-- Fills in missing top-level profile skill entries from the default Codex skills tree so shared skills stay available in profile-scoped runs.
-- Leaves any manual top-level profile skill override in place.
-- Leaves a manual per-profile `config.toml` override intact when present.
+- Creates a profile-local `CODEX_HOME` with private permissions.
+- Defaults profile `config.toml` to a symlink to the default Codex `config.toml`.
+- Fills in missing top-level profile skill entries with symlinks to the default Codex skills tree.
+- Leaves manual profile-local config files and manual top-level skill overrides in place.
 
 `multicodex login <name> [codex login args]`
-- Runs official `codex login` in the profile context.
-- Passes any extra login args through to `codex login`.
-- Avoids printing sensitive output.
-- Requires the effective profile config to enable `cli_auth_credentials_store = "file"` so profile auth remains isolated.
+- Runs official `codex login` in the selected profile context.
+- Passes extra login args through to `codex login`.
+- Requires the effective profile config to enable `cli_auth_credentials_store = "file"`.
+- Normalizes regular profile `auth.json` permissions to `0600` after login.
 
 `multicodex login-all`
-- Iterates through known profiles and invokes profile-scoped login.
+- Runs profile-scoped login for each known profile in sorted order.
 - Summarizes success and failure per profile.
 
-`multicodex use <name> [--shell]`
-- Local scope only.
-- Emits shell env instructions or starts a subshell bound to that profile.
-- Leaves the default Codex account untouched.
-
 `multicodex cli <name> [codex args...]`
-- Runs the interactive Codex CLI in the selected profile context.
-- Uses the same default args as the local `c` alias: `--search --dangerously-bypass-approvals-and-sandbox -m gpt-5.5 -c model_reasoning_effort=medium`.
-- Appends any extra args after the profile name.
-- When stdin, stdout, and stderr are real terminals, replaces the multicodex process with `codex` so the interactive session behaves like a normal direct Codex launch.
-- Re-checks file-backed auth isolation before launching Codex.
-- Keeps Codex thread state and `/goal` state profile-local through the selected profile's `CODEX_HOME`, so separate terminals using different profiles do not share active goals.
+- Runs the interactive official Codex CLI with the selected profile's `CODEX_HOME`.
+- Does not inject model, reasoning, sandbox, approval, or search defaults.
+- Uses shared Codex config defaults unless the caller passes explicit Codex args.
+- Re-checks file-backed auth isolation before launch.
+- Replaces the multicodex process with `codex` when stdin, stdout, and stderr are real terminals.
+- Keeps auth, threads, sessions, and `/goal` state profile-local.
 - Leaves the default Codex account untouched.
-
-`multicodex run <name> -- <command...>`
-- Executes one command with profile-scoped context.
-- Re-checks file-backed auth isolation before direct `codex` invocations.
-- Returns child exit code.
 
 `multicodex exec [codex exec args]`
-- Executes `codex exec` with all remaining arguments passed through unchanged.
-- For help requests (`--help`, `-h`, or `help`), delegates directly to `codex exec` and does not require profiles to be configured.
-- Automatically selects among configured multicodex profiles.
-- Re-checks file-backed auth isolation before launching `codex exec`.
+- Runs `codex exec` with all remaining arguments passed through unchanged.
+- Delegates exact help requests (`--help`, `-h`, or `help`) directly to `codex exec` without requiring profiles.
+- Automatically selects only among configured multicodex profiles.
+- Re-checks file-backed auth isolation before launch.
 - Parses model selection arguments (`--model`, `--model=`, and `-m`) for routing.
-- If the model contains `spark` (case-insensitive), each profile selects its Spark bucket when available.
-- If Spark is requested but no eligible Spark bucket is available, exec returns the usage-selection error instead of falling back to a random/default Codex account.
-- Treats profiles whose five-hour usage window is strictly below 40% as eligible to route work to.
-- Excludes profiles whose weekly window is known to be exhausted, so an account at 100% weekly usage is not selected while other usable profiles exist.
+- If the model contains `spark` case-insensitively, selects Spark usage windows when available.
+- If Spark is requested but Spark usage data is unavailable, returns the usage-selection error instead of falling back to default-window routing.
+- Treats profiles whose five-hour usage window is strictly below 40% as eligible.
+- Excludes profiles whose weekly window is known to be exhausted.
 - Among eligible profiles, picks the one whose weekly reset is soonest.
-- When eligible profiles do not expose a weekly reset time, picks randomly among those eligible profiles.
-- When no profile is eligible, picks a random accessible profile for that call.
-- When usage fetch is unavailable for every profile, picks a random configured profile for that call.
-- Returns child exit code.
+- When usage fetch is unavailable for every profile, falls back to the first configured profile after profile safety checks pass.
+- Writes selected-profile metadata only under `MULTICODEX_HOME` when `MULTICODEX_SELECTED_PROFILE_PATH` is set.
+- Returns the child exit code.
 
 `multicodex status`
 - Shows all profiles and each profile login status.
-- Does not manage the default Codex account.
+- Does not manage or inspect the default Codex account as a multicodex profile.
 
 `multicodex heartbeat`
-- Runs a minimal read-only `codex exec --skip-git-repo-check --sandbox read-only --color never hello` keepalive for each logged-in profile.
-- Skips profiles that are currently logged out.
-- Re-checks file-backed auth isolation before per-profile Codex execution.
-- Uses a non-blocking local lock so overlapping heartbeat runs are skipped instead of overlapping.
+- Runs `codex exec --skip-git-repo-check --sandbox read-only --color never hello` for each logged-in profile.
+- Skips logged-out profiles.
+- Re-checks file-backed auth isolation before per-profile execution.
+- Uses a non-blocking lock under `MULTICODEX_HOME`.
 - Retries failed logged-in profile heartbeats with linear backoff by default.
 - Prints per-profile result rows and a final summary.
-- Returns non-zero when no logged-in profiles are found or when any logged-in profile heartbeat fails.
+- Returns non-zero when no logged-in profiles are found or any logged-in profile heartbeat fails.
 - Leaves the default Codex account untouched.
-- Supports environment overrides for timeout, retries, backoff, prompt, and lock path.
+- Supports environment overrides for timeout, retries, backoff, and lock path.
+- Rejects lock paths that resolve outside `MULTICODEX_HOME`.
 
 `multicodex monitor`
-- Runs a live terminal UI for Codex subscription usage across compatible local accounts.
+- Runs a live terminal UI for Codex subscription usage.
 - Defaults to the integrated monitor UI when no monitor subcommand is provided.
-- Defaults both the poll interval and the per-poll fetch timeout to 60 seconds.
-- Builds account candidates from monitor-owned account overrides, multicodex profile config, the default Codex home, the active `CODEX_HOME`, and broader filesystem discovery. The default Codex home respects `MULTICODEX_DEFAULT_CODEX_HOME` first, then `CODEX_HOME`.
-- When the same Codex home appears more than once, labels and source details prefer monitor-owned account overrides, then multicodex profiles, then the default Codex home, then the active `CODEX_HOME`, then auto-discovery.
-- Renders compact usage lines in each window card, for example `used: 12% [resets in 3h4m]`.
-- When Spark data is present for an account, the same panel also shows `used-spark: 8% [resets in 3h4m]` and keeps one row per account in the two-column layout.
-- Shows account labels instead of raw email addresses in the TUI when labels are available.
-- Orders TUI account rows by weekly reset time, from first to reset at the top to last at the bottom; accounts with unknown weekly reset times come last.
-- Keeps tracked timestamps in UTC internally while rendering user-facing TUI timestamps in local time without seconds.
-- Uses read-only filesystem auto-discovery under the home directory, scanning for `.codex*`, `.codex`, and `codex-home` paths up to depth 5 before filtering transient/cache locations and requiring usage signals.
-- When fallback is available, keeps most of a long fetch timeout for the primary source and reserves at most 10 seconds for fallback so slow refreshes are less likely to end as false `unavailable` window cards.
-- Treats observed-token totals as local estimates derived from session logs rather than official provider counters.
-- Shows the weekly observed-token total as a token estimate in the TUI and shows `partial` when some home estimates are missing.
+- Defaults both poll interval and per-poll fetch timeout to 60 seconds.
+- By default, builds account candidates only from monitor-owned account overrides and configured multicodex profiles.
+- Supports opt-in account sources with `--include-default`, `--include-active`, and `--discover`.
+- Uses OAuth usage fetches for normal account rows.
 - Remains read-only with respect to Codex account state.
-
-`multicodex monitor help`
-- Prints monitor-specific usage, flags, and completion examples.
+- Renders compact usage lines in each window card.
+- Shows Spark usage inline when Spark data is present.
+- Shows configured labels before raw identity fields.
+- Orders account rows by weekly reset time.
+- Keeps timestamps in UTC internally and renders user-facing timestamps in local time.
+- Treats observed-token totals as local estimates from session logs.
+- Keeps last good official window cards visible and marked stale during full refresh outages.
 
 `multicodex monitor tui`
 - Explicit alias for the integrated monitor terminal UI.
@@ -123,16 +108,12 @@
 
 `multicodex monitor doctor`
 - Runs read-only monitor setup and source checks.
-- Supports JSON output for automation.
-- Checks codex binary access, auth-file readability, app-server usage fetch, and oauth usage fetch.
-- Exits success when at least one usage source works, while surfacing degraded output when a source is unavailable.
-
-`multicodex monitor` diagnostics
-- When a refresh loses official window data for every account at once, keep showing the last good official window cards and mark them stale instead of blanking the whole monitor.
-- Prefer concrete account fetch failures over generic `window cards are unavailable` warnings.
-- Prefer plain-English re-login warnings such as `auth expired; sign in again` over generic account fetch failures when an expired profile token is the likely cause.
-- If an account exposes only one official usage window, keep the account visible and mark only the missing window as unavailable.
-- Keep raw per-account error text available in account data for deeper debugging and tests.
+- Supports JSON output.
+- Checks configured monitor accounts and configured multicodex profiles by default.
+- Uses OAuth fetch checks by default.
+- Adds default Codex home, active `CODEX_HOME`, filesystem discovery, or app-server checks only when the caller passes `--include-default`, `--include-active`, `--discover`, or `--app-server`.
+- Exits success when at least one usage fetch works and fails when no usage fetch works.
+- Reports degraded status when some usage fetches fail but at least one works.
 
 `multicodex monitor completion`
 - Defaults to bash when no shell is provided.
@@ -141,33 +122,28 @@
 `multicodex doctor`
 - Runs non-mutating setup and auth checks.
 - Reports `ok`, `warn`, and `fail` checks with a final pass or fail summary.
-- Supports JSON output for automation.
-- Includes repository leak-guard checks for:
-  - auth homes being outside the active git working tree
-  - recommended ignore patterns present in `.gitignore` chain
-  - tracked sensitive-looking files (for example `auth.json`, `.env`, and key files)
+- Supports JSON output.
+- Includes repository leak-guard checks for auth homes in git worktrees, recommended ignore patterns, and tracked sensitive-looking files.
 
 `multicodex dry-run`
 - Prints planned operations without executing commands or mutating files.
-- Supports operation-specific previews for:
-  - `use <name>`
-  - `login <name>`
-  - `run <name> -- <command...>`
+- Supports an operation-specific preview for `login <name>`.
 
 `multicodex completion <shell>`
 - Prints tab-completion script for bash, zsh, or fish.
-- Supports command name completion.
-- Supports dynamic profile-name completion from local multicodex config.
+- Supports command name completion and dynamic profile-name completion.
 
 `multicodex help [command [subcommand]]`
-- Prints global help when no command topic is provided.
-- Prints command-specific usage, description, and examples for one topic, including nested monitor topics such as `monitor doctor`, `monitor completion`, and `monitor tui`.
+- Prints global help when no topic is provided.
+- Prints command-specific usage, description, and examples for one topic, including nested monitor topics.
 
-## Error handling
+## Error Handling
+
 - Fail fast with actionable messages.
 - Never dump secret content in errors.
-- Use deterministic exit codes.
+- Use deterministic exit codes where practical.
 
-## Profile naming
+## Profile Naming
+
 - Profile names may include letters, numbers, `@`, `.`, `_`, and `-`.
-- This allows account-like names such as `me@example.com`.
+- Account-like names are allowed, but docs and tests should prefer non-personal labels such as `personal` and `work`.

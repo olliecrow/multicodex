@@ -91,7 +91,7 @@ func commandReadOnlyStartup(command string) (bool, bool) {
 	switch command {
 	case "status", "doctor", "dry-run", "monitor", "completion", "__complete-profiles":
 		return true, true
-	case "init", "add", "login", "login-all", "use", "cli", "run", "exec", "heartbeat":
+	case "init", "add", "login", "login-all", "cli", "exec", "heartbeat":
 		return false, true
 	default:
 		return false, false
@@ -118,12 +118,8 @@ func (a *App) Run(args []string) error {
 		return a.cmdLogin(args[1:])
 	case "login-all":
 		return a.cmdLoginAll()
-	case "use":
-		return a.cmdUse(args[1:])
 	case "cli":
 		return a.cmdCLI(args[1:])
-	case "run":
-		return a.cmdRun(args[1:])
 	case "exec":
 		return a.cmdExec(args[1:])
 	case "status":
@@ -179,22 +175,30 @@ func (a *App) loadConfigIfExists() (*Config, error) {
 }
 
 func (a *App) cmdInit() error {
-	if err := a.store.EnsureBaseDirs(); err != nil {
+	var cfg *Config
+	created := false
+	if err := a.store.WithConfigLock(func() error {
+		loaded, err := a.store.Load()
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				cfg = DefaultConfig()
+				if err := a.store.Save(cfg); err != nil {
+					return err
+				}
+				created = true
+				return nil
+			}
+			return err
+		}
+		cfg = loaded
+		return nil
+	}); err != nil {
 		return err
 	}
-
-	cfg, err := a.store.Load()
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			cfg = DefaultConfig()
-			if err := a.store.Save(cfg); err != nil {
-				return err
-			}
-			fmt.Println("initialized multicodex local state")
-			fmt.Printf("home: %s\n", a.store.paths.MulticodexHome)
-			return nil
-		}
-		return err
+	if created {
+		fmt.Println("initialized multicodex local state")
+		fmt.Printf("home: %s\n", a.store.paths.MulticodexHome)
+		return nil
 	}
 
 	fmt.Println("multicodex already initialized")
@@ -212,21 +216,27 @@ func (a *App) cmdAdd(args []string) error {
 		return &ExitError{Code: 2, Message: err.Error()}
 	}
 
-	cfg, err := a.loadOrInitConfig()
-	if err != nil {
-		return err
-	}
+	var profile Profile
+	if err := a.store.WithConfigLock(func() error {
+		cfg, err := a.loadOrInitConfig()
+		if err != nil {
+			return err
+		}
 
-	if _, exists := cfg.Profiles[name]; exists {
-		return &ExitError{Code: 2, Message: fmt.Sprintf("profile already exists: %s", name)}
-	}
+		if _, exists := cfg.Profiles[name]; exists {
+			return &ExitError{Code: 2, Message: fmt.Sprintf("profile already exists: %s", name)}
+		}
 
-	profile, err := a.store.CreateProfile(name)
-	if err != nil {
-		return err
-	}
-	cfg.Profiles[name] = profile
-	if err := a.store.Save(cfg); err != nil {
+		profile, err = a.store.CreateProfile(name)
+		if err != nil {
+			return err
+		}
+		cfg.Profiles[name] = profile
+		if err := a.store.Save(cfg); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
 		return err
 	}
 
@@ -336,75 +346,6 @@ func (a *App) cmdLoginAll() error {
 	}
 	fmt.Println("login-all completed")
 	return nil
-}
-
-func (a *App) cmdUse(args []string) error {
-	if len(args) < 1 || len(args) > 2 {
-		return &ExitError{Code: 2, Message: "usage: multicodex use <name> [--shell]"}
-	}
-	name := args[0]
-	openShell := len(args) == 2 && args[1] == "--shell"
-	if len(args) == 2 && args[1] != "--shell" {
-		return &ExitError{Code: 2, Message: "usage: multicodex use <name> [--shell]"}
-	}
-
-	cfg, err := a.loadOrInitConfig()
-	if err != nil {
-		return err
-	}
-	profile, ok := cfg.Profiles[name]
-	if !ok {
-		return &ExitError{Code: 2, Message: fmt.Sprintf("unknown profile: %s", name)}
-	}
-	if err := a.store.EnsureProfileDir(profile); err != nil {
-		return err
-	}
-	if err := ensureProfileCodexExecutionReady(a.store.paths, profile); err != nil {
-		return err
-	}
-
-	if openShell {
-		fmt.Printf("starting shell with profile %q\n", name)
-		return RunShellWithProfile(profile.CodexHome, name)
-	}
-
-	fmt.Print(RenderShellExports(profile.CodexHome, name))
-	return nil
-}
-
-func (a *App) cmdRun(args []string) error {
-	if len(args) < 3 {
-		return &ExitError{Code: 2, Message: "usage: multicodex run <name> -- <command...>"}
-	}
-	name := args[0]
-	sep := -1
-	for i := 1; i < len(args); i++ {
-		if args[i] == "--" {
-			sep = i
-			break
-		}
-	}
-	if sep == -1 || sep == len(args)-1 {
-		return &ExitError{Code: 2, Message: "usage: multicodex run <name> -- <command...>"}
-	}
-
-	cfg, err := a.loadOrInitConfig()
-	if err != nil {
-		return err
-	}
-	profile, ok := cfg.Profiles[name]
-	if !ok {
-		return &ExitError{Code: 2, Message: fmt.Sprintf("unknown profile: %s", name)}
-	}
-	if err := a.store.EnsureProfileDir(profile); err != nil {
-		return err
-	}
-	cmd := args[sep+1]
-	cmdArgs := args[sep+2:]
-	if err := ensureProfileCodexExecutionReady(a.store.paths, profile); err != nil {
-		return err
-	}
-	return RunWithProfile(profile.CodexHome, name, cmd, cmdArgs)
 }
 
 func (a *App) cmdStatus() error {

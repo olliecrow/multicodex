@@ -133,6 +133,9 @@ func TestWithoutCodexProfileEnvRemovesStaleProfileState(t *testing.T) {
 	env := withoutCodexProfileEnv([]string{
 		"CODEX_HOME=/tmp/stale",
 		"MULTICODEX_ACTIVE_PROFILE=stale",
+		"MULTICODEX_SELECTED_PROFILE_PATH=/tmp/stale.json",
+		"OPENAI_API_KEY=stale",
+		"CODEX_AUTH_TOKEN=stale",
 		"KEEP=value",
 	})
 	joined := strings.Join(env, "\n")
@@ -141,6 +144,12 @@ func TestWithoutCodexProfileEnvRemovesStaleProfileState(t *testing.T) {
 	}
 	if strings.Contains(joined, "MULTICODEX_ACTIVE_PROFILE=") {
 		t.Fatalf("expected MULTICODEX_ACTIVE_PROFILE to be removed, got %q", env)
+	}
+	if strings.Contains(joined, "MULTICODEX_SELECTED_PROFILE_PATH=") {
+		t.Fatalf("expected MULTICODEX_SELECTED_PROFILE_PATH to be removed, got %q", env)
+	}
+	if strings.Contains(joined, "OPENAI_API_KEY=") || strings.Contains(joined, "CODEX_AUTH_TOKEN=") {
+		t.Fatalf("expected account override credentials to be removed, got %q", env)
 	}
 	if !strings.Contains(joined, "KEEP=value") {
 		t.Fatalf("expected unrelated env to remain, got %q", env)

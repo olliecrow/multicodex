@@ -36,6 +36,12 @@ type MonitorAccount struct {
 	CodexHome string `json:"codex_home"`
 }
 
+type MonitorAccountOptions struct {
+	IncludeDefault bool
+	IncludeActive  bool
+	Discover       bool
+}
+
 type multicodexConfigFile struct {
 	Profiles map[string]struct {
 		Name      string `json:"name"`
@@ -44,20 +50,31 @@ type multicodexConfigFile struct {
 }
 
 func loadMonitorAccounts() ([]MonitorAccount, string, error) {
-	defaultHome, err := defaultCodexHome()
-	if err != nil {
-		return nil, "", err
+	return loadMonitorAccountsWithOptions(MonitorAccountOptions{})
+}
+
+func loadMonitorAccountsWithOptions(options MonitorAccountOptions) ([]MonitorAccount, string, error) {
+	collector := newAccountCollector()
+
+	if options.IncludeDefault {
+		defaultHome, err := defaultCodexHome()
+		if err != nil {
+			return nil, "", err
+		}
+		collector.add("default", defaultHome, 50, false)
 	}
 
-	collector := newAccountCollector()
-	collector.add("default", defaultHome, 50, false)
-
-	if envHome := strings.TrimSpace(os.Getenv("CODEX_HOME")); envHome != "" {
-		expanded, expandErr := expandPath(envHome)
-		if expandErr != nil {
-			collector.warnf("could not resolve CODEX_HOME: %v", expandErr)
+	if options.IncludeActive {
+		envHome := strings.TrimSpace(os.Getenv("CODEX_HOME"))
+		if envHome == "" {
+			collector.warnf("active CODEX_HOME is not set")
 		} else {
-			collector.add("active", expanded, 40, true)
+			expanded, expandErr := expandPath(envHome)
+			if expandErr != nil {
+				collector.warnf("could not resolve CODEX_HOME: %v", expandErr)
+			} else {
+				collector.add("active", expanded, 40, true)
+			}
 		}
 	}
 
@@ -85,29 +102,24 @@ func loadMonitorAccounts() ([]MonitorAccount, string, error) {
 		}
 	}
 
-	autoAccounts, autoWarning, autoErr := discoverMonitorAccountsFromFilesystem()
-	if autoErr != nil {
-		collector.warnf("auto discovery error: %v", autoErr)
-	} else {
-		if autoWarning != "" {
-			collector.warnf("%s", autoWarning)
-		}
-		for _, account := range autoAccounts {
-			if isMulticodexProfileHome(account.CodexHome) {
-				continue
+	if options.Discover {
+		autoAccounts, autoWarning, autoErr := discoverMonitorAccountsFromFilesystem()
+		if autoErr != nil {
+			collector.warnf("auto discovery error: %v", autoErr)
+		} else {
+			if autoWarning != "" {
+				collector.warnf("%s", autoWarning)
 			}
-			collector.add(account.Label, account.CodexHome, 30, false)
+			for _, account := range autoAccounts {
+				if isMulticodexProfileHome(account.CodexHome) {
+					continue
+				}
+				collector.add(account.Label, account.CodexHome, 30, false)
+			}
 		}
 	}
 
 	out := collector.toAccounts()
-	if len(out) == 0 {
-		out = append(out, MonitorAccount{
-			Label:     "default",
-			CodexHome: defaultHome,
-		})
-	}
-
 	return out, collector.warningString(), nil
 }
 
@@ -689,9 +701,6 @@ func EnsureMonitorDataDir() error {
 
 func defaultCodexHome() (string, error) {
 	if codexHome := strings.TrimSpace(os.Getenv(defaultCodexHomeEnvVar)); codexHome != "" {
-		return expandPath(codexHome)
-	}
-	if codexHome := strings.TrimSpace(os.Getenv("CODEX_HOME")); codexHome != "" {
 		return expandPath(codexHome)
 	}
 	home, err := os.UserHomeDir()

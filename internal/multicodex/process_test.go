@@ -6,27 +6,60 @@ import (
 	"testing"
 )
 
-func TestRenderShellExports(t *testing.T) {
+func TestProfileCodexEnvSetsProfileAndStripsAccountOverrides(t *testing.T) {
 	t.Parallel()
 
-	out := RenderShellExports("/tmp/codex-home", "work")
-	expected := "export CODEX_HOME='/tmp/codex-home'\nexport MULTICODEX_ACTIVE_PROFILE='work'\n"
-	if out != expected {
-		t.Fatalf("unexpected exports:\n%s", out)
+	env := profileCodexEnv([]string{
+		"PATH=/bin",
+		"CODEX_HOME=/tmp/stale",
+		"MULTICODEX_ACTIVE_PROFILE=stale",
+		"MULTICODEX_SELECTED_PROFILE_PATH=/tmp/out",
+		"OPENAI_API_KEY=secret",
+		"OPENAI_BASE_URL=https://example.invalid",
+		"CODEX_AUTH_TOKEN=secret",
+	}, "/tmp/codex-home", "work")
+
+	joined := strings.Join(env, "\n")
+	for _, forbidden := range []string{
+		"CODEX_HOME=/tmp/stale",
+		"MULTICODEX_ACTIVE_PROFILE=stale",
+		"MULTICODEX_SELECTED_PROFILE_PATH=",
+		"OPENAI_API_KEY=",
+		"OPENAI_BASE_URL=",
+		"CODEX_AUTH_TOKEN=",
+	} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("expected %s to be stripped from %q", forbidden, joined)
+		}
+	}
+	if !strings.Contains(joined, "PATH=/bin") {
+		t.Fatalf("expected PATH to remain, got %q", joined)
+	}
+	if !strings.Contains(joined, "CODEX_HOME=/tmp/codex-home") {
+		t.Fatalf("expected CODEX_HOME to be set, got %q", joined)
+	}
+	if !strings.Contains(joined, "MULTICODEX_ACTIVE_PROFILE=work") {
+		t.Fatalf("expected profile env to be set, got %q", joined)
 	}
 }
 
-func TestRenderShellExportsUsesSingleQuoteShellEscaping(t *testing.T) {
-	out := RenderShellExports("/tmp/$(touch bad)'home", "work`bad`")
-	if !strings.Contains(out, `'/tmp/$(touch bad)'"'"'home'`) {
-		t.Fatalf("expected CODEX_HOME to be single-quote escaped, got %q", out)
+func TestNeutralCodexEnvStripsProfileState(t *testing.T) {
+	env := neutralCodexEnv([]string{
+		"PATH=/bin",
+		"CODEX_HOME=/tmp/stale",
+		"MULTICODEX_ACTIVE_PROFILE=stale",
+		"OPENAI_API_KEY=secret",
+	})
+	joined := strings.Join(env, "\n")
+	if strings.Contains(joined, "CODEX_HOME=") || strings.Contains(joined, "MULTICODEX_ACTIVE_PROFILE=") || strings.Contains(joined, "OPENAI_API_KEY=") {
+		t.Fatalf("expected neutral env to strip Codex profile and account overrides, got %q", joined)
 	}
-	if !strings.Contains(out, "'work`bad`'") {
-		t.Fatalf("expected profile to be single-quote escaped, got %q", out)
+	if !strings.Contains(joined, "PATH=/bin") {
+		t.Fatalf("expected PATH to remain, got %q", joined)
 	}
 }
 
-func TestRunInteractiveWithProfileExecsWhenTerminalAttached(t *testing.T) {
+func TestRunInteractiveCodexWithProfileExecsWhenTerminalAttached(t *testing.T) {
 	oldLookPath := execLookPath
 	oldSyscallExec := syscallExec
 	oldInteractive := isInteractiveTerminalAttached
@@ -55,7 +88,7 @@ func TestRunInteractiveWithProfileExecsWhenTerminalAttached(t *testing.T) {
 		return sentinel
 	}
 
-	err := RunInteractiveWithProfile("/tmp/codex-home", "work", "codex", []string{"--version"})
+	err := RunInteractiveCodexWithProfile("/tmp/codex-home", "work", []string{"--version"})
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("expected sentinel error, got %v", err)
 	}

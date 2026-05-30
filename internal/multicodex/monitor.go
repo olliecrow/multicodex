@@ -3,6 +3,7 @@ package multicodex
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -42,8 +43,15 @@ func (a *App) runMonitorDoctor(args []string) error {
 	fs.SetOutput(os.Stderr)
 	jsonOutput := fs.Bool("json", false, "output doctor report as JSON")
 	timeout := fs.Duration("timeout", 60*time.Second, "doctor timeout")
+	includeDefault := fs.Bool("include-default", false, "include the default Codex home")
+	includeActive := fs.Bool("include-active", false, "include the active CODEX_HOME")
+	discover := fs.Bool("discover", false, "discover compatible Codex homes from the filesystem")
+	appServer := fs.Bool("app-server", false, "also check the Codex app-server usage source")
 	if err := fs.Parse(args); err != nil {
-		return &ExitError{Code: 2, Message: "usage: multicodex monitor doctor [--json] [--timeout 60s]"}
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return &ExitError{Code: 2, Message: "usage: multicodex monitor doctor [--json] [--timeout 60s] [--include-default] [--include-active] [--discover] [--app-server]"}
 	}
 	if *timeout <= 0 {
 		return &ExitError{Code: 2, Message: "error: --timeout must be > 0"}
@@ -51,7 +59,14 @@ func (a *App) runMonitorDoctor(args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
 
-	report := usage.RunDoctor(ctx)
+	report := usage.RunDoctor(ctx, usage.DoctorOptions{
+		Accounts: usage.MonitorAccountOptions{
+			IncludeDefault: *includeDefault,
+			IncludeActive:  *includeActive,
+			Discover:       *discover,
+		},
+		IncludeAppServer: *appServer,
+	})
 	if *jsonOutput {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
@@ -90,8 +105,14 @@ func (a *App) runMonitorTUI(args []string) error {
 	timeout := fs.Duration("timeout", 60*time.Second, "per-poll fetch timeout")
 	noColor := fs.Bool("no-color", false, "disable color styling")
 	noAltScreen := fs.Bool("no-alt-screen", false, "disable alternate screen mode")
+	includeDefault := fs.Bool("include-default", false, "include the default Codex home")
+	includeActive := fs.Bool("include-active", false, "include the active CODEX_HOME")
+	discover := fs.Bool("discover", false, "discover compatible Codex homes from the filesystem")
 	if err := fs.Parse(args); err != nil {
-		return &ExitError{Code: 2, Message: "usage: multicodex monitor [--interval 60s] [--timeout 60s] [--no-color] [--no-alt-screen]"}
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return &ExitError{Code: 2, Message: "usage: multicodex monitor [--interval 60s] [--timeout 60s] [--no-color] [--no-alt-screen] [--include-default] [--include-active] [--discover]"}
 	}
 	if *interval <= 0 {
 		return &ExitError{Code: 2, Message: "error: --interval must be > 0"}
@@ -103,7 +124,11 @@ func (a *App) runMonitorTUI(args []string) error {
 		return &ExitError{Code: 1, Message: "interactive monitor requires a TTY"}
 	}
 
-	fetcher := usage.NewDefaultFetcher()
+	fetcher := usage.NewDefaultFetcherWithAccountOptions(usage.MonitorAccountOptions{
+		IncludeDefault: *includeDefault,
+		IncludeActive:  *includeActive,
+		Discover:       *discover,
+	})
 	defer fetcher.Close()
 
 	if err := tui.Run(tui.Options{
@@ -163,10 +188,17 @@ func printMonitorUsage() {
 	fmt.Println("Monitor doctor flags:")
 	fmt.Println("  --json            Output report as JSON")
 	fmt.Println("  --timeout 60s     Doctor timeout")
+	fmt.Println("  --include-default Include the default Codex home")
+	fmt.Println("  --include-active  Include the active CODEX_HOME")
+	fmt.Println("  --discover        Discover compatible Codex homes from the filesystem")
+	fmt.Println("  --app-server      Also check the Codex app-server usage source")
 	fmt.Println()
 	fmt.Println("Monitor terminal user interface flags:")
 	fmt.Println("  --interval 60s    Poll interval")
 	fmt.Println("  --timeout 60s     Per-poll fetch timeout")
 	fmt.Println("  --no-color        Disable color styling")
 	fmt.Println("  --no-alt-screen   Disable alternate screen mode")
+	fmt.Println("  --include-default Include the default Codex home")
+	fmt.Println("  --include-active  Include the active CODEX_HOME")
+	fmt.Println("  --discover        Discover compatible Codex homes from the filesystem")
 }

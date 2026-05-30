@@ -21,7 +21,6 @@ const heartbeatRetryCount = 1
 const heartbeatBackoff = 20 * time.Second
 
 type heartbeatSettings struct {
-	Prompt   string
 	Timeout  time.Duration
 	Retries  int
 	Backoff  time.Duration
@@ -204,11 +203,11 @@ func runCodexHeartbeat(codexHome string, settings heartbeatSettings) (string, er
 		"read-only",
 		"--color",
 		"never",
-		settings.Prompt,
+		heartbeatPrompt,
 	)
 	cmd.Dir = codexHome
 	cmd.WaitDelay = 500 * time.Millisecond
-	cmd.Env = withProfileEnv(os.Environ(), codexHome, "")
+	cmd.Env = profileCodexEnv(os.Environ(), codexHome, "")
 
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -230,15 +229,10 @@ func runCodexHeartbeat(codexHome string, settings heartbeatSettings) (string, er
 
 func loadHeartbeatSettings(paths Paths) (heartbeatSettings, error) {
 	settings := heartbeatSettings{
-		Prompt:   heartbeatPrompt,
 		Timeout:  codexHeartbeatTimeout,
 		Retries:  heartbeatRetryCount,
 		Backoff:  heartbeatBackoff,
 		LockPath: filepath.Join(paths.MulticodexHome, "heartbeat.lock"),
-	}
-
-	if value := strings.TrimSpace(os.Getenv("MULTICODEX_HEARTBEAT_PROMPT")); value != "" {
-		settings.Prompt = value
 	}
 
 	timeoutSeconds, err := parsePositiveEnvInt("MULTICODEX_HEARTBEAT_TIMEOUT_SECONDS", int(settings.Timeout/time.Second))
@@ -260,7 +254,11 @@ func loadHeartbeatSettings(paths Paths) (heartbeatSettings, error) {
 	settings.Backoff = time.Duration(backoffSeconds) * time.Second
 
 	if value := strings.TrimSpace(os.Getenv("MULTICODEX_HEARTBEAT_LOCK_PATH")); value != "" {
-		settings.LockPath = value
+		lockPath, err := resolvePathInsideRoot(paths.MulticodexHome, value, "heartbeat lock path")
+		if err != nil {
+			return heartbeatSettings{}, err
+		}
+		settings.LockPath = lockPath
 	}
 
 	return settings, nil

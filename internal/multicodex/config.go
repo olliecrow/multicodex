@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 )
 
 const configVersion = 1
@@ -63,8 +64,41 @@ func (s *Store) EnsureBaseDirs() error {
 	return nil
 }
 
+func (s *Store) WithConfigLock(fn func() error) error {
+	if err := s.EnsureBaseDirs(); err != nil {
+		return err
+	}
+	lockPath := filepath.Join(s.paths.MulticodexHome, "config.lock")
+	if err := ensureRegularSingleFileForWrite(lockPath, "multicodex config lock"); err != nil {
+		return err
+	}
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0o600)
+	if err != nil {
+		return fmt.Errorf("open config lock: %w", err)
+	}
+	defer lockFile.Close()
+	if err := lockFile.Chmod(0o600); err != nil {
+		return fmt.Errorf("secure config lock permissions: %w", err)
+	}
+	info, err := lockFile.Stat()
+	if err != nil {
+		return fmt.Errorf("inspect config lock: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("multicodex config lock is not a regular file: %s", lockPath)
+	}
+	if fileHasMultipleLinks(info) {
+		return fmt.Errorf("multicodex config lock has multiple hard links: %s", lockPath)
+	}
+	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
+		return fmt.Errorf("lock config: %w", err)
+	}
+	defer func() { _ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN) }()
+	return fn()
+}
+
 func (s *Store) Load() (*Config, error) {
-	if err := ensureRegularFileOrSymlinkTarget(s.paths.ConfigPath, "multicodex config"); err != nil {
+	if err := ensureRegularSingleFile(s.paths.ConfigPath, "multicodex config"); err != nil {
 		return nil, err
 	}
 	b, err := os.ReadFile(s.paths.ConfigPath)
@@ -95,6 +129,9 @@ func (s *Store) Load() (*Config, error) {
 
 func (s *Store) Save(cfg *Config) error {
 	if err := s.EnsureBaseDirs(); err != nil {
+		return err
+	}
+	if err := ensureRegularSingleFileForWrite(s.paths.ConfigPath, "multicodex config"); err != nil {
 		return err
 	}
 	cfg.Version = configVersion
@@ -432,6 +469,33 @@ func ensureRegularFileOrSymlinkTarget(path, label string) error {
 	return nil
 }
 
+func ensureRegularSingleFile(path, label string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("%s is a symlink: %s", label, path)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("%s is not a regular file: %s", label, path)
+	}
+	if fileHasMultipleLinks(info) {
+		return fmt.Errorf("%s has multiple hard links: %s", label, path)
+	}
+	return nil
+}
+
+func ensureRegularSingleFileForWrite(path, label string) error {
+	if err := ensureRegularSingleFile(path, label); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
 func parseTOMLKey(raw string) (string, error) {
 	key := strings.TrimSpace(raw)
 	if key == "" {
@@ -544,6 +608,13 @@ func (s *Store) ensureProfileConfig(codexHome string) error {
 			return fmt.Errorf("profile config path is a directory: %s", configPath)
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
+			targetPath, err := resolveSymlinkTarget(configPath)
+			if err != nil {
+				return fmt.Errorf("read profile config symlink: %w", err)
+			}
+			if canonicalProfilePath(targetPath) != canonicalProfilePath(defaultConfigPath) {
+				return fmt.Errorf("profile config symlink must point to default Codex config %s: %s", defaultConfigPath, configPath)
+			}
 			targetInfo, err := os.Stat(configPath)
 			if err != nil {
 				return fmt.Errorf("profile config symlink target is not readable: %w", err)
@@ -600,6 +671,9 @@ func (s *Store) ensureProfileSkills(codexHome string) error {
 	if err := os.MkdirAll(profileSkillsPath, 0o700); err != nil {
 		return fmt.Errorf("create profile skills dir: %w", err)
 	}
+	if err := s.removeStaleManagedSkillLinks(defaultSkillsPath, profileSkillsPath); err != nil {
+		return err
+	}
 
 	for _, entry := range entries {
 		name := strings.TrimSpace(entry.Name())
@@ -614,13 +688,20 @@ func (s *Store) ensureProfileSkills(codexHome string) error {
 		switch {
 		case err == nil:
 			if info.Mode()&os.ModeSymlink != 0 {
-				target, readErr := os.Readlink(profileEntryPath)
+				target, readErr := resolveSymlinkTarget(profileEntryPath)
 				if readErr != nil {
 					return fmt.Errorf("read profile skill symlink %s: %w", profileEntryPath, readErr)
 				}
-				if target == defaultEntryPath {
+				if canonicalProfilePath(target) == canonicalProfilePath(defaultEntryPath) {
 					continue
 				}
+				if pathIsInsideRoot(defaultSkillsPath, target) {
+					if err := os.Remove(profileEntryPath); err != nil {
+						return fmt.Errorf("replace stale profile skill symlink %s: %w", profileEntryPath, err)
+					}
+					break
+				}
+				return fmt.Errorf("profile skill symlink must point under default skills directory: %s", profileEntryPath)
 			}
 			continue
 		case !errors.Is(err, os.ErrNotExist):
@@ -633,4 +714,60 @@ func (s *Store) ensureProfileSkills(codexHome string) error {
 	}
 
 	return nil
+}
+
+func (s *Store) removeStaleManagedSkillLinks(defaultSkillsPath, profileSkillsPath string) error {
+	entries, err := os.ReadDir(profileSkillsPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("read profile skills dir: %w", err)
+	}
+	for _, entry := range entries {
+		profileEntryPath := filepath.Join(profileSkillsPath, entry.Name())
+		info, err := os.Lstat(profileEntryPath)
+		if err != nil {
+			return fmt.Errorf("inspect profile skill entry %s: %w", profileEntryPath, err)
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			continue
+		}
+		target, err := resolveSymlinkTarget(profileEntryPath)
+		if err != nil {
+			return fmt.Errorf("read profile skill symlink %s: %w", profileEntryPath, err)
+		}
+		if !pathIsInsideRoot(defaultSkillsPath, target) {
+			return fmt.Errorf("profile skill symlink must point under default skills directory: %s", profileEntryPath)
+		}
+		if _, err := os.Stat(target); errors.Is(err, os.ErrNotExist) {
+			if err := os.Remove(profileEntryPath); err != nil {
+				return fmt.Errorf("remove stale profile skill symlink %s: %w", profileEntryPath, err)
+			}
+		} else if err != nil {
+			return fmt.Errorf("inspect profile skill symlink target %s: %w", profileEntryPath, err)
+		}
+	}
+	return nil
+}
+
+func resolveSymlinkTarget(path string) (string, error) {
+	target, err := os.Readlink(path)
+	if err != nil {
+		return "", err
+	}
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(filepath.Dir(path), target)
+	}
+	return filepath.Clean(target), nil
+}
+
+func pathIsInsideRoot(root, path string) bool {
+	root = canonicalProfilePath(root)
+	path = canonicalProfilePath(path)
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)))
 }

@@ -419,7 +419,7 @@ func TestDiagnosticsStatusPreservesFirstWarningWhenNoActiveWindowWarningExists(t
 	m := seededModel()
 	m.summary.Warnings = []string{
 		`account "apple" fetch failed: primary source "app-server" failed`,
-		`account "crowoy" observed tokens unavailable: warming token estimate`,
+		`account "personal" observed tokens unavailable: warming token estimate`,
 	}
 
 	line := m.diagnosticsStatusLine()
@@ -432,11 +432,11 @@ func TestDiagnosticsStatusPrefersAuthExpiredWarning(t *testing.T) {
 	m := seededModel()
 	m.summary.Warnings = []string{
 		`account "apple" fetch failed: primary source "app-server" failed`,
-		`account "crowoy" auth expired; sign in again`,
+		`account "personal" auth expired; sign in again`,
 	}
 
 	line := m.diagnosticsStatusLine()
-	if line.value != `account "crowoy" auth expired; sign in again (+1 more)` {
+	if line.value != `account "personal" auth expired; sign in again (+1 more)` {
 		t.Fatalf("expected auth-expired warning to be prioritized, got %q", line.value)
 	}
 }
