@@ -338,6 +338,21 @@ func canonicalProfilePath(p string) string {
 			}
 			return filepath.Clean(cleaned)
 		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			resolvedPrefix, err := filepath.EvalSymlinks(prefix)
+			if err != nil {
+				return filepath.Clean(cleaned)
+			}
+			resolvedInfo, err := os.Stat(resolvedPrefix)
+			if err != nil || !resolvedInfo.IsDir() {
+				return filepath.Clean(cleaned)
+			}
+			if len(suffix) == 0 {
+				return filepath.Clean(resolvedPrefix)
+			}
+			parts := append([]string{resolvedPrefix}, suffix...)
+			return filepath.Clean(filepath.Join(parts...))
+		}
 		if !info.IsDir() {
 			return filepath.Clean(cleaned)
 		}
@@ -608,11 +623,15 @@ func (s *Store) ensureProfileConfig(codexHome string) error {
 			return fmt.Errorf("profile config path is a directory: %s", configPath)
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
-			targetPath, err := resolveSymlinkTarget(configPath)
+			targetPath, err := resolveExistingSymlinkTarget(configPath)
 			if err != nil {
-				return fmt.Errorf("read profile config symlink: %w", err)
+				return fmt.Errorf("resolve profile config symlink: %w", err)
 			}
-			if canonicalProfilePath(targetPath) != canonicalProfilePath(defaultConfigPath) {
+			defaultTargetPath, err := resolveExistingPath(defaultConfigPath)
+			if err != nil {
+				return fmt.Errorf("resolve default Codex config: %w", err)
+			}
+			if targetPath != defaultTargetPath {
 				return fmt.Errorf("profile config symlink must point to default Codex config %s: %s", defaultConfigPath, configPath)
 			}
 			targetInfo, err := os.Stat(configPath)
@@ -661,6 +680,13 @@ func (s *Store) ensureProfileSkills(codexHome string) error {
 		return err
 	}
 
+	if err := os.MkdirAll(profileSkillsPath, 0o700); err != nil {
+		return fmt.Errorf("create profile skills dir: %w", err)
+	}
+	if err := os.Chmod(profileSkillsPath, 0o700); err != nil {
+		return fmt.Errorf("secure profile skills dir permissions: %w", err)
+	}
+
 	entries, err := os.ReadDir(defaultSkillsPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -668,16 +694,13 @@ func (s *Store) ensureProfileSkills(codexHome string) error {
 		}
 		return fmt.Errorf("read default skills dir: %w", err)
 	}
-	if err := os.MkdirAll(profileSkillsPath, 0o700); err != nil {
-		return fmt.Errorf("create profile skills dir: %w", err)
-	}
 	if err := s.removeStaleManagedSkillLinks(defaultSkillsPath, profileSkillsPath); err != nil {
 		return err
 	}
 
 	for _, entry := range entries {
 		name := strings.TrimSpace(entry.Name())
-		if name == "" || name == "." || name == ".." || name == ".system" {
+		if name == "" || name == "." || name == ".." {
 			continue
 		}
 
@@ -688,9 +711,27 @@ func (s *Store) ensureProfileSkills(codexHome string) error {
 		switch {
 		case err == nil:
 			if info.Mode()&os.ModeSymlink != 0 {
-				target, readErr := resolveSymlinkTarget(profileEntryPath)
+				target, readErr := resolveExistingSymlinkTarget(profileEntryPath)
 				if readErr != nil {
-					return fmt.Errorf("read profile skill symlink %s: %w", profileEntryPath, readErr)
+					if errors.Is(readErr, syscall.EINVAL) {
+						if info, statErr := os.Lstat(profileEntryPath); statErr == nil && info.Mode()&os.ModeSymlink == 0 {
+							continue
+						}
+					}
+					if !errors.Is(readErr, os.ErrNotExist) {
+						return fmt.Errorf("resolve profile skill symlink %s: %w", profileEntryPath, readErr)
+					}
+					target, readErr = resolveBrokenManagedSymlinkTarget(profileEntryPath)
+					if readErr != nil {
+						return fmt.Errorf("resolve profile skill symlink %s: %w", profileEntryPath, readErr)
+					}
+					if pathIsInsideRoot(defaultSkillsPath, target) {
+						if err := os.Remove(profileEntryPath); err != nil {
+							return fmt.Errorf("replace stale profile skill symlink %s: %w", profileEntryPath, err)
+						}
+						break
+					}
+					return fmt.Errorf("profile skill symlink must point under default skills directory: %s", profileEntryPath)
 				}
 				if canonicalProfilePath(target) == canonicalProfilePath(defaultEntryPath) {
 					continue
@@ -708,7 +749,7 @@ func (s *Store) ensureProfileSkills(codexHome string) error {
 			return fmt.Errorf("inspect profile skill entry %s: %w", profileEntryPath, err)
 		}
 
-		if err := os.Symlink(defaultEntryPath, profileEntryPath); err != nil {
+		if err := linkProfileSkill(defaultEntryPath, profileEntryPath); err != nil {
 			return fmt.Errorf("link profile skill %s: %w", name, err)
 		}
 	}
@@ -733,33 +774,84 @@ func (s *Store) removeStaleManagedSkillLinks(defaultSkillsPath, profileSkillsPat
 		if info.Mode()&os.ModeSymlink == 0 {
 			continue
 		}
-		target, err := resolveSymlinkTarget(profileEntryPath)
+		target, err := resolveExistingSymlinkTarget(profileEntryPath)
 		if err != nil {
-			return fmt.Errorf("read profile skill symlink %s: %w", profileEntryPath, err)
-		}
-		if !pathIsInsideRoot(defaultSkillsPath, target) {
-			return fmt.Errorf("profile skill symlink must point under default skills directory: %s", profileEntryPath)
-		}
-		if _, err := os.Stat(target); errors.Is(err, os.ErrNotExist) {
+			if errors.Is(err, syscall.EINVAL) {
+				if info, statErr := os.Lstat(profileEntryPath); statErr == nil && info.Mode()&os.ModeSymlink == 0 {
+					continue
+				}
+			}
+			if !errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("resolve profile skill symlink %s: %w", profileEntryPath, err)
+			}
+			target, err = resolveBrokenManagedSymlinkTarget(profileEntryPath)
+			if err != nil {
+				return fmt.Errorf("resolve profile skill symlink %s: %w", profileEntryPath, err)
+			}
+			if !pathIsInsideRoot(defaultSkillsPath, target) {
+				return fmt.Errorf("profile skill symlink must point under default skills directory: %s", profileEntryPath)
+			}
 			if err := os.Remove(profileEntryPath); err != nil {
 				return fmt.Errorf("remove stale profile skill symlink %s: %w", profileEntryPath, err)
 			}
-		} else if err != nil {
-			return fmt.Errorf("inspect profile skill symlink target %s: %w", profileEntryPath, err)
+			continue
+		}
+		if !pathIsInsideRoot(defaultSkillsPath, target) {
+			return fmt.Errorf("profile skill symlink must point under default skills directory: %s", profileEntryPath)
 		}
 	}
 	return nil
 }
 
-func resolveSymlinkTarget(path string) (string, error) {
+func linkProfileSkill(defaultEntryPath, profileEntryPath string) error {
+	if err := os.Symlink(defaultEntryPath, profileEntryPath); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			info, statErr := os.Lstat(profileEntryPath)
+			if statErr == nil && info.Mode()&os.ModeSymlink != 0 {
+				target, readErr := resolveExistingSymlinkTarget(profileEntryPath)
+				if readErr == nil && canonicalProfilePath(target) == canonicalProfilePath(defaultEntryPath) {
+					return nil
+				}
+			}
+		}
+		return err
+	}
+	return nil
+}
+
+func resolveExistingSymlinkTarget(path string) (string, error) {
+	return resolveExistingPath(path)
+}
+
+func resolveExistingPath(path string) (string, error) {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Clean(resolved), nil
+}
+
+func resolveBrokenManagedSymlinkTarget(path string) (string, error) {
 	target, err := os.Readlink(path)
 	if err != nil {
 		return "", err
+	}
+	if containsParentPathSegment(target) {
+		return "", fmt.Errorf("symlink target contains parent directory traversal: %s", target)
 	}
 	if !filepath.IsAbs(target) {
 		target = filepath.Join(filepath.Dir(path), target)
 	}
 	return filepath.Clean(target), nil
+}
+
+func containsParentPathSegment(path string) bool {
+	for _, part := range strings.Split(filepath.ToSlash(path), "/") {
+		if part == ".." {
+			return true
+		}
+	}
+	return false
 }
 
 func pathIsInsideRoot(root, path string) bool {

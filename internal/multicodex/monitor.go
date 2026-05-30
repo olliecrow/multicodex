@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -146,24 +147,28 @@ func (a *App) runMonitorTUI(args []string) error {
 }
 
 func printMonitorDoctorHuman(report usage.DoctorReport) {
-	fmt.Println("multicodex monitor doctor")
-	fmt.Println()
+	printMonitorDoctorHumanTo(os.Stdout, report)
+}
+
+func printMonitorDoctorHumanTo(w io.Writer, report usage.DoctorReport) {
+	fmt.Fprintln(w, "multicodex monitor doctor")
+	fmt.Fprintln(w)
 	for _, c := range report.Checks {
 		state := "FAIL"
 		if c.OK {
 			state = "PASS"
 		}
-		fmt.Printf("[%s] %s\n", state, c.Name)
-		fmt.Printf("  %s\n", c.Details)
+		fmt.Fprintf(w, "[%s] %s\n", state, c.Name)
+		fmt.Fprintf(w, "  %s\n", c.Details)
 	}
-	fmt.Println()
+	fmt.Fprintln(w)
 	switch report.Status() {
 	case "healthy":
-		fmt.Println("monitor doctor result: PASS")
+		fmt.Fprintln(w, "monitor doctor result: PASS")
 	case "degraded":
-		fmt.Println("monitor doctor result: PASS (degraded: at least one usage source is unavailable)")
+		fmt.Fprintln(w, "monitor doctor result: PASS (degraded: at least one check failed)")
 	default:
-		fmt.Println("monitor doctor result: FAIL")
+		fmt.Fprintln(w, "monitor doctor result: FAIL")
 	}
 }
 
