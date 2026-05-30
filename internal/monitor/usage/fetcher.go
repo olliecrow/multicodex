@@ -77,11 +77,18 @@ func newConfiguredFetcherWithLoader(asyncObserved bool, loader func() ([]Monitor
 }
 
 func (f *Fetcher) Fetch(ctx context.Context) (*Summary, error) {
+	if f.accountLoader != nil {
+		f.refreshAccounts(time.Now().UTC(), len(f.accounts) == 0)
+	}
 	if len(f.accounts) > 0 {
 		return f.fetchMultiAccount(ctx)
 	}
 	if f.accountLoader != nil {
-		return nil, fmt.Errorf("no monitor accounts configured")
+		msg := "no monitor accounts configured"
+		if f.initializationNote != "" {
+			msg += ": " + f.initializationNote
+		}
+		return nil, fmt.Errorf("%s", msg)
 	}
 	return f.fetchSingle(ctx)
 }

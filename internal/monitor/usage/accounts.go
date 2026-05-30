@@ -129,11 +129,18 @@ func loadAccountsFromMulticodexConfig() ([]MonitorAccount, string, error) {
 		return nil, "", fmt.Errorf("resolve multicodex config: %w", err)
 	}
 	multicodexHome := filepath.Dir(configPath)
-	if info, err := os.Lstat(multicodexHome); err == nil && info.Mode()&os.ModeSymlink != 0 {
-		return nil, "skipping multicodex profiles: multicodex home is a symlink", nil
+	if info, err := os.Lstat(multicodexHome); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return nil, "skipping multicodex profiles: multicodex home is a symlink", nil
+		}
+		if info.IsDir() && info.Mode().Perm()&0o077 != 0 {
+			return nil, fmt.Sprintf("skipping multicodex profiles: multicodex home permissions are %o, expected no group/world permissions", info.Mode().Perm()), nil
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, "", fmt.Errorf("inspect multicodex home %s: %w", multicodexHome, err)
 	}
 
-	if err := monitorRegularFileOrSymlinkTarget(configPath); err != nil {
+	if err := monitorRegularSingleFile(configPath); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, "", nil
 		}
@@ -229,7 +236,7 @@ func monitorProfileHomeSafe(profilesDir, name, home string) error {
 			return fmt.Errorf("%s has multiple hard links", path)
 		}
 	}
-	ok, err := monitorConfigUsesFileStore(filepath.Join(home, "config.toml"))
+	ok, err := monitorProfileConfigUsesFileStore(filepath.Join(home, "config.toml"))
 	if err != nil {
 		return err
 	}
@@ -253,9 +260,58 @@ func monitorFileHasMultipleLinks(info os.FileInfo) bool {
 }
 
 func monitorConfigUsesFileStore(path string) (bool, error) {
-	if err := monitorRegularFileOrSymlinkTarget(path); err != nil {
+	if err := monitorRegularSingleFile(path); err != nil {
 		return false, err
 	}
+	return monitorConfigFileUsesFileStore(path)
+}
+
+func monitorProfileConfigUsesFileStore(path string) (bool, error) {
+	defaultHome, err := defaultCodexHome()
+	if err != nil {
+		return false, err
+	}
+	defaultConfigPath := filepath.Join(defaultHome, "config.toml")
+	if err := monitorProfileConfigPathSafe(path, defaultConfigPath); err != nil {
+		return false, err
+	}
+	return monitorConfigFileUsesFileStore(path)
+}
+
+func monitorProfileConfigPathSafe(path, defaultConfigPath string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("%s is not a regular file", path)
+		}
+		return nil
+	}
+
+	targetPath, err := monitorResolveExistingPath(path)
+	if err != nil {
+		return fmt.Errorf("resolve profile config symlink: %w", err)
+	}
+	defaultTargetPath, err := monitorResolveExistingPath(defaultConfigPath)
+	if err != nil {
+		return fmt.Errorf("resolve default Codex config: %w", err)
+	}
+	if targetPath != defaultTargetPath {
+		return fmt.Errorf("profile config symlink must point to default Codex config %s", defaultConfigPath)
+	}
+	targetInfo, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("profile config symlink target is not readable: %w", err)
+	}
+	if !targetInfo.Mode().IsRegular() {
+		return fmt.Errorf("profile config symlink target is not a regular file: %s", path)
+	}
+	return nil
+}
+
+func monitorConfigFileUsesFileStore(path string) (bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return false, fmt.Errorf("read profile config: %w", err)
@@ -300,32 +356,19 @@ func monitorConfigUsesFileStore(path string) (bool, error) {
 	return false, nil
 }
 
-func monitorRegularFileOrSymlinkTarget(path string) error {
-	info, err := os.Lstat(path)
-	if err != nil {
-		return err
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		targetInfo, err := os.Stat(path)
-		if err != nil {
-			return err
-		}
-		if !targetInfo.Mode().IsRegular() {
-			return fmt.Errorf("%s symlink target is not a regular file", path)
-		}
-		return nil
-	}
-	if !info.Mode().IsRegular() {
-		return fmt.Errorf("%s is not a regular file", path)
-	}
-	return nil
-}
-
 func monitorTOMLKey(raw string) string {
 	if len(raw) >= 2 && ((raw[0] == '"' && raw[len(raw)-1] == '"') || (raw[0] == '\'' && raw[len(raw)-1] == '\'')) {
 		return raw[1 : len(raw)-1]
 	}
 	return raw
+}
+
+func monitorResolveExistingPath(path string) (string, error) {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Clean(resolved), nil
 }
 
 func isMulticodexProfileHome(home string) bool {

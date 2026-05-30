@@ -66,8 +66,8 @@ Multicodex intentionally has no command for changing the shared default Codex ac
 - Treats profiles whose five-hour usage window is strictly below 40% as eligible.
 - Excludes profiles whose weekly window is known to be exhausted.
 - Among eligible profiles, picks the one whose weekly reset is soonest.
-- When usage fetch is unavailable for every profile, falls back to the first configured profile after profile safety checks pass.
-- Writes selected-profile metadata only under `MULTICODEX_HOME` when `MULTICODEX_SELECTED_PROFILE_PATH` is set.
+- When usage fetch is unavailable for every profile, falls back to the first configured profile that passes profile safety checks.
+- Writes selected-profile metadata only under `MULTICODEX_HOME/run` when `MULTICODEX_SELECTED_PROFILE_PATH` is set.
 - Returns the child exit code.
 
 `multicodex status`
@@ -113,7 +113,7 @@ Multicodex intentionally has no command for changing the shared default Codex ac
 - Uses OAuth fetch checks by default.
 - Adds default Codex home, active `CODEX_HOME`, filesystem discovery, or app-server checks only when the caller passes `--include-default`, `--include-active`, `--discover`, or `--app-server`.
 - Exits success when at least one usage fetch works and fails when no usage fetch works.
-- Reports degraded status when some usage fetches fail but at least one works.
+- Reports degraded status when at least one usage fetch works but another usage fetch or setup check fails.
 
 `multicodex monitor completion`
 - Defaults to bash when no shell is provided.

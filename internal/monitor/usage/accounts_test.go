@@ -474,6 +474,37 @@ func TestLoadMonitorAccountsPrefersMulticodexProfiles(t *testing.T) {
 	}
 }
 
+func TestLoadMonitorAccountsRejectsSymlinkedMulticodexConfig(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv(multicodexHomeEnvVar, filepath.Join(tmp, defaultMulticodexHomeDirName))
+	t.Setenv(accountsFileEnvVar, filepath.Join(tmp, "missing.json"))
+
+	configDir := filepath.Join(tmp, defaultMulticodexHomeDirName)
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatalf("mkdir multicodex dir: %v", err)
+	}
+	outsideConfig := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(outsideConfig, []byte(`{"version":1,"profiles":{}}`), 0o600); err != nil {
+		t.Fatalf("write outside config: %v", err)
+	}
+	if err := os.Symlink(outsideConfig, filepath.Join(configDir, "config.json")); err != nil {
+		t.Fatalf("symlink config: %v", err)
+	}
+
+	accounts, warning, err := loadMonitorAccounts()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(accounts) != 0 {
+		t.Fatalf("expected symlinked multicodex config to be skipped, got %#v", accounts)
+	}
+	if !strings.Contains(warning, "multicodex profile discovery error") || !strings.Contains(warning, "symlink") {
+		t.Fatalf("expected symlink warning, got %q", warning)
+	}
+}
+
 func TestLoadAccountsFromMulticodexConfigRejectsGroupReadableProfileDir(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
@@ -505,6 +536,189 @@ func TestLoadAccountsFromMulticodexConfigRejectsGroupReadableProfileDir(t *testi
 	}
 	if !strings.Contains(warning, "expected no group/world permissions") {
 		t.Fatalf("expected private-permissions warning, got %q", warning)
+	}
+}
+
+func TestLoadAccountsFromMulticodexConfigRejectsGroupReadableMulticodexHome(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv(multicodexHomeEnvVar, filepath.Join(tmp, defaultMulticodexHomeDirName))
+
+	configDir := filepath.Join(tmp, defaultMulticodexHomeDirName)
+	profileHome := filepath.Join(configDir, "profiles", "personal", "codex-home")
+	if err := os.MkdirAll(profileHome, 0o700); err != nil {
+		t.Fatalf("mkdir profile home: %v", err)
+	}
+	if err := os.Chmod(configDir, 0o750); err != nil {
+		t.Fatalf("chmod multicodex home: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(profileHome, "auth.json"), []byte(`{"tokens":{"access_token":"x"}}`), 0o600); err != nil {
+		t.Fatalf("write auth file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(profileHome, "config.toml"), []byte("cli_auth_credentials_store = \"file\"\n"), 0o600); err != nil {
+		t.Fatalf("write profile config: %v", err)
+	}
+	configPath := filepath.Join(configDir, "config.json")
+	configBody := `{"version":1,"profiles":{"personal":{"name":"personal","codex_home":"` + profileHome + `"}}}`
+	if err := os.WriteFile(configPath, []byte(configBody), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	accounts, warning, err := loadAccountsFromMulticodexConfig()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(accounts) != 0 {
+		t.Fatalf("expected group-readable multicodex home to be skipped, got %#v", accounts)
+	}
+	if !strings.Contains(warning, "expected no group/world permissions") {
+		t.Fatalf("expected private-permissions warning, got %q", warning)
+	}
+}
+
+func TestLoadAccountsFromMulticodexConfigRejectsProfileConfigSymlinkOutsideDefault(t *testing.T) {
+	tmp := t.TempDir()
+	defaultHome := filepath.Join(tmp, "default-codex")
+	t.Setenv("HOME", tmp)
+	t.Setenv(defaultCodexHomeEnvVar, defaultHome)
+	t.Setenv(multicodexHomeEnvVar, filepath.Join(tmp, defaultMulticodexHomeDirName))
+
+	if err := os.MkdirAll(defaultHome, 0o700); err != nil {
+		t.Fatalf("mkdir default home: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(defaultHome, "config.toml"), []byte("cli_auth_credentials_store = \"file\"\n"), 0o600); err != nil {
+		t.Fatalf("write default config: %v", err)
+	}
+
+	configDir := filepath.Join(tmp, defaultMulticodexHomeDirName)
+	profileHome := filepath.Join(configDir, "profiles", "personal", "codex-home")
+	if err := os.MkdirAll(profileHome, 0o700); err != nil {
+		t.Fatalf("mkdir profile home: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(profileHome, "auth.json"), []byte(`{"tokens":{"access_token":"x"}}`), 0o600); err != nil {
+		t.Fatalf("write auth file: %v", err)
+	}
+	otherConfig := filepath.Join(t.TempDir(), "other-config.toml")
+	if err := os.WriteFile(otherConfig, []byte("cli_auth_credentials_store = \"file\"\n"), 0o600); err != nil {
+		t.Fatalf("write other config: %v", err)
+	}
+	if err := os.Symlink(otherConfig, filepath.Join(profileHome, "config.toml")); err != nil {
+		t.Fatalf("symlink profile config: %v", err)
+	}
+	configPath := filepath.Join(configDir, "config.json")
+	configBody := `{"version":1,"profiles":{"personal":{"name":"personal","codex_home":"` + profileHome + `"}}}`
+	if err := os.WriteFile(configPath, []byte(configBody), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	accounts, warning, err := loadAccountsFromMulticodexConfig()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(accounts) != 0 {
+		t.Fatalf("expected unsafe profile config to be skipped, got %#v", accounts)
+	}
+	if !strings.Contains(warning, "must point to default Codex config") {
+		t.Fatalf("expected default config symlink warning, got %q", warning)
+	}
+}
+
+func TestLoadAccountsFromMulticodexConfigRejectsProfileConfigSymlinkTraversalThroughSymlink(t *testing.T) {
+	tmp := t.TempDir()
+	defaultHome := filepath.Join(tmp, "default-codex")
+	t.Setenv("HOME", tmp)
+	t.Setenv(defaultCodexHomeEnvVar, defaultHome)
+	t.Setenv(multicodexHomeEnvVar, filepath.Join(tmp, defaultMulticodexHomeDirName))
+
+	if err := os.MkdirAll(defaultHome, 0o700); err != nil {
+		t.Fatalf("mkdir default home: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(defaultHome, "config.toml"), []byte("cli_auth_credentials_store = \"file\"\n"), 0o600); err != nil {
+		t.Fatalf("write default config: %v", err)
+	}
+	outsideDir := filepath.Join(tmp, "outside")
+	outsideChild := filepath.Join(outsideDir, "child")
+	if err := os.MkdirAll(outsideChild, 0o700); err != nil {
+		t.Fatalf("mkdir outside child: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(outsideDir, "config.toml"), []byte("cli_auth_credentials_store = \"file\"\n"), 0o600); err != nil {
+		t.Fatalf("write outside config: %v", err)
+	}
+	if err := os.Symlink(outsideChild, filepath.Join(defaultHome, "pivot")); err != nil {
+		t.Fatalf("symlink default pivot: %v", err)
+	}
+
+	configDir := filepath.Join(tmp, defaultMulticodexHomeDirName)
+	profileHome := filepath.Join(configDir, "profiles", "personal", "codex-home")
+	if err := os.MkdirAll(profileHome, 0o700); err != nil {
+		t.Fatalf("mkdir profile home: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(profileHome, "auth.json"), []byte(`{"tokens":{"access_token":"x"}}`), 0o600); err != nil {
+		t.Fatalf("write auth file: %v", err)
+	}
+	rawTarget := defaultHome + string(os.PathSeparator) + "pivot" + string(os.PathSeparator) + ".." + string(os.PathSeparator) + "config.toml"
+	if err := os.Symlink(rawTarget, filepath.Join(profileHome, "config.toml")); err != nil {
+		t.Fatalf("symlink profile config: %v", err)
+	}
+	configPath := filepath.Join(configDir, "config.json")
+	configBody := `{"version":1,"profiles":{"personal":{"name":"personal","codex_home":"` + profileHome + `"}}}`
+	if err := os.WriteFile(configPath, []byte(configBody), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	accounts, warning, err := loadAccountsFromMulticodexConfig()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(accounts) != 0 {
+		t.Fatalf("expected unsafe profile config to be skipped, got %#v", accounts)
+	}
+	if !strings.Contains(warning, "must point to default Codex config") {
+		t.Fatalf("expected default config symlink warning, got %q", warning)
+	}
+}
+
+func TestLoadAccountsFromMulticodexConfigAllowsProfileConfigSymlinkToDefault(t *testing.T) {
+	tmp := t.TempDir()
+	defaultHome := filepath.Join(tmp, "default-codex")
+	t.Setenv("HOME", tmp)
+	t.Setenv(defaultCodexHomeEnvVar, defaultHome)
+	t.Setenv(multicodexHomeEnvVar, filepath.Join(tmp, defaultMulticodexHomeDirName))
+
+	if err := os.MkdirAll(defaultHome, 0o700); err != nil {
+		t.Fatalf("mkdir default home: %v", err)
+	}
+	defaultConfigPath := filepath.Join(defaultHome, "config.toml")
+	if err := os.WriteFile(defaultConfigPath, []byte("cli_auth_credentials_store = \"file\"\n"), 0o600); err != nil {
+		t.Fatalf("write default config: %v", err)
+	}
+
+	configDir := filepath.Join(tmp, defaultMulticodexHomeDirName)
+	profileHome := filepath.Join(configDir, "profiles", "personal", "codex-home")
+	if err := os.MkdirAll(profileHome, 0o700); err != nil {
+		t.Fatalf("mkdir profile home: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(profileHome, "auth.json"), []byte(`{"tokens":{"access_token":"x"}}`), 0o600); err != nil {
+		t.Fatalf("write auth file: %v", err)
+	}
+	if err := os.Symlink(defaultConfigPath, filepath.Join(profileHome, "config.toml")); err != nil {
+		t.Fatalf("symlink profile config: %v", err)
+	}
+	configPath := filepath.Join(configDir, "config.json")
+	configBody := `{"version":1,"profiles":{"personal":{"name":"personal","codex_home":"` + profileHome + `"}}}`
+	if err := os.WriteFile(configPath, []byte(configBody), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	accounts, warning, err := loadAccountsFromMulticodexConfig()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if warning != "" {
+		t.Fatalf("expected no warning, got %q", warning)
+	}
+	if len(accounts) != 1 || accounts[0].Label != "personal" {
+		t.Fatalf("expected profile to be loaded, got %#v", accounts)
 	}
 }
 
