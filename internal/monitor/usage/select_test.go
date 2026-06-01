@@ -67,6 +67,99 @@ func TestSelectBestAccountUsesKnownWeeklyResetBeforeUnknownWeeklyReset(t *testin
 	}
 }
 
+func TestSelectBestAccountUsesLowerPriorityBeforeReserveAccount(t *testing.T) {
+	selected, err := selectBestAccountFromResultsForModel([]accountFetchResult{
+		{
+			codexHome:         "/profile",
+			selectionPriority: 0,
+			account: AccountSummary{
+				Label:           "profile",
+				PrimaryWindow:   WindowSummary{UsedPercent: 10},
+				SecondaryWindow: WindowSummary{UsedPercent: 30},
+			},
+			snapshot: &Summary{},
+		},
+		{
+			codexHome:         "/default",
+			selectionPriority: 100,
+			account: AccountSummary{
+				Label:           "default",
+				PrimaryWindow:   WindowSummary{UsedPercent: 1},
+				SecondaryWindow: WindowSummary{UsedPercent: 1, SecondsUntilReset: testInt64Ptr(30 * 60)},
+			},
+			snapshot: &Summary{},
+		},
+	}, 40, "")
+	if err != nil {
+		t.Fatalf("selectBestAccountFromResultsForModel: %v", err)
+	}
+	if selected.Account.Label != "profile" {
+		t.Fatalf("expected lower-priority profile account before reserve default account, got %q", selected.Account.Label)
+	}
+}
+
+func TestSelectBestAccountUsesReserveAccountWhenProfilesAreNotEligible(t *testing.T) {
+	selected, err := selectBestAccountFromResultsForModel([]accountFetchResult{
+		{
+			codexHome:         "/profile",
+			selectionPriority: 0,
+			account: AccountSummary{
+				Label:           "profile",
+				PrimaryWindow:   WindowSummary{UsedPercent: 80},
+				SecondaryWindow: WindowSummary{UsedPercent: 30, SecondsUntilReset: testInt64Ptr(10 * 60)},
+			},
+			snapshot: &Summary{},
+		},
+		{
+			codexHome:         "/default",
+			selectionPriority: 100,
+			account: AccountSummary{
+				Label:           "default",
+				PrimaryWindow:   WindowSummary{UsedPercent: 1},
+				SecondaryWindow: WindowSummary{UsedPercent: 1, SecondsUntilReset: testInt64Ptr(30 * 60)},
+			},
+			snapshot: &Summary{},
+		},
+	}, 40, "")
+	if err != nil {
+		t.Fatalf("selectBestAccountFromResultsForModel: %v", err)
+	}
+	if selected.Account.Label != "default" {
+		t.Fatalf("expected reserve default account after profile accounts are not eligible, got %q", selected.Account.Label)
+	}
+}
+
+func TestSelectBestAccountUsesAccessibleProfilesBeforeAccessibleReserveFallback(t *testing.T) {
+	selected, err := selectBestAccountFromResultsForModel([]accountFetchResult{
+		{
+			codexHome:         "/profile",
+			selectionPriority: 0,
+			account: AccountSummary{
+				Label:           "profile",
+				PrimaryWindow:   WindowSummary{UsedPercent: 80},
+				SecondaryWindow: WindowSummary{UsedPercent: 100, SecondsUntilReset: testInt64Ptr(10 * 60)},
+			},
+			snapshot: &Summary{},
+		},
+		{
+			codexHome:         "/default",
+			selectionPriority: 100,
+			account: AccountSummary{
+				Label:           "default",
+				PrimaryWindow:   WindowSummary{UsedPercent: 80},
+				SecondaryWindow: WindowSummary{UsedPercent: 100, SecondsUntilReset: testInt64Ptr(30 * 60)},
+			},
+			snapshot: &Summary{},
+		},
+	}, 40, "")
+	if err != nil {
+		t.Fatalf("selectBestAccountFromResultsForModel: %v", err)
+	}
+	if selected.Account.Label != "profile" {
+		t.Fatalf("expected accessible profile fallback before accessible reserve fallback, got %q", selected.Account.Label)
+	}
+}
+
 func TestSelectBestAccountChoosesRandomEligibleAccountWhenAllEligibleWeeklyResetsAreUnknown(t *testing.T) {
 	originalChooser := chooseRandomResultIndex
 	chooseRandomResultIndex = func(candidates []int) int {

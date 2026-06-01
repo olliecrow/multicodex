@@ -58,14 +58,16 @@ Multicodex intentionally has no command for changing the shared default Codex ac
 `multicodex exec [codex exec args]`
 - Runs `codex exec` with all remaining arguments passed through unchanged.
 - Delegates exact help requests (`--help`, `-h`, or `help`) directly to `codex exec` without requiring profiles.
-- Automatically selects only among configured multicodex profiles.
-- Re-checks file-backed auth isolation before launch.
+- Automatically selects among configured multicodex profiles first.
+- Includes the default Codex home as a built-in reserve account after configured profiles.
+- Re-checks file-backed auth isolation before launching configured profiles.
 - Parses model selection arguments (`--model`, `--model=`, and `-m`) for routing.
 - If the model contains `spark` case-insensitively, selects Spark usage windows when available.
 - If Spark is requested but Spark usage data is unavailable, returns the usage-selection error instead of falling back to default-window routing.
 - Treats profiles whose five-hour usage window is strictly below 40% as eligible.
 - Excludes profiles whose weekly window is known to be exhausted.
 - Among eligible profiles, picks the one whose weekly reset is soonest.
+- Uses the default Codex home only when no configured profile is eligible under the same usage rules.
 - When usage fetch is unavailable for every profile, falls back to the first configured profile that passes profile safety checks.
 - Writes selected-profile metadata only under `MULTICODEX_HOME/run` when `MULTICODEX_SELECTED_PROFILE_PATH` is set.
 - Returns the child exit code.
