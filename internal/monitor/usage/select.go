@@ -5,6 +5,7 @@ import (
 	cryptorand "crypto/rand"
 	"fmt"
 	"math/big"
+	"sort"
 	"strings"
 	"time"
 )
@@ -17,6 +18,8 @@ type SelectedAccount struct {
 
 type accountWindowCandidate struct {
 	resultIndex          int
+	selectionPriority    int
+	secondsUntilReset    int64
 	primaryUsedPercent   int
 	secondaryUsedPercent int
 }
@@ -64,8 +67,7 @@ func selectBestAccountFromResultsForModel(results []accountFetchResult, maxPrima
 	modelIsSpark := isSparkModel(model)
 	eligibleUnknownResetCandidates := []accountWindowCandidate{}
 	accessibleCandidates := []accountWindowCandidate{}
-	soonestEligibleResetSeconds := int64(0)
-	soonestEligibleCandidates := []accountWindowCandidate{}
+	eligibleResetCandidates := []accountWindowCandidate{}
 	hadModelWindow := false
 
 	for i, result := range results {
@@ -80,6 +82,7 @@ func selectBestAccountFromResultsForModel(results []accountFetchResult, maxPrima
 
 		candidate := accountWindowCandidate{
 			resultIndex:          i,
+			selectionPriority:    result.selectionPriority,
 			primaryUsedPercent:   primaryWindow.UsedPercent,
 			secondaryUsedPercent: secondaryWindow.UsedPercent,
 		}
@@ -100,21 +103,11 @@ func selectBestAccountFromResultsForModel(results []accountFetchResult, maxPrima
 			eligibleUnknownResetCandidates = append(eligibleUnknownResetCandidates, candidate)
 			continue
 		}
-
-		if len(soonestEligibleCandidates) == 0 || secondsUntilReset < soonestEligibleResetSeconds {
-			soonestEligibleResetSeconds = secondsUntilReset
-			soonestEligibleCandidates = []accountWindowCandidate{candidate}
-			continue
-		}
-		if secondsUntilReset == soonestEligibleResetSeconds {
-			soonestEligibleCandidates = append(soonestEligibleCandidates, candidate)
-		}
+		candidate.secondsUntilReset = secondsUntilReset
+		eligibleResetCandidates = append(eligibleResetCandidates, candidate)
 	}
 
-	if selected, ok := chooseSelectedAccount(results, soonestEligibleCandidates); ok {
-		return selected, nil
-	}
-	if selected, ok := chooseSelectedAccount(results, eligibleUnknownResetCandidates); ok {
+	if selected, ok := choosePrioritizedEligibleAccount(results, eligibleResetCandidates, eligibleUnknownResetCandidates); ok {
 		return selected, nil
 	}
 	if modelIsSpark && !hadModelWindow {
@@ -123,11 +116,76 @@ func selectBestAccountFromResultsForModel(results []accountFetchResult, maxPrima
 	if modelIsSpark && hadModelWindow {
 		return SelectedAccount{}, fmt.Errorf("no model-eligible accounts available for requested model %q", model)
 	}
-	if selected, ok := chooseSelectedAccount(results, accessibleCandidates); ok {
+	if selected, ok := choosePrioritizedAccount(results, accessibleCandidates); ok {
 		return selected, nil
 	}
 
 	return SelectedAccount{}, fmt.Errorf("no accessible accounts")
+}
+
+func choosePrioritizedAccount(results []accountFetchResult, candidates []accountWindowCandidate) (SelectedAccount, bool) {
+	for _, priority := range sortedCandidatePriorities(candidates) {
+		if selected, ok := chooseSelectedAccount(results, candidatesWithPriority(candidates, priority)); ok {
+			return selected, true
+		}
+	}
+	return SelectedAccount{}, false
+}
+
+func choosePrioritizedEligibleAccount(results []accountFetchResult, resetCandidates, unknownResetCandidates []accountWindowCandidate) (SelectedAccount, bool) {
+	for _, priority := range sortedCandidatePriorities(resetCandidates, unknownResetCandidates) {
+		if selected, ok := chooseSelectedAccount(results, soonestResetCandidatesForPriority(resetCandidates, priority)); ok {
+			return selected, true
+		}
+		if selected, ok := chooseSelectedAccount(results, candidatesWithPriority(unknownResetCandidates, priority)); ok {
+			return selected, true
+		}
+	}
+	return SelectedAccount{}, false
+}
+
+func sortedCandidatePriorities(candidateGroups ...[]accountWindowCandidate) []int {
+	seen := map[int]struct{}{}
+	for _, candidates := range candidateGroups {
+		for _, candidate := range candidates {
+			seen[candidate.selectionPriority] = struct{}{}
+		}
+	}
+	priorities := make([]int, 0, len(seen))
+	for priority := range seen {
+		priorities = append(priorities, priority)
+	}
+	sort.Ints(priorities)
+	return priorities
+}
+
+func soonestResetCandidatesForPriority(candidates []accountWindowCandidate, priority int) []accountWindowCandidate {
+	out := []accountWindowCandidate{}
+	soonest := int64(0)
+	for _, candidate := range candidates {
+		if candidate.selectionPriority != priority {
+			continue
+		}
+		if len(out) == 0 || candidate.secondsUntilReset < soonest {
+			soonest = candidate.secondsUntilReset
+			out = []accountWindowCandidate{candidate}
+			continue
+		}
+		if candidate.secondsUntilReset == soonest {
+			out = append(out, candidate)
+		}
+	}
+	return out
+}
+
+func candidatesWithPriority(candidates []accountWindowCandidate, priority int) []accountWindowCandidate {
+	out := []accountWindowCandidate{}
+	for _, candidate := range candidates {
+		if candidate.selectionPriority == priority {
+			out = append(out, candidate)
+		}
+	}
+	return out
 }
 
 func selectWindowsForModel(account AccountSummary, model string) (WindowSummary, WindowSummary, bool) {

@@ -32,8 +32,9 @@ type accountItem struct {
 }
 
 type MonitorAccount struct {
-	Label     string `json:"label"`
-	CodexHome string `json:"codex_home"`
+	Label             string `json:"label"`
+	CodexHome         string `json:"codex_home"`
+	SelectionPriority int    `json:"-"`
 }
 
 type MonitorAccountOptions struct {

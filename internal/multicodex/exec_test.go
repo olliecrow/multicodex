@@ -47,6 +47,49 @@ func TestCmdExecRunsCodexExecWithSelectedProfile(t *testing.T) {
 	}
 }
 
+func TestCmdExecRunsCodexExecWithDefaultReserveAccount(t *testing.T) {
+	app, logPath := newExecTestApp(t)
+	createExecProfiles(t, app, "alpha")
+
+	originalSelector := defaultExecAccountSelector
+	defaultExecAccountSelector = func(_ context.Context, accounts []usage.MonitorAccount, _ int, _ string) (usage.SelectedAccount, error) {
+		var defaultAccount usage.MonitorAccount
+		for _, account := range accounts {
+			if account.Label == defaultExecAccountLabel {
+				defaultAccount = account
+			}
+		}
+		if defaultAccount.CodexHome == "" {
+			t.Fatalf("expected default reserve account in selector candidates, got %#v", accounts)
+		}
+		if defaultAccount.SelectionPriority <= 0 {
+			t.Fatalf("expected default reserve account to have lower selection priority, got %#v", defaultAccount)
+		}
+		return usage.SelectedAccount{
+			Account:              defaultAccount,
+			PrimaryUsedPercent:   5,
+			SecondaryUsedPercent: 5,
+		}, nil
+	}
+	defer func() { defaultExecAccountSelector = originalSelector }()
+
+	if err := app.Run([]string{"exec", "--skip-git-repo-check", "hello"}); err != nil {
+		t.Fatalf("exec failed: %v", err)
+	}
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	log := string(data)
+	if !strings.Contains(log, "profile=\n") {
+		t.Fatalf("expected default reserve exec not to set active profile, got %q", log)
+	}
+	if !strings.Contains(log, "codex_home="+app.store.paths.DefaultCodexHome) {
+		t.Fatalf("expected default reserve exec to use default Codex home, got %q", log)
+	}
+}
+
 func TestCmdExecWritesSelectedProfileMetadata(t *testing.T) {
 	app, _ := newExecTestApp(t)
 	createExecProfiles(t, app, "alpha", "beta")
@@ -372,6 +415,49 @@ func TestCmdExecSkipsWeeklyExhaustedProfileUsingDefaultSelector(t *testing.T) {
 	}
 }
 
+func TestCmdExecUsesConfiguredProfilesBeforeDefaultReserveAccount(t *testing.T) {
+	app, logPath, root := newExecSelectionTestApp(t)
+	createExecProfiles(t, app, "alpha")
+	writeExecSelectionProfileData(t, root, "alpha", 10, 30, 0)
+	writeExecSelectionDefaultData(t, app, 1, 1, 30*time.Minute)
+
+	if err := app.Run([]string{"exec", "--skip-git-repo-check", "hello"}); err != nil {
+		t.Fatalf("exec failed: %v", err)
+	}
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	log := string(data)
+	if !strings.Contains(log, "profile=alpha") {
+		t.Fatalf("expected eligible profile before default reserve account, got %q", log)
+	}
+}
+
+func TestCmdExecUsesDefaultReserveAccountWhenProfilesAreNotEligible(t *testing.T) {
+	app, logPath, root := newExecSelectionTestApp(t)
+	createExecProfiles(t, app, "alpha")
+	writeExecSelectionProfileData(t, root, "alpha", 80, 30, 10*time.Minute)
+	writeExecSelectionDefaultData(t, app, 1, 1, 30*time.Minute)
+
+	if err := app.Run([]string{"exec", "--skip-git-repo-check", "hello"}); err != nil {
+		t.Fatalf("exec failed: %v", err)
+	}
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	log := string(data)
+	if !strings.Contains(log, "profile=\n") {
+		t.Fatalf("expected reserve default account not to set active profile, got %q", log)
+	}
+	if !strings.Contains(log, "codex_home="+app.store.paths.DefaultCodexHome) {
+		t.Fatalf("expected reserve default account Codex home, got %q", log)
+	}
+}
+
 func TestCmdExecSparkModelDoesNotFallbackWhenSparkWindowMissing(t *testing.T) {
 	app, logPath, root := newExecSelectionTestApp(t)
 	createExecProfiles(t, app, "alpha")
@@ -525,8 +611,11 @@ func TestCmdExecSkipsInvalidConfiguredProfileBeforeSelection(t *testing.T) {
 
 	originalSelector := defaultExecAccountSelector
 	defaultExecAccountSelector = func(_ context.Context, accounts []usage.MonitorAccount, _ int, _ string) (usage.SelectedAccount, error) {
-		if len(accounts) != 1 || accounts[0].Label != "beta" {
-			t.Fatalf("expected selector to see only ready beta profile, got %#v", accounts)
+		if len(accounts) != 2 || accounts[0].Label != "beta" || accounts[1].Label != defaultExecAccountLabel {
+			t.Fatalf("expected selector to see ready beta profile plus default reserve account, got %#v", accounts)
+		}
+		if accounts[1].SelectionPriority <= accounts[0].SelectionPriority {
+			t.Fatalf("expected default reserve account to have lower selection priority, got %#v", accounts)
 		}
 		return usage.SelectedAccount{Account: usage.MonitorAccount{Label: "beta"}}, nil
 	}
@@ -854,6 +943,7 @@ if [[ "${1:-}" == "exec" ]]; then
   : "${MULTICODEX_FAKE_CODEX_LOG:?MULTICODEX_FAKE_CODEX_LOG must be set}"
   {
     printf 'profile=%s\n' "${MULTICODEX_ACTIVE_PROFILE:-}"
+    printf 'codex_home=%s\n' "${CODEX_HOME:-}"
     i=0
     for arg in "$@"; do
       printf 'arg[%d]=%s\n' "$i" "$arg"
@@ -898,6 +988,9 @@ func (t execSelectionOAuthTransport) RoundTrip(req *http.Request) (*http.Respons
 	}
 	name := strings.TrimPrefix(token, "token-")
 	usagePath := filepath.Join(t.root, "multi", "profiles", name, "codex-home", "usage.json")
+	if name == defaultExecAccountLabel {
+		usagePath = filepath.Join(t.root, "default-codex", "usage.json")
+	}
 	data, err := os.ReadFile(usagePath)
 	if err != nil {
 		return nil, err
@@ -977,5 +1070,28 @@ func writeExecSelectionProfileData(t *testing.T, root, name string, primaryUsed,
 	)
 	if err := os.WriteFile(filepath.Join(home, "usage.json"), []byte(usageJSON), 0o600); err != nil {
 		t.Fatalf("write usage: %v", err)
+	}
+}
+
+func writeExecSelectionDefaultData(t *testing.T, app *App, primaryUsed, weeklyUsed int, weeklyResetIn time.Duration) {
+	t.Helper()
+
+	home := app.store.paths.DefaultCodexHome
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		t.Fatalf("mkdir default Codex home: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "auth.json"), []byte(`{"tokens":{"access_token":"token-default"}}`), 0o600); err != nil {
+		t.Fatalf("write default auth: %v", err)
+	}
+	now := time.Now().UTC()
+	usageJSON := fmt.Sprintf(
+		`{"primary_used_percent": %d, "weekly_used_percent": %d, "email": "default@example.com", "primary_resets_at": %d, "secondary_resets_at": %d}`,
+		primaryUsed,
+		weeklyUsed,
+		now.Add(5*time.Hour).Unix(),
+		now.Add(weeklyResetIn).Unix(),
+	)
+	if err := os.WriteFile(filepath.Join(home, "usage.json"), []byte(usageJSON), 0o600); err != nil {
+		t.Fatalf("write default usage: %v", err)
 	}
 }

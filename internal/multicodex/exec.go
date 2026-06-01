@@ -16,6 +16,8 @@ const (
 	execSelectionPrimaryUsageLimit = 40
 	execSelectionTimeout           = 10 * time.Second
 	envSelectedProfilePath         = "MULTICODEX_SELECTED_PROFILE_PATH"
+	defaultExecAccountLabel        = "default"
+	defaultExecAccountPriority     = 100
 )
 
 type execAccountSelector func(context.Context, []usage.MonitorAccount, int, string) (usage.SelectedAccount, error)
@@ -28,9 +30,11 @@ type execSelectionMetadata struct {
 }
 
 type execSelection struct {
-	Name     string
-	Profile  Profile
-	Metadata execSelectionMetadata
+	Name      string
+	CodexHome string
+	IsProfile bool
+	Profile   Profile
+	Metadata  execSelectionMetadata
 }
 
 var defaultExecAccountSelector execAccountSelector = func(ctx context.Context, accounts []usage.MonitorAccount, maxPrimaryUsedPercent int, model string) (usage.SelectedAccount, error) {
@@ -56,17 +60,23 @@ func (a *App) cmdExec(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := a.store.EnsureProfileDir(selected.Profile); err != nil {
-		return err
-	}
-	if err := ensureProfileCodexExecutionReady(a.store.paths, selected.Profile); err != nil {
-		return err
+	if selected.IsProfile {
+		if err := a.store.EnsureProfileDir(selected.Profile); err != nil {
+			return err
+		}
+		if err := ensureProfileCodexExecutionReady(a.store.paths, selected.Profile); err != nil {
+			return err
+		}
 	}
 	if err := writeSelectedProfileMetadata(a.store.paths, os.Getenv(envSelectedProfilePath), selected.Metadata); err != nil {
 		return err
 	}
 
-	return RunCodexWithProfile(selected.Profile.CodexHome, selected.Name, append([]string{"exec"}, args...))
+	activeProfile := selected.Name
+	if !selected.IsProfile {
+		activeProfile = ""
+	}
+	return RunCodexWithProfile(selected.CodexHome, activeProfile, append([]string{"exec"}, args...))
 }
 
 func (a *App) execReadyConfig(cfg *Config) (*Config, error) {
@@ -214,6 +224,14 @@ func (a *App) selectExecProfile(cfg *Config, selector execAccountSelector, model
 			CodexHome: profile.CodexHome,
 		})
 	}
+	defaultHome := normalizeExecCodexHome(a.store.paths.DefaultCodexHome)
+	if defaultHome != "" && !execAccountsContainHome(accounts, defaultHome) {
+		accounts = append(accounts, usage.MonitorAccount{
+			Label:             defaultExecAccountLabel,
+			CodexHome:         defaultHome,
+			SelectionPriority: defaultExecAccountPriority,
+		})
+	}
 
 	if selector != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), execSelectionTimeout)
@@ -228,7 +246,16 @@ func (a *App) selectExecProfile(cfg *Config, selector execAccountSelector, model
 					PrimaryUsedPercent:   intPtr(selected.PrimaryUsedPercent),
 					SecondaryUsedPercent: intPtr(selected.SecondaryUsedPercent),
 				}
-				return execSelection{Name: name, Profile: profile, Metadata: metadata}, nil
+				return execSelection{Name: name, CodexHome: profile.CodexHome, IsProfile: true, Profile: profile, Metadata: metadata}, nil
+			}
+			if home, ok := lookupDefaultExecAccount(a.store.paths, selected); ok {
+				metadata := execSelectionMetadata{
+					Profile:              defaultExecAccountLabel,
+					SelectionSource:      "usage_selector_default_reserve",
+					PrimaryUsedPercent:   intPtr(selected.PrimaryUsedPercent),
+					SecondaryUsedPercent: intPtr(selected.SecondaryUsedPercent),
+				}
+				return execSelection{Name: defaultExecAccountLabel, CodexHome: home, Metadata: metadata}, nil
 			}
 		} else if strings.Contains(strings.ToLower(strings.TrimSpace(model)), "spark") {
 			return execSelection{}, err
@@ -237,13 +264,37 @@ func (a *App) selectExecProfile(cfg *Config, selector execAccountSelector, model
 
 	first := names[0]
 	return execSelection{
-		Name:    first,
-		Profile: cfg.Profiles[first],
+		Name:      first,
+		CodexHome: cfg.Profiles[first].CodexHome,
+		IsProfile: true,
+		Profile:   cfg.Profiles[first],
 		Metadata: execSelectionMetadata{
 			Profile:         first,
 			SelectionSource: "configured_profile_fallback",
 		},
 	}, nil
+}
+
+func execAccountsContainHome(accounts []usage.MonitorAccount, home string) bool {
+	normalized := normalizeExecCodexHome(home)
+	if normalized == "" {
+		return false
+	}
+	for _, account := range accounts {
+		if normalizeExecCodexHome(account.CodexHome) == normalized {
+			return true
+		}
+	}
+	return false
+}
+
+func lookupDefaultExecAccount(paths Paths, selected usage.SelectedAccount) (string, bool) {
+	defaultHome := normalizeExecCodexHome(paths.DefaultCodexHome)
+	selectedHome := normalizeExecCodexHome(selected.Account.CodexHome)
+	if defaultHome == "" || selectedHome == "" || selectedHome != defaultHome {
+		return "", false
+	}
+	return defaultHome, true
 }
 
 func parseModelFromExecArgs(args []string) string {

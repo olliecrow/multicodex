@@ -116,11 +116,12 @@ Two terminals can run `multicodex cli` with different profiles at the same time.
 
 ## Exec Routing
 
-`multicodex exec [codex exec args]` runs `codex exec` after selecting among configured multicodex profiles.
+`multicodex exec [codex exec args]` runs `codex exec` after selecting among configured multicodex profiles, with the default Codex home as a built-in reserve account.
 
 - Help requests such as `multicodex exec --help` delegate directly to `codex exec` and do not require profiles.
 - Profiles below 40% five-hour usage are eligible unless their weekly window is known to be exhausted.
 - Among eligible profiles, exec picks the profile whose weekly reset is soonest.
+- The default Codex home is considered only after no configured profile is eligible under the same usage rules.
 - If usage data is unavailable for every profile, exec falls back to the first configured profile after profile safety checks pass.
 - For explicit Spark model names, exec uses Spark usage windows when available and fails if Spark data is not available instead of silently using default-window routing.
 
