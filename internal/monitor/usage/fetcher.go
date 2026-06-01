@@ -36,6 +36,7 @@ type accountFetcher struct {
 
 type accountFetchResult struct {
 	codexHome           string
+	selectionPriority   int
 	account             AccountSummary
 	snapshot            *Summary
 	fetchErr            error
@@ -641,7 +642,8 @@ func (f *Fetcher) fetchAccountsConcurrent(ctx context.Context, now time.Time, ac
 
 func (f *Fetcher) fetchAccountResult(ctx context.Context, account accountFetcher, now time.Time) accountFetchResult {
 	result := accountFetchResult{
-		codexHome: account.account.CodexHome,
+		codexHome:         account.account.CodexHome,
+		selectionPriority: account.account.SelectionPriority,
 		account: AccountSummary{
 			Label: account.account.Label,
 		},

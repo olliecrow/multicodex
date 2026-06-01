@@ -21,7 +21,7 @@ var commandSummaries = []struct {
 	{Name: "login <name> [codex login args]", Summary: "login profile using official codex flow"},
 	{Name: "login-all", Summary: "run login for every known profile"},
 	{Name: "cli <name> [codex args...]", Summary: "run the interactive Codex CLI with one profile"},
-	{Name: "exec [codex exec args]", Summary: "run codex exec on the best available profile"},
+	{Name: "exec [codex exec args]", Summary: "run codex exec on the best available account"},
 	{Name: "status", Summary: "show all profile auth states"},
 	{Name: "heartbeat", Summary: "send a minimal keepalive hello for logged-in profiles"},
 	{Name: "monitor [flags]", Summary: "show live subscription usage across accounts"},
@@ -76,7 +76,7 @@ var commandHelpByName = map[string]commandHelp{
 	},
 	"exec": {
 		Usage:       "multicodex exec [codex exec args]",
-		Description: "Run `codex exec` after automatically selecting the best available configured profile. Profiles below 40% five-hour usage are eligible unless their weekly window is known to be exhausted, and multicodex picks the eligible profile whose weekly reset is soonest. If usage data is unavailable, multicodex falls back to the first configured profile after profile safety checks pass.",
+		Description: "Run `codex exec` after automatically selecting the best available account. Configured profiles are considered first. The default Codex home is a reserve account and is used only after no configured profile is eligible under the same usage rules. If usage data is unavailable, multicodex falls back to the first configured profile after profile safety checks pass.",
 		Examples: []string{
 			`multicodex exec -s read-only "Summarize the README in 3 bullets."`,
 			"multicodex exec --skip-git-repo-check -C /path/to/repo \"Review the latest diff.\"",
