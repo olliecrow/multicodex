@@ -38,7 +38,7 @@ func renderDryRunOverview(store *Store, cfg *Config) string {
 	b.WriteString("2. add <name> creates an isolated profile CODEX_HOME and links profile config to the default Codex config by default.\n")
 	b.WriteString("3. login <name> runs official codex login within that profile context.\n")
 	b.WriteString("4. cli <name> starts an interactive Codex session with profile-local state.\n")
-	b.WriteString("5. exec routes codex exec to a configured profile only.\n")
+	b.WriteString("5. exec routes codex exec to a configured profile when one is usable, otherwise to the default reserve account.\n")
 	b.WriteString("6. heartbeat sends one fixed read-only keepalive for logged-in profiles.\n")
 	b.WriteString("7. multicodex does not switch or restore the shared default Codex auth account.\n\n")
 	b.WriteString("dry-run only: no commands were executed and no files were changed.\n")

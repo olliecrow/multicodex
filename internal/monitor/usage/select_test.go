@@ -73,6 +73,19 @@ func TestSelectBestAccountPrefersAmberTierBeforeSoonerRedReset(t *testing.T) {
 	}
 }
 
+func TestSelectBestAccountTreatsSixtyOneAsRedTier(t *testing.T) {
+	selected, err := selectBestAccountFromResultsForModel([]accountFetchResult{
+		testAccountFetchResult("red-sooner-reset", 61, 10, 30*time.Minute),
+		testAccountFetchResult("amber-later-reset", 60, 10, 48*time.Hour),
+	}, 40, "")
+	if err != nil {
+		t.Fatalf("selectBestAccountFromResultsForModel: %v", err)
+	}
+	if selected.Account.Label != "amber-later-reset" {
+		t.Fatalf("expected 61%% account to be red and lose to amber, got %q", selected.Account.Label)
+	}
+}
+
 func TestSelectBestAccountUsesKnownWeeklyResetBeforeUnknownWeeklyReset(t *testing.T) {
 	selected, err := selectBestAccountFromResultsForModel([]accountFetchResult{
 		{
@@ -91,6 +104,27 @@ func TestSelectBestAccountUsesKnownWeeklyResetBeforeUnknownWeeklyReset(t *testin
 	}
 	if selected.Account.Label != "known" {
 		t.Fatalf("expected known, got %q", selected.Account.Label)
+	}
+}
+
+func TestSelectBestAccountUsesUnknownResetGreenBeforeKnownResetAmber(t *testing.T) {
+	selected, err := selectBestAccountFromResultsForModel([]accountFetchResult{
+		{
+			codexHome: "/green-unknown-reset",
+			account: AccountSummary{
+				Label:           "green-unknown-reset",
+				PrimaryWindow:   WindowSummary{UsedPercent: 10},
+				SecondaryWindow: WindowSummary{UsedPercent: 30},
+			},
+			snapshot: &Summary{},
+		},
+		testAccountFetchResult("amber-known-reset", 41, 20, 30*time.Minute),
+	}, 40, "")
+	if err != nil {
+		t.Fatalf("selectBestAccountFromResultsForModel: %v", err)
+	}
+	if selected.Account.Label != "green-unknown-reset" {
+		t.Fatalf("expected green account with unknown reset before amber account, got %q", selected.Account.Label)
 	}
 }
 
@@ -122,6 +156,37 @@ func TestSelectBestAccountUsesLowerPriorityBeforeReserveAccount(t *testing.T) {
 	}
 	if selected.Account.Label != "profile" {
 		t.Fatalf("expected lower-priority profile account before reserve default account, got %q", selected.Account.Label)
+	}
+}
+
+func TestSelectBestAccountKeepsReserveBlockedByUsableUnknownResetProfile(t *testing.T) {
+	selected, err := selectBestAccountFromResultsForModel([]accountFetchResult{
+		{
+			codexHome:         "/profile",
+			selectionPriority: 0,
+			account: AccountSummary{
+				Label:           "profile",
+				PrimaryWindow:   WindowSummary{UsedPercent: 80},
+				SecondaryWindow: WindowSummary{UsedPercent: 30},
+			},
+			snapshot: &Summary{},
+		},
+		{
+			codexHome:         "/default",
+			selectionPriority: 100,
+			account: AccountSummary{
+				Label:           "default",
+				PrimaryWindow:   WindowSummary{UsedPercent: 1},
+				SecondaryWindow: WindowSummary{UsedPercent: 1, SecondsUntilReset: testInt64Ptr(30 * 60)},
+			},
+			snapshot: &Summary{},
+		},
+	}, 40, "")
+	if err != nil {
+		t.Fatalf("selectBestAccountFromResultsForModel: %v", err)
+	}
+	if selected.Account.Label != "profile" {
+		t.Fatalf("expected usable profile with unknown reset before reserve, got %q", selected.Account.Label)
 	}
 }
 

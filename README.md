@@ -57,7 +57,7 @@ multicodex cli personal
 multicodex cli work "check this repo"
 ```
 
-Run `codex exec` on the best available configured profile.
+Run `codex exec` on the best available account.
 
 ```bash
 multicodex exec -s read-only "Summarize the README in 3 bullets."
@@ -119,6 +119,7 @@ Two terminals can run `multicodex cli` with different profiles at the same time.
 `multicodex exec [codex exec args]` runs `codex exec` after selecting among configured multicodex profiles, with the default Codex home as a built-in reserve account.
 
 - Help requests such as `multicodex exec --help` delegate directly to `codex exec` and do not require profiles.
+- Exec can run with no configured profiles by using the default Codex home as the only available account.
 - Configured profiles at 100% five-hour or weekly usage are not selected.
 - Configured profiles are grouped by five-hour usage: green is 0-40%, amber is 41-60%, and red is 61-99%.
 - Exec tries green profiles before amber profiles, and amber profiles before red profiles.
