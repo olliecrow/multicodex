@@ -28,6 +28,7 @@
 
 ## Operating defaults
 - Keep changes minimal, explicit, and security first.
+- Follow the high-confidence change discipline in `docs/workflows.md`.
 - Never commit credentials, tokens, local auth files, or machine-specific private paths.
 - This repository is public. Treat new repositories as private by default until Ollie explicitly approves making them public.
 

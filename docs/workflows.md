@@ -8,6 +8,16 @@ This document defines how work is tracked so progress compounds without context 
 - Capture important rationale in code comments, tests, or docs.
 - Keep workflow simple and low ceremony.
 
+## Change discipline
+- Make only high-confidence changes that fix observed problems, real risks, broken contracts, failing behavior, or clear quality issues.
+- Prefer no change over a weakly justified change.
+- Keep scope tight and prefer one clear current path over compatibility shims, backup paths, temporary modes, or old/new dual behavior.
+- Treat schemas, status fields, docs, command output, and routing policy as behavior.
+- Do not mask failures. If routing, auth, usage, or safety data is unclear, fail with a clear reason instead of guessing.
+- Verify close to the change first, then broaden checks when the blast radius is wider.
+- Keep scratch planning separate from committed docs, and remove stale scratch artifacts before completion.
+- Stage and commit only in-scope files; preserve unrelated changes.
+
 ## Note routing
 - `/plan/current/notes.md`: running notes and immediate next actions.
 - `/plan/current/notes-index.md`: compact index of active workstreams.
@@ -28,3 +38,4 @@ This document defines how work is tracked so progress compounds without context 
 - Acceptance checks pass.
 - Risks are documented.
 - No unresolved blockers remain.
+- The working tree is clean after committed work, except for explicitly out-of-scope local changes.

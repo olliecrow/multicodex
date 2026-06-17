@@ -199,8 +199,8 @@ References: `internal/monitor/tui/model.go`, `internal/monitor/tui/model_test.go
 Decision: Add `multicodex exec` as an auto-routing wrapper around `codex exec`.
 Context: Users often want the convenience of `codex exec` without manually choosing which logged-in subscription account currently has the most weekly headroom.
 Rationale: A dedicated `multicodex exec` command preserves a simple, familiar interface while keeping account-selection policy explicit and local to multicodex.
-Trade-offs: Selection is still best-effort snapshot routing, so simultaneous launches can choose the same account and the chosen account may change between invocations. The default Codex home is available as a reserve account, but it is not configurable and must not become a managed multicodex profile.
-Enforcement: `multicodex exec` forwards all arguments directly to `codex exec`, bypasses profile selection only for exact help requests, treats configured profiles below 40% five-hour usage as eligible only when their weekly window is not known to be exhausted, picks the eligible profile whose weekly reset is soonest, and uses the default Codex home only when no configured profile is eligible under the same usage rules. When usage data is unavailable for every profile, it falls back to the first configured profile after profile safety checks. Tests assert priority-tier selection and default-reserve execution.
+Trade-offs: Selection is snapshot-based, so simultaneous launches can still choose the same account and the chosen account may change between invocations. The policy may fail closed when available profiles are over the five-hour safety limit, but that is safer than submitting work to an account likely to fail mid-run or spending the protected default account too early.
+Enforcement: `multicodex exec` forwards all arguments directly to `codex exec`, bypasses profile selection only for exact help requests, treats accounts below 50% five-hour usage as eligible only when their weekly window is below 100%, picks the eligible profile whose weekly reset is soonest, and never selects an account at 100% five-hour or weekly usage. The default Codex home is a protected reserve and is used only when at least one configured profile has current usage data and every such profile is at 100% weekly usage. If no safe account is available, exec returns the usage-selection error before launching Codex. Tests assert priority-tier selection, hard exclusion of exhausted accounts, protected default-reserve execution, and fail-closed behavior for the current unsafe usage shape.
 References: `internal/multicodex/exec.go`, `internal/multicodex/exec_test.go`, `internal/monitor/usage/select.go`, `internal/monitor/usage/select_test.go`, `README.md`, `docs/command-spec.md`
 
 Decision: Parse `cli_auth_credentials_store` by exact key instead of substring matching.
@@ -333,6 +333,18 @@ Enforcement:
 `AGENTS.md` requires plain English in chat and written project material. When touching code, prefer clear descriptive names for files, folders, flags, config keys, functions, classes, types, variables, tests, and examples, and rename confusing names when the change is safe and worth it.
 References:
 `AGENTS.md`
+
+Decision: Use high-confidence, fail-closed change discipline for repository work.
+Context:
+Routing, auth, public documentation, and operational command behavior can affect real account usage and public repository safety.
+Rationale:
+Small, evidence-backed changes are easier to verify and less likely to hide failures or spend protected account quota unexpectedly.
+Trade-offs:
+Some requests may stop with a clear error instead of continuing through a permissive fallback.
+Enforcement:
+`docs/workflows.md` defines the active change discipline: make only high-confidence changes, keep one clear current path, avoid speculative fallbacks, treat docs and command contracts as behavior, verify close to the change before broader checks, and keep scratch planning out of committed docs.
+References:
+`docs/workflows.md`, `AGENTS.md`
 
 Decision: Treat this repository as belonging under the personal GitHub account `olliecrow`.
 Context:

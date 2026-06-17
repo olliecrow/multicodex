@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	execSelectionPrimaryUsageLimit = 40
+	execSelectionPrimaryUsageLimit = 50
 	execSelectionTimeout           = 10 * time.Second
 	envSelectedProfilePath         = "MULTICODEX_SELECTED_PROFILE_PATH"
 	defaultExecAccountLabel        = "default"
@@ -233,46 +233,36 @@ func (a *App) selectExecProfile(cfg *Config, selector execAccountSelector, model
 		})
 	}
 
-	if selector != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), execSelectionTimeout)
-		defer cancel()
-
-		selected, err := selector(ctx, accounts, execSelectionPrimaryUsageLimit, model)
-		if err == nil {
-			if name, profile, ok := lookupSelectedExecProfile(cfg, selected); ok {
-				metadata := execSelectionMetadata{
-					Profile:              name,
-					SelectionSource:      "usage_selector",
-					PrimaryUsedPercent:   intPtr(selected.PrimaryUsedPercent),
-					SecondaryUsedPercent: intPtr(selected.SecondaryUsedPercent),
-				}
-				return execSelection{Name: name, CodexHome: profile.CodexHome, IsProfile: true, Profile: profile, Metadata: metadata}, nil
-			}
-			if home, ok := lookupDefaultExecAccount(a.store.paths, selected); ok {
-				metadata := execSelectionMetadata{
-					Profile:              defaultExecAccountLabel,
-					SelectionSource:      "usage_selector_default_reserve",
-					PrimaryUsedPercent:   intPtr(selected.PrimaryUsedPercent),
-					SecondaryUsedPercent: intPtr(selected.SecondaryUsedPercent),
-				}
-				return execSelection{Name: defaultExecAccountLabel, CodexHome: home, Metadata: metadata}, nil
-			}
-		} else if strings.Contains(strings.ToLower(strings.TrimSpace(model)), "spark") {
-			return execSelection{}, err
-		}
+	if selector == nil {
+		return execSelection{}, fmt.Errorf("missing exec account selector")
 	}
 
-	first := names[0]
-	return execSelection{
-		Name:      first,
-		CodexHome: cfg.Profiles[first].CodexHome,
-		IsProfile: true,
-		Profile:   cfg.Profiles[first],
-		Metadata: execSelectionMetadata{
-			Profile:         first,
-			SelectionSource: "configured_profile_fallback",
-		},
-	}, nil
+	ctx, cancel := context.WithTimeout(context.Background(), execSelectionTimeout)
+	defer cancel()
+
+	selected, err := selector(ctx, accounts, execSelectionPrimaryUsageLimit, model)
+	if err != nil {
+		return execSelection{}, err
+	}
+	if name, profile, ok := lookupSelectedExecProfile(cfg, selected); ok {
+		metadata := execSelectionMetadata{
+			Profile:              name,
+			SelectionSource:      "usage_selector",
+			PrimaryUsedPercent:   intPtr(selected.PrimaryUsedPercent),
+			SecondaryUsedPercent: intPtr(selected.SecondaryUsedPercent),
+		}
+		return execSelection{Name: name, CodexHome: profile.CodexHome, IsProfile: true, Profile: profile, Metadata: metadata}, nil
+	}
+	if home, ok := lookupDefaultExecAccount(a.store.paths, selected); ok {
+		metadata := execSelectionMetadata{
+			Profile:              defaultExecAccountLabel,
+			SelectionSource:      "usage_selector_default_reserve",
+			PrimaryUsedPercent:   intPtr(selected.PrimaryUsedPercent),
+			SecondaryUsedPercent: intPtr(selected.SecondaryUsedPercent),
+		}
+		return execSelection{Name: defaultExecAccountLabel, CodexHome: home, Metadata: metadata}, nil
+	}
+	return execSelection{}, fmt.Errorf("selected account %q is not an exec candidate", selected.Account.Label)
 }
 
 func execAccountsContainHome(accounts []usage.MonitorAccount, home string) bool {
