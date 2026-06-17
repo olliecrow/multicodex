@@ -211,10 +211,6 @@ func execArgsAreHelpRequest(args []string) bool {
 }
 
 func (a *App) selectExecProfile(cfg *Config, selector execAccountSelector, model string) (execSelection, error) {
-	if len(cfg.Profiles) == 0 {
-		return execSelection{}, &ExitError{Code: 2, Message: "no profiles configured. add one with: multicodex add <name>"}
-	}
-
 	names := sortedProfileNames(cfg)
 	accounts := make([]usage.MonitorAccount, 0, len(names))
 	for _, name := range names {
