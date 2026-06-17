@@ -76,7 +76,7 @@ var commandHelpByName = map[string]commandHelp{
 	},
 	"exec": {
 		Usage:       "multicodex exec [codex exec args]",
-		Description: "Run `codex exec` after automatically selecting the best available account. Configured profiles are considered first. The default Codex home is a reserve account and is used only after no configured profile is eligible under the same usage rules. If usage data is unavailable, multicodex falls back to the first configured profile after profile safety checks pass.",
+		Description: "Run `codex exec` after automatically selecting the best available account. Configured profiles are considered first. Accounts must be below 50% five-hour usage and below 100% weekly usage. The default Codex home is a protected reserve account and is used only when logged-in configured profiles are weekly-exhausted. If no safe account is available, exec fails before launching Codex.",
 		Examples: []string{
 			`multicodex exec -s read-only "Summarize the README in 3 bullets."`,
 			"multicodex exec --skip-git-repo-check -C /path/to/repo \"Review the latest diff.\"",

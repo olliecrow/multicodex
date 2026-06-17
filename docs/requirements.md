@@ -7,7 +7,7 @@
 - User can log in to one or all configured profiles.
 - Default behavior must not alter the system default Codex session.
 - User can launch Codex CLI or Codex exec with configured profile accounts without switching the system default Codex account.
-- Codex exec auto-routing may use the system default Codex account as a reserve account only after configured profiles are not eligible.
+- Codex exec auto-routing may use the system default Codex account as a reserve account only after at least one configured profile has current usage data and every such profile is at 100% weekly usage.
 - Multicodex does not switch, restore, or manage the default Codex account.
 - Status view shows status for all configured profiles.
 - User can view live subscription usage across compatible local accounts from the same CLI.

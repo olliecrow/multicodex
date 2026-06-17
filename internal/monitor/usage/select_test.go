@@ -98,8 +98,39 @@ func TestSelectBestAccountUsesLowerPriorityBeforeReserveAccount(t *testing.T) {
 	}
 }
 
-func TestSelectBestAccountUsesReserveAccountWhenProfilesAreNotEligible(t *testing.T) {
+func TestSelectBestAccountUsesReserveAccountWhenProfilesAreWeeklyExhausted(t *testing.T) {
 	selected, err := selectBestAccountFromResultsForModel([]accountFetchResult{
+		{
+			codexHome:         "/profile",
+			selectionPriority: 0,
+			account: AccountSummary{
+				Label:           "profile",
+				PrimaryWindow:   WindowSummary{UsedPercent: 80},
+				SecondaryWindow: WindowSummary{UsedPercent: 100, SecondsUntilReset: testInt64Ptr(10 * 60)},
+			},
+			snapshot: &Summary{},
+		},
+		{
+			codexHome:         "/default",
+			selectionPriority: 100,
+			account: AccountSummary{
+				Label:           "default",
+				PrimaryWindow:   WindowSummary{UsedPercent: 1},
+				SecondaryWindow: WindowSummary{UsedPercent: 1, SecondsUntilReset: testInt64Ptr(30 * 60)},
+			},
+			snapshot: &Summary{},
+		},
+	}, 40, "")
+	if err != nil {
+		t.Fatalf("selectBestAccountFromResultsForModel: %v", err)
+	}
+	if selected.Account.Label != "default" {
+		t.Fatalf("expected reserve default account after profile accounts are weekly exhausted, got %q", selected.Account.Label)
+	}
+}
+
+func TestSelectBestAccountBlocksReserveAccountWhenProfileIsWeeklyAvailable(t *testing.T) {
+	_, err := selectBestAccountFromResultsForModel([]accountFetchResult{
 		{
 			codexHome:         "/profile",
 			selectionPriority: 0,
@@ -121,42 +152,48 @@ func TestSelectBestAccountUsesReserveAccountWhenProfilesAreNotEligible(t *testin
 			snapshot: &Summary{},
 		},
 	}, 40, "")
-	if err != nil {
-		t.Fatalf("selectBestAccountFromResultsForModel: %v", err)
-	}
-	if selected.Account.Label != "default" {
-		t.Fatalf("expected reserve default account after profile accounts are not eligible, got %q", selected.Account.Label)
+	if err == nil {
+		t.Fatal("expected reserve account to stay blocked while a logged-in profile has weekly usage left")
 	}
 }
 
-func TestSelectBestAccountUsesAccessibleProfilesBeforeAccessibleReserveFallback(t *testing.T) {
+func TestSelectBestAccountNeverUsesWeeklyExhaustedAccounts(t *testing.T) {
+	_, err := selectBestAccountFromResultsForModel([]accountFetchResult{
+		testAccountFetchResult("weekly-exhausted", 8, 100, 1*time.Hour),
+	}, 50, "")
+	if err == nil {
+		t.Fatal("expected weekly-exhausted account to be rejected")
+	}
+}
+
+func TestSelectBestAccountNeverUsesPrimaryExhaustedAccounts(t *testing.T) {
+	_, err := selectBestAccountFromResultsForModel([]accountFetchResult{
+		testAccountFetchResult("primary-exhausted", 100, 10, 1*time.Hour),
+	}, 50, "")
+	if err == nil {
+		t.Fatal("expected primary-exhausted account to be rejected")
+	}
+}
+
+func TestSelectBestAccountUsesWeeklyAvailableProfileBelowPrimaryLimit(t *testing.T) {
+	originalChooser := chooseRandomResultIndex
+	chooseRandomResultIndex = func(candidates []int) int {
+		if len(candidates) != 1 {
+			t.Fatalf("expected only the below-limit account to remain, got %d candidates", len(candidates))
+		}
+		return candidates[0]
+	}
+	defer func() { chooseRandomResultIndex = originalChooser }()
+
 	selected, err := selectBestAccountFromResultsForModel([]accountFetchResult{
-		{
-			codexHome:         "/profile",
-			selectionPriority: 0,
-			account: AccountSummary{
-				Label:           "profile",
-				PrimaryWindow:   WindowSummary{UsedPercent: 80},
-				SecondaryWindow: WindowSummary{UsedPercent: 100, SecondsUntilReset: testInt64Ptr(10 * 60)},
-			},
-			snapshot: &Summary{},
-		},
-		{
-			codexHome:         "/default",
-			selectionPriority: 100,
-			account: AccountSummary{
-				Label:           "default",
-				PrimaryWindow:   WindowSummary{UsedPercent: 80},
-				SecondaryWindow: WindowSummary{UsedPercent: 100, SecondsUntilReset: testInt64Ptr(30 * 60)},
-			},
-			snapshot: &Summary{},
-		},
-	}, 40, "")
+		testAccountFetchResult("weekly-exhausted", 8, 100, 1*time.Hour),
+		testAccountFetchResult("below-primary-limit", 49, 66, 48*time.Hour),
+	}, 50, "")
 	if err != nil {
 		t.Fatalf("selectBestAccountFromResultsForModel: %v", err)
 	}
-	if selected.Account.Label != "profile" {
-		t.Fatalf("expected accessible profile fallback before accessible reserve fallback, got %q", selected.Account.Label)
+	if selected.Account.Label != "below-primary-limit" {
+		t.Fatalf("expected below-primary-limit, got %q", selected.Account.Label)
 	}
 }
 
@@ -201,29 +238,14 @@ func TestSelectBestAccountChoosesRandomEligibleAccountWhenAllEligibleWeeklyReset
 	}
 }
 
-func TestSelectBestAccountChoosesRandomAccessibleAccountWhenNoAccountIsEligible(t *testing.T) {
-	originalChooser := chooseRandomResultIndex
-	chooseRandomResultIndex = func(candidates []int) int {
-		if len(candidates) == 0 {
-			return -1
-		}
-		if len(candidates) != 3 {
-			t.Fatalf("expected 3 candidates, got %d", len(candidates))
-		}
-		return candidates[2]
-	}
-	defer func() { chooseRandomResultIndex = originalChooser }()
-
-	selected, err := selectBestAccountFromResultsForModel([]accountFetchResult{
+func TestSelectBestAccountErrorsWhenNoAccountIsBelowPrimaryLimit(t *testing.T) {
+	_, err := selectBestAccountFromResultsForModel([]accountFetchResult{
 		testAccountFetchResult("alpha", 65, 40, 12*time.Hour),
 		testAccountFetchResult("beta", 65, 20, 48*time.Hour),
 		testAccountFetchResult("gamma", 70, 5, 6*time.Hour),
-	}, 40, "")
-	if err != nil {
-		t.Fatalf("selectBestAccountFromResultsForModel: %v", err)
-	}
-	if selected.Account.Label != "gamma" {
-		t.Fatalf("expected gamma, got %q", selected.Account.Label)
+	}, 50, "")
+	if err == nil {
+		t.Fatal("expected error when all accounts exceed primary limit")
 	}
 }
 
@@ -250,32 +272,17 @@ func TestSelectBestAccountChoosesRandomAmongMatchingSoonestEligibleAccounts(t *t
 	}
 }
 
-func TestSelectBestAccountUsesRandomAccessibleFallbackWhenOnlyInaccessibleResultsRemain(t *testing.T) {
-	originalChooser := chooseRandomResultIndex
-	chooseRandomResultIndex = func(candidates []int) int {
-		if len(candidates) == 0 {
-			return -1
-		}
-		if len(candidates) != 1 {
-			t.Fatalf("expected 1 candidate, got %d", len(candidates))
-		}
-		return candidates[0]
-	}
-	defer func() { chooseRandomResultIndex = originalChooser }()
-
-	selected, err := selectBestAccountFromResultsForModel([]accountFetchResult{
+func TestSelectBestAccountErrorsWhenOnlyUnsafeResultsRemain(t *testing.T) {
+	_, err := selectBestAccountFromResultsForModel([]accountFetchResult{
 		{
 			codexHome: "/broken",
 			account:   AccountSummary{Label: "broken"},
 			fetchErr:  errors.New("boom"),
 		},
 		testAccountFetchResult("working", 85, 10, 2*time.Hour),
-	}, 40, "")
-	if err != nil {
-		t.Fatalf("selectBestAccountFromResultsForModel: %v", err)
-	}
-	if selected.Account.Label != "working" {
-		t.Fatalf("expected working, got %q", selected.Account.Label)
+	}, 50, "")
+	if err == nil {
+		t.Fatal("expected error when remaining account exceeds primary limit")
 	}
 }
 
@@ -318,7 +325,7 @@ func TestSelectBestAccountForModelUsesSparkWindowForModelSelection(t *testing.T)
 			},
 			"codex_bengalfox": {
 				PrimaryWindow:   WindowSummary{UsedPercent: 15},
-				SecondaryWindow: WindowSummary{UsedPercent: unavailableUsedPercent},
+				SecondaryWindow: WindowSummary{UsedPercent: 60, SecondsUntilReset: testInt64Ptr(30 * 60)},
 			},
 		}),
 		testAccountFetchResultWithRateLimits("beta", 20, 20, map[string]RateLimitWindow{
@@ -328,17 +335,17 @@ func TestSelectBestAccountForModelUsesSparkWindowForModelSelection(t *testing.T)
 			},
 			"codex_bengalfox": {
 				PrimaryWindow:   WindowSummary{UsedPercent: 45},
-				SecondaryWindow: WindowSummary{UsedPercent: unavailableUsedPercent},
+				SecondaryWindow: WindowSummary{UsedPercent: 40, SecondsUntilReset: testInt64Ptr(30 * 60)},
 			},
 		}),
 	}
 	p, s, _ := selectWindowsForModel(results[0].account, "gpt-5-codex-spark")
-	if p.UsedPercent != 15 || s.UsedPercent != unavailableUsedPercent {
-		t.Fatalf("expected alpha spark windows to be {15, unavailable}, got {%d,%d}", p.UsedPercent, s.UsedPercent)
+	if p.UsedPercent != 15 || s.UsedPercent != 60 {
+		t.Fatalf("expected alpha spark windows to be {15, 60}, got {%d,%d}", p.UsedPercent, s.UsedPercent)
 	}
 	p, s, _ = selectWindowsForModel(results[1].account, "gpt-5-codex-spark")
-	if p.UsedPercent != 45 || s.UsedPercent != unavailableUsedPercent {
-		t.Fatalf("expected beta spark windows to be {45, unavailable}, got {%d,%d}", p.UsedPercent, s.UsedPercent)
+	if p.UsedPercent != 45 || s.UsedPercent != 40 {
+		t.Fatalf("expected beta spark windows to be {45, 40}, got {%d,%d}", p.UsedPercent, s.UsedPercent)
 	}
 
 	selected, err := selectBestAccountFromResultsForModel(results, 40, "gpt-5-codex-spark")

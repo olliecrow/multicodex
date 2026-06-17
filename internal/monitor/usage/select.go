@@ -66,9 +66,9 @@ func (f *Fetcher) SelectAccountForModel(ctx context.Context, maxPrimaryUsedPerce
 func selectBestAccountFromResultsForModel(results []accountFetchResult, maxPrimaryUsedPercent int, model string) (SelectedAccount, error) {
 	modelIsSpark := isSparkModel(model)
 	eligibleUnknownResetCandidates := []accountWindowCandidate{}
-	accessibleCandidates := []accountWindowCandidate{}
 	eligibleResetCandidates := []accountWindowCandidate{}
 	hadModelWindow := false
+	hadUsableWindow := false
 
 	for i, result := range results {
 		if result.fetchErr != nil || result.snapshot == nil {
@@ -80,22 +80,28 @@ func selectBestAccountFromResultsForModel(results []accountFetchResult, maxPrima
 			hadModelWindow = true
 		}
 
+		if modelIsSpark && !hasModelWindow {
+			continue
+		}
+		if !usageWindowsAvailable(primaryWindow, secondaryWindow) {
+			continue
+		}
+		hadUsableWindow = true
+		if usageWindowIsKnownExhausted(primaryWindow) || usageWindowIsKnownExhausted(secondaryWindow) {
+			continue
+		}
+		if primaryWindow.UsedPercent >= maxPrimaryUsedPercent {
+			continue
+		}
+		if reserveCandidateBlockedByLowerPriorityAccount(results, result.selectionPriority, model) {
+			continue
+		}
+
 		candidate := accountWindowCandidate{
 			resultIndex:          i,
 			selectionPriority:    result.selectionPriority,
 			primaryUsedPercent:   primaryWindow.UsedPercent,
 			secondaryUsedPercent: secondaryWindow.UsedPercent,
-		}
-		accessibleCandidates = append(accessibleCandidates, candidate)
-		if modelIsSpark && !hasModelWindow {
-			continue
-		}
-
-		if primaryWindow.UsedPercent >= maxPrimaryUsedPercent {
-			continue
-		}
-		if weeklyWindowIsKnownExhausted(secondaryWindow) {
-			continue
 		}
 
 		secondsUntilReset, ok := secondsUntilReset(secondaryWindow)
@@ -116,20 +122,10 @@ func selectBestAccountFromResultsForModel(results []accountFetchResult, maxPrima
 	if modelIsSpark && hadModelWindow {
 		return SelectedAccount{}, fmt.Errorf("no model-eligible accounts available for requested model %q", model)
 	}
-	if selected, ok := choosePrioritizedAccount(results, accessibleCandidates); ok {
-		return selected, nil
+	if hadUsableWindow {
+		return SelectedAccount{}, fmt.Errorf("no safe accounts available below %d%% five-hour usage with weekly usage below 100%%", maxPrimaryUsedPercent)
 	}
-
-	return SelectedAccount{}, fmt.Errorf("no accessible accounts")
-}
-
-func choosePrioritizedAccount(results []accountFetchResult, candidates []accountWindowCandidate) (SelectedAccount, bool) {
-	for _, priority := range sortedCandidatePriorities(candidates) {
-		if selected, ok := chooseSelectedAccount(results, candidatesWithPriority(candidates, priority)); ok {
-			return selected, true
-		}
-	}
-	return SelectedAccount{}, false
+	return SelectedAccount{}, fmt.Errorf("no usable account usage windows available")
 }
 
 func choosePrioritizedEligibleAccount(results []accountFetchResult, resetCandidates, unknownResetCandidates []accountWindowCandidate) (SelectedAccount, bool) {
@@ -198,8 +194,38 @@ func selectWindowsForModel(account AccountSummary, model string) (WindowSummary,
 	return account.PrimaryWindow, account.SecondaryWindow, false
 }
 
-func weeklyWindowIsKnownExhausted(win WindowSummary) bool {
+func usageWindowsAvailable(primary, secondary WindowSummary) bool {
+	return primary.UsedPercent != unavailableUsedPercent && secondary.UsedPercent != unavailableUsedPercent
+}
+
+func usageWindowIsKnownExhausted(win WindowSummary) bool {
 	return win.UsedPercent != unavailableUsedPercent && win.UsedPercent >= 100
+}
+
+func reserveCandidateBlockedByLowerPriorityAccount(results []accountFetchResult, priority int, model string) bool {
+	hasLowerPriorityAccount := false
+	hasLowerPriorityUsableWindow := false
+	for _, result := range results {
+		if result.selectionPriority >= priority {
+			continue
+		}
+		hasLowerPriorityAccount = true
+		if result.fetchErr != nil || result.snapshot == nil {
+			continue
+		}
+		primaryWindow, secondaryWindow, hasModelWindow := selectWindowsForModel(result.account, model)
+		if isSparkModel(model) && !hasModelWindow {
+			continue
+		}
+		if !usageWindowsAvailable(primaryWindow, secondaryWindow) {
+			continue
+		}
+		hasLowerPriorityUsableWindow = true
+		if !usageWindowIsKnownExhausted(secondaryWindow) {
+			return true
+		}
+	}
+	return hasLowerPriorityAccount && !hasLowerPriorityUsableWindow
 }
 
 func chooseSelectedAccount(results []accountFetchResult, candidates []accountWindowCandidate) (SelectedAccount, bool) {

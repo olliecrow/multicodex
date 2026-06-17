@@ -34,5 +34,5 @@
 ## Global auth boundary
 - Multicodex must not change, restore, back up, symlink, lock, or otherwise manage the shared default Codex auth account.
 - The system default Codex account is managed by normal Codex tooling outside multicodex.
-- `multicodex exec` may run `codex exec` with the existing default Codex home as a reserve account, but it must not mutate default auth state or expose default auth details.
+- `multicodex exec` may run `codex exec` with the existing default Codex home as a protected reserve account only when configured logged-in profiles are weekly-exhausted. It must not mutate default auth state or expose default auth details.
 - Monitor defaults must stay profile-focused. Default Codex home, active `CODEX_HOME`, filesystem discovery, and app-server checks require explicit monitor flags.

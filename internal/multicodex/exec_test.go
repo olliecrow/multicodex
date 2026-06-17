@@ -85,7 +85,7 @@ func TestCmdExecRunsCodexExecWithDefaultReserveAccount(t *testing.T) {
 	if !strings.Contains(log, "profile=\n") {
 		t.Fatalf("expected default reserve exec not to set active profile, got %q", log)
 	}
-	if !strings.Contains(log, "codex_home="+app.store.paths.DefaultCodexHome) {
+	if !strings.Contains(log, "codex_home="+normalizeExecCodexHome(app.store.paths.DefaultCodexHome)) {
 		t.Fatalf("expected default reserve exec to use default Codex home, got %q", log)
 	}
 }
@@ -322,8 +322,10 @@ func TestSelectExecProfilePassesModelToSelector(t *testing.T) {
 
 	model := "gpt-5-codex-spark"
 	calledWith := ""
-	selected, err := app.selectExecProfile(cfg, func(_ context.Context, _ []usage.MonitorAccount, _ int, selectedModel string) (usage.SelectedAccount, error) {
+	calledLimit := 0
+	selected, err := app.selectExecProfile(cfg, func(_ context.Context, _ []usage.MonitorAccount, maxPrimaryUsedPercent int, selectedModel string) (usage.SelectedAccount, error) {
 		calledWith = selectedModel
+		calledLimit = maxPrimaryUsedPercent
 		return usage.SelectedAccount{
 			Account:              usage.MonitorAccount{Label: "alpha"},
 			PrimaryUsedPercent:   10,
@@ -338,6 +340,9 @@ func TestSelectExecProfilePassesModelToSelector(t *testing.T) {
 	}
 	if calledWith != model {
 		t.Fatalf("expected selector called with %q model, got %q", model, calledWith)
+	}
+	if calledLimit != 50 {
+		t.Fatalf("expected selector called with 50%% primary limit, got %d", calledLimit)
 	}
 }
 
@@ -435,10 +440,10 @@ func TestCmdExecUsesConfiguredProfilesBeforeDefaultReserveAccount(t *testing.T) 
 	}
 }
 
-func TestCmdExecUsesDefaultReserveAccountWhenProfilesAreNotEligible(t *testing.T) {
+func TestCmdExecUsesDefaultReserveAccountWhenProfilesAreWeeklyExhausted(t *testing.T) {
 	app, logPath, root := newExecSelectionTestApp(t)
 	createExecProfiles(t, app, "alpha")
-	writeExecSelectionProfileData(t, root, "alpha", 80, 30, 10*time.Minute)
+	writeExecSelectionProfileData(t, root, "alpha", 80, 100, 10*time.Minute)
 	writeExecSelectionDefaultData(t, app, 1, 1, 30*time.Minute)
 
 	if err := app.Run([]string{"exec", "--skip-git-repo-check", "hello"}); err != nil {
@@ -453,8 +458,27 @@ func TestCmdExecUsesDefaultReserveAccountWhenProfilesAreNotEligible(t *testing.T
 	if !strings.Contains(log, "profile=\n") {
 		t.Fatalf("expected reserve default account not to set active profile, got %q", log)
 	}
-	if !strings.Contains(log, "codex_home="+app.store.paths.DefaultCodexHome) {
+	if !strings.Contains(log, "codex_home="+normalizeExecCodexHome(app.store.paths.DefaultCodexHome)) {
 		t.Fatalf("expected reserve default account Codex home, got %q", log)
+	}
+}
+
+func TestCmdExecFailsClosedForCurrentUnsafeUsageShape(t *testing.T) {
+	app, logPath, root := newExecSelectionTestApp(t)
+	createExecProfiles(t, app, "apple", "oc")
+	writeExecSelectionProfileData(t, root, "apple", 8, 100, 1*time.Hour)
+	writeExecSelectionProfileData(t, root, "oc", 60, 67, 48*time.Hour)
+	writeExecSelectionDefaultData(t, app, 52, 78, 30*time.Minute)
+
+	err := app.Run([]string{"exec", "--skip-git-repo-check", "hello"})
+	if err == nil {
+		t.Fatal("expected exec to fail without submitting to an unsafe account")
+	}
+	if !strings.Contains(err.Error(), "no safe accounts available") {
+		t.Fatalf("expected no-safe-accounts error, got %v", err)
+	}
+	if _, statErr := os.Stat(logPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("expected codex not to be invoked, stat err=%v", statErr)
 	}
 }
 
@@ -509,7 +533,7 @@ func TestCmdExecTreatsFlagsAfterTerminatorAsPromptText(t *testing.T) {
 	}
 }
 
-func TestSelectExecProfileFallsBackToFirstConfiguredProfileWhenSelectionFails(t *testing.T) {
+func TestSelectExecProfileReturnsErrorWhenSelectionFails(t *testing.T) {
 	app := newTestAppForCLI(t)
 	createExecProfiles(t, app, "alpha", "beta")
 
@@ -521,18 +545,12 @@ func TestSelectExecProfileFallsBackToFirstConfiguredProfileWhenSelectionFails(t 
 	selected, err := app.selectExecProfile(cfg, func(context.Context, []usage.MonitorAccount, int, string) (usage.SelectedAccount, error) {
 		return usage.SelectedAccount{}, errors.New("boom")
 	}, "")
-	if err != nil {
-		t.Fatalf("selectExecProfile: %v", err)
-	}
-	if selected.Name != "alpha" {
-		t.Fatalf("expected alpha configured fallback, got %q", selected.Name)
-	}
-	if selected.Metadata.SelectionSource != "configured_profile_fallback" {
-		t.Fatalf("expected configured fallback selection source, got %q", selected.Metadata.SelectionSource)
+	if err == nil {
+		t.Fatalf("expected selection error, got profile %q", selected.Name)
 	}
 }
 
-func TestSelectExecProfileFallsBackToOnlyProfileWhenSelectionFails(t *testing.T) {
+func TestSelectExecProfileReturnsErrorForOnlyProfileWhenSelectionFails(t *testing.T) {
 	app := newTestAppForCLI(t)
 	createExecProfiles(t, app, "alpha")
 
@@ -544,14 +562,8 @@ func TestSelectExecProfileFallsBackToOnlyProfileWhenSelectionFails(t *testing.T)
 	selected, err := app.selectExecProfile(cfg, func(context.Context, []usage.MonitorAccount, int, string) (usage.SelectedAccount, error) {
 		return usage.SelectedAccount{}, errors.New("boom")
 	}, "")
-	if err != nil {
-		t.Fatalf("selectExecProfile: %v", err)
-	}
-	if selected.Name != "alpha" {
-		t.Fatalf("expected alpha fallback, got %q", selected.Name)
-	}
-	if selected.Metadata.SelectionSource != "configured_profile_fallback" {
-		t.Fatalf("expected configured fallback selection source, got %q", selected.Metadata.SelectionSource)
+	if err == nil {
+		t.Fatalf("expected selection error, got profile %q", selected.Name)
 	}
 }
 
@@ -572,7 +584,7 @@ func TestSelectExecProfileReturnsErrorForSparkModelWhenNoModelWindowAvailable(t 
 	}
 }
 
-func TestCmdExecFallsBackToFirstConfiguredProfileWhenUsageSelectionFails(t *testing.T) {
+func TestCmdExecReturnsErrorWhenUsageSelectionFails(t *testing.T) {
 	app, logPath := newExecTestApp(t)
 	createExecProfiles(t, app, "alpha", "beta")
 
@@ -582,17 +594,12 @@ func TestCmdExecFallsBackToFirstConfiguredProfileWhenUsageSelectionFails(t *test
 	}
 	defer func() { defaultExecAccountSelector = originalSelector }()
 
-	if err := app.Run([]string{"exec", "--skip-git-repo-check", "hello"}); err != nil {
-		t.Fatalf("exec failed: %v", err)
+	err := app.Run([]string{"exec", "--skip-git-repo-check", "hello"})
+	if err == nil {
+		t.Fatal("expected exec to fail when usage selection fails")
 	}
-
-	data, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("read log: %v", err)
-	}
-	log := string(data)
-	if !strings.Contains(log, "profile=alpha") {
-		t.Fatalf("expected alpha profile in log, got %q", log)
+	if _, statErr := os.Stat(logPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("expected codex not to be invoked, stat err=%v", statErr)
 	}
 }
 
