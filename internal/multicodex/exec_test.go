@@ -484,6 +484,28 @@ func TestCmdExecUsesDefaultReserveAccountWithoutConfiguredProfiles(t *testing.T)
 	}
 }
 
+func TestCmdExecUsesDefaultReserveAccountWhenConfiguredProfileUsageUnavailable(t *testing.T) {
+	app, logPath, _ := newExecSelectionTestApp(t)
+	createExecProfiles(t, app, "alpha")
+	writeExecSelectionDefaultData(t, app, 20, 20, 30*time.Minute)
+
+	if err := app.Run([]string{"exec", "--skip-git-repo-check", "hello"}); err != nil {
+		t.Fatalf("exec failed: %v", err)
+	}
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	log := string(data)
+	if !strings.Contains(log, "profile=\n") {
+		t.Fatalf("expected default reserve account when configured profile usage is unavailable, got %q", log)
+	}
+	if !strings.Contains(log, "codex_home="+normalizeExecCodexHome(app.store.paths.DefaultCodexHome)) {
+		t.Fatalf("expected default reserve account Codex home, got %q", log)
+	}
+}
+
 func TestCmdExecUsesRedProfileForCurrentUsageShape(t *testing.T) {
 	app, logPath, root := newExecSelectionTestApp(t)
 	createExecProfiles(t, app, "apple", "oc")
