@@ -322,10 +322,10 @@ func TestSelectExecProfilePassesModelToSelector(t *testing.T) {
 
 	model := "gpt-5-codex-spark"
 	calledWith := ""
-	calledLimit := 0
-	selected, err := app.selectExecProfile(cfg, func(_ context.Context, _ []usage.MonitorAccount, maxPrimaryUsedPercent int, selectedModel string) (usage.SelectedAccount, error) {
+	calledGreenMax := 0
+	selected, err := app.selectExecProfile(cfg, func(_ context.Context, _ []usage.MonitorAccount, greenPrimaryMaxPercent int, selectedModel string) (usage.SelectedAccount, error) {
 		calledWith = selectedModel
-		calledLimit = maxPrimaryUsedPercent
+		calledGreenMax = greenPrimaryMaxPercent
 		return usage.SelectedAccount{
 			Account:              usage.MonitorAccount{Label: "alpha"},
 			PrimaryUsedPercent:   10,
@@ -341,8 +341,8 @@ func TestSelectExecProfilePassesModelToSelector(t *testing.T) {
 	if calledWith != model {
 		t.Fatalf("expected selector called with %q model, got %q", model, calledWith)
 	}
-	if calledLimit != 50 {
-		t.Fatalf("expected selector called with 50%% primary limit, got %d", calledLimit)
+	if calledGreenMax != 40 {
+		t.Fatalf("expected selector called with 40%% green primary limit, got %d", calledGreenMax)
 	}
 }
 
@@ -463,39 +463,43 @@ func TestCmdExecUsesDefaultReserveAccountWhenProfilesAreWeeklyExhausted(t *testi
 	}
 }
 
-func TestCmdExecFailsClosedForCurrentUnsafeUsageShape(t *testing.T) {
+func TestCmdExecUsesRedProfileForCurrentUsageShape(t *testing.T) {
 	app, logPath, root := newExecSelectionTestApp(t)
 	createExecProfiles(t, app, "apple", "oc")
 	writeExecSelectionProfileData(t, root, "apple", 8, 100, 1*time.Hour)
-	writeExecSelectionProfileData(t, root, "oc", 60, 67, 48*time.Hour)
+	writeExecSelectionProfileData(t, root, "oc", 66, 67, 48*time.Hour)
 	writeExecSelectionDefaultData(t, app, 52, 78, 30*time.Minute)
 
-	err := app.Run([]string{"exec", "--skip-git-repo-check", "hello"})
-	if err == nil {
-		t.Fatal("expected exec to fail without submitting to an unsafe account")
+	if err := app.Run([]string{"exec", "--skip-git-repo-check", "hello"}); err != nil {
+		t.Fatalf("exec failed: %v", err)
 	}
-	if !strings.Contains(err.Error(), "no safe accounts available") {
-		t.Fatalf("expected no-safe-accounts error, got %v", err)
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
 	}
-	if _, statErr := os.Stat(logPath); !errors.Is(statErr, os.ErrNotExist) {
-		t.Fatalf("expected codex not to be invoked, stat err=%v", statErr)
+	log := string(data)
+	if !strings.Contains(log, "profile=oc") {
+		t.Fatalf("expected oc profile from current red-but-usable shape, got %q", log)
 	}
 }
 
-func TestCmdExecSparkModelDoesNotFallbackWhenSparkWindowMissing(t *testing.T) {
+func TestCmdExecSparkModelUsesDefaultReserveWhenSparkWindowMissing(t *testing.T) {
 	app, logPath, root := newExecSelectionTestApp(t)
 	createExecProfiles(t, app, "alpha")
 	writeExecSelectionProfileData(t, root, "alpha", 10, 20, 1*time.Hour)
 
-	err := app.Run([]string{"exec", "-m=gpt-5-codex-spark", "--skip-git-repo-check", "hello"})
-	if err == nil {
-		t.Fatalf("expected spark exec to fail without spark usage window")
+	if err := app.Run([]string{"exec", "-m=gpt-5-codex-spark", "--skip-git-repo-check", "hello"}); err != nil {
+		t.Fatalf("exec failed: %v", err)
 	}
-	if !strings.Contains(err.Error(), "no model-specific rate-limit windows") {
-		t.Fatalf("expected missing spark window error, got %v", err)
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
 	}
-	if _, statErr := os.Stat(logPath); !errors.Is(statErr, os.ErrNotExist) {
-		t.Fatalf("expected codex exec not to be invoked, stat err=%v", statErr)
+	log := string(data)
+	if !strings.Contains(log, "profile=\n") {
+		t.Fatalf("expected default reserve account when configured Spark window is missing, got %q", log)
 	}
 }
 

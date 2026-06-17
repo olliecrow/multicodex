@@ -13,11 +13,11 @@ import (
 )
 
 const (
-	execSelectionPrimaryUsageLimit = 50
-	execSelectionTimeout           = 10 * time.Second
-	envSelectedProfilePath         = "MULTICODEX_SELECTED_PROFILE_PATH"
-	defaultExecAccountLabel        = "default"
-	defaultExecAccountPriority     = 100
+	execSelectionGreenPrimaryMaxPercent = 40
+	execSelectionTimeout                = 10 * time.Second
+	envSelectedProfilePath              = "MULTICODEX_SELECTED_PROFILE_PATH"
+	defaultExecAccountLabel             = "default"
+	defaultExecAccountPriority          = 100
 )
 
 type execAccountSelector func(context.Context, []usage.MonitorAccount, int, string) (usage.SelectedAccount, error)
@@ -37,8 +37,8 @@ type execSelection struct {
 	Metadata  execSelectionMetadata
 }
 
-var defaultExecAccountSelector execAccountSelector = func(ctx context.Context, accounts []usage.MonitorAccount, maxPrimaryUsedPercent int, model string) (usage.SelectedAccount, error) {
-	return usage.SelectBestAccountForModel(ctx, accounts, maxPrimaryUsedPercent, model)
+var defaultExecAccountSelector execAccountSelector = func(ctx context.Context, accounts []usage.MonitorAccount, greenPrimaryMaxPercent int, model string) (usage.SelectedAccount, error) {
+	return usage.SelectBestAccountForModel(ctx, accounts, greenPrimaryMaxPercent, model)
 }
 
 func (a *App) cmdExec(args []string) error {
@@ -240,7 +240,7 @@ func (a *App) selectExecProfile(cfg *Config, selector execAccountSelector, model
 	ctx, cancel := context.WithTimeout(context.Background(), execSelectionTimeout)
 	defer cancel()
 
-	selected, err := selector(ctx, accounts, execSelectionPrimaryUsageLimit, model)
+	selected, err := selector(ctx, accounts, execSelectionGreenPrimaryMaxPercent, model)
 	if err != nil {
 		return execSelection{}, err
 	}

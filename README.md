@@ -119,12 +119,13 @@ Two terminals can run `multicodex cli` with different profiles at the same time.
 `multicodex exec [codex exec args]` runs `codex exec` after selecting among configured multicodex profiles, with the default Codex home as a built-in reserve account.
 
 - Help requests such as `multicodex exec --help` delegate directly to `codex exec` and do not require profiles.
-- Profiles below 50% five-hour usage are eligible unless their weekly window is known to be exhausted.
-- Accounts at 100% five-hour or weekly usage are never selected.
-- Among eligible profiles, exec picks the profile whose weekly reset is soonest.
-- The default Codex home is a protected reserve. It is used only when at least one configured profile has current usage data and every such profile is at 100% weekly usage.
-- If no safe account is available, exec fails before launching Codex.
-- For explicit Spark model names, exec uses Spark usage windows when available and fails if Spark data is not available instead of silently using default-window routing.
+- Configured profiles at 100% five-hour or weekly usage are not selected.
+- Configured profiles are grouped by five-hour usage: green is 0-40%, amber is 41-60%, and red is 61-99%.
+- Exec tries green profiles before amber profiles, and amber profiles before red profiles.
+- Within each tier, exec picks the profile whose weekly reset is soonest.
+- The default Codex home is a protected reserve. It is used only when no configured profile has current usable five-hour and weekly usage left.
+- If the default Codex home is the only remaining destination, exec uses it as the final fallback even when its usage data is unavailable or exhausted.
+- For explicit Spark model names, configured profiles need Spark usage windows to win normal routing; the default Codex home still remains the final fallback.
 
 ## Heartbeat
 

@@ -63,12 +63,14 @@ Multicodex intentionally has no command for changing the shared default Codex ac
 - Re-checks file-backed auth isolation before launching configured profiles.
 - Parses model selection arguments (`--model`, `--model=`, and `-m`) for routing.
 - If the model contains `spark` case-insensitively, selects Spark usage windows when available.
-- If Spark is requested but Spark usage data is unavailable, returns the usage-selection error instead of falling back to default-window routing.
-- Treats accounts whose five-hour usage window is strictly below 50% as eligible.
-- Excludes accounts whose five-hour or weekly window is known to be exhausted.
-- Among eligible profiles, picks the one whose weekly reset is soonest.
-- Uses the default Codex home only when at least one configured profile has current usage data and every such profile is at 100% weekly usage.
-- When no safe account is available, returns the usage-selection error and does not launch Codex.
+- If Spark is requested, configured profiles need Spark usage data to win normal routing.
+- Excludes configured profiles whose five-hour or weekly window is known to be exhausted.
+- Groups configured profiles by five-hour usage: green is 0-40%, amber is 41-60%, and red is 61-99%.
+- Tries green profiles before amber profiles, and amber profiles before red profiles.
+- Within each tier, picks the profile whose weekly reset is soonest.
+- Uses the default Codex home only when no configured profile has current usable five-hour and weekly usage left.
+- If the default Codex home is the only remaining destination, uses it as the final fallback even when its usage data is unavailable or exhausted.
+- Returns a usage-selection error only when no configured profile is usable and the default Codex home is not available as a reserve candidate.
 - Writes selected-profile metadata only under `MULTICODEX_HOME/run` when `MULTICODEX_SELECTED_PROFILE_PATH` is set.
 - Returns the child exit code.
 
