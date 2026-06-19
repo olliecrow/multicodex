@@ -84,6 +84,65 @@ func TestRunDoctorMinimal(t *testing.T) {
 	}
 }
 
+func TestRunDoctorScrubsCodexVersionEnvironment(t *testing.T) {
+	root := t.TempDir()
+	fakeBin := filepath.Join(root, "bin")
+	if err := os.MkdirAll(fakeBin, 0o700); err != nil {
+		t.Fatalf("mkdir fake bin: %v", err)
+	}
+	logPath := filepath.Join(root, "codex-env.log")
+	script := "#!/bin/sh\nenv > \"$MULTICODEX_TEST_ENV_LOG\"\nprintf 'codex-test-version\\n'\n"
+	if err := os.WriteFile(filepath.Join(fakeBin, "codex"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake codex: %v", err)
+	}
+	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("MULTICODEX_TEST_ENV_LOG", logPath)
+	t.Setenv("CODEX_HOME", filepath.Join(root, "stale-codex"))
+	t.Setenv("MULTICODEX_ACTIVE_PROFILE", "stale")
+	t.Setenv("OPENAI_API_KEY", "stale")
+	t.Setenv("CODEX_AUTH_TOKEN", "stale")
+	t.Setenv("MULTICODEX_HOME", filepath.Join(root, "multi"))
+	t.Setenv("MULTICODEX_DEFAULT_CODEX_HOME", filepath.Join(root, "codex"))
+
+	paths, err := ResolvePaths()
+	if err != nil {
+		t.Fatalf("ResolvePaths: %v", err)
+	}
+	report := RunDoctor(NewStore(paths), DefaultConfig(), time.Second)
+	found := false
+	for _, check := range report.Checks {
+		if check.Name == "codex binary" {
+			found = true
+			if check.Status != "ok" {
+				t.Fatalf("expected codex binary check ok, got %s (%s)", check.Status, check.Details)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected codex binary check in report")
+	}
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read codex env log: %v", err)
+	}
+	log := string(data)
+	for _, forbidden := range []string{"CODEX_HOME", "MULTICODEX_ACTIVE_PROFILE", "OPENAI_API_KEY", "CODEX_AUTH_TOKEN"} {
+		if envLogContainsKey(log, forbidden) {
+			t.Fatalf("expected %s to be scrubbed from codex version env", forbidden)
+		}
+	}
+}
+
+func envLogContainsKey(log, key string) bool {
+	for _, line := range strings.Split(log, "\n") {
+		if strings.HasPrefix(line, key+"=") {
+			return true
+		}
+	}
+	return false
+}
+
 func TestCheckAuthFileStructured(t *testing.T) {
 	t.Parallel()
 

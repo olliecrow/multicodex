@@ -3,6 +3,7 @@ package usage
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"sort"
 	"strings"
@@ -89,6 +90,7 @@ func (r DoctorReport) Status() string {
 
 func checkCodexBinary(ctx context.Context) DoctorCheck {
 	cmd := exec.CommandContext(ctx, "codex", "--version")
+	cmd.Env = withoutCodexProfileEnv(os.Environ())
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return DoctorCheck{
