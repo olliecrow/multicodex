@@ -844,6 +844,40 @@ func TestMonitorConfigUsesFileStoreRequiresExactRootKey(t *testing.T) {
 	}
 }
 
+func TestMonitorConfigUsesFileStoreUnquotesBasicStringValue(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "config.toml")
+	content := `cli_auth_credentials_store = "f\u0069le"` + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	ok, err := monitorConfigUsesFileStore(path)
+	if err != nil {
+		t.Fatalf("monitorConfigUsesFileStore: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected escaped file credential store value to pass")
+	}
+}
+
+func TestMonitorConfigUsesFileStoreIgnoresEqualsInsideQuotedKey(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "config.toml")
+	content := `"not=credential_store" = "x"` + "\ncli_auth_credentials_store = \"file\"\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	ok, err := monitorConfigUsesFileStore(path)
+	if err != nil {
+		t.Fatalf("monitorConfigUsesFileStore: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected exact credential store key to pass after quoted key with equals")
+	}
+}
+
 func TestMonitorConfigUsesFileStoreRejectsQuotedKeyWithExtraSpaces(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "config.toml")
