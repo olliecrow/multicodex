@@ -827,6 +827,40 @@ func TestLoadAccountsFromMulticodexConfigRejectsHardLinkedAuth(t *testing.T) {
 	}
 }
 
+func TestLoadAccountsFromMulticodexConfigRejectsLooseAuthPermissions(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv(multicodexHomeEnvVar, filepath.Join(tmp, defaultMulticodexHomeDirName))
+
+	configDir := filepath.Join(tmp, defaultMulticodexHomeDirName)
+	profileHome := filepath.Join(configDir, "profiles", "personal", "codex-home")
+	if err := os.MkdirAll(profileHome, 0o700); err != nil {
+		t.Fatalf("mkdir profile home: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(profileHome, "auth.json"), []byte(`{"tokens":{"access_token":"x"}}`), 0o644); err != nil {
+		t.Fatalf("write auth file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(profileHome, "config.toml"), []byte("cli_auth_credentials_store = \"file\"\n"), 0o600); err != nil {
+		t.Fatalf("write profile config: %v", err)
+	}
+	configPath := filepath.Join(configDir, "config.json")
+	configBody := `{"version":1,"profiles":{"personal":{"name":"personal","codex_home":"` + profileHome + `"}}}`
+	if err := os.WriteFile(configPath, []byte(configBody), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	accounts, warning, err := loadAccountsFromMulticodexConfig()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(accounts) != 0 {
+		t.Fatalf("expected loose-permission auth profile to be skipped, got %#v", accounts)
+	}
+	if !strings.Contains(warning, "permissions") {
+		t.Fatalf("expected permissions warning, got %q", warning)
+	}
+}
+
 func TestMonitorConfigUsesFileStoreRequiresExactRootKey(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "config.toml")

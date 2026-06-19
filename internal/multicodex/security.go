@@ -10,7 +10,7 @@ import (
 )
 
 func secureAuthFilePermissions(codexHome string) error {
-	authPath, hasAuth, err := ensureProfileAuthPathSafe(codexHome)
+	authPath, hasAuth, err := ensureProfileAuthPathShapeSafe(codexHome)
 	if err != nil {
 		return err
 	}
@@ -24,6 +24,21 @@ func secureAuthFilePermissions(codexHome string) error {
 }
 
 func ensureProfileAuthPathSafe(codexHome string) (string, bool, error) {
+	authPath, hasAuth, err := ensureProfileAuthPathShapeSafe(codexHome)
+	if err != nil || !hasAuth {
+		return authPath, hasAuth, err
+	}
+	info, err := os.Lstat(authPath)
+	if err != nil {
+		return "", false, fmt.Errorf("inspect auth file permissions: %w", err)
+	}
+	if info.Mode().Perm()&0o077 != 0 {
+		return "", false, fmt.Errorf("auth path permissions are %o, expected 600: %s", info.Mode().Perm(), authPath)
+	}
+	return authPath, true, nil
+}
+
+func ensureProfileAuthPathShapeSafe(codexHome string) (string, bool, error) {
 	homeInfo, err := os.Lstat(codexHome)
 	if err != nil {
 		return "", false, fmt.Errorf("inspect profile codex home: %w", err)

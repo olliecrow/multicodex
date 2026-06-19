@@ -237,6 +237,9 @@ func monitorProfileHomeSafe(profilesDir, name, home string) error {
 		if path == authPath && monitorFileHasMultipleLinks(info) {
 			return fmt.Errorf("%s has multiple hard links", path)
 		}
+		if path == authPath && info.Mode().Perm()&0o077 != 0 {
+			return fmt.Errorf("%s permissions are %o, expected 600", path, info.Mode().Perm())
+		}
 	}
 	ok, err := monitorProfileConfigUsesFileStore(filepath.Join(home, "config.toml"))
 	if err != nil {

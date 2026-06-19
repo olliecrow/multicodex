@@ -64,6 +64,25 @@ func TestOAuthSourceFetchAllowsPrimaryOnlyMainWindow(t *testing.T) {
 	}
 }
 
+func TestUsableAuthFileRejectsLoosePermissions(t *testing.T) {
+	codexHome := t.TempDir()
+	authPath := codexHome + "/auth.json"
+	if err := os.WriteFile(authPath, []byte(`{"tokens":{"access_token":"test-token"}}`), 0o644); err != nil {
+		t.Fatalf("write auth.json: %v", err)
+	}
+
+	ok, err := usableAuthFile(authPath)
+	if err == nil {
+		t.Fatal("expected loose auth permissions to fail")
+	}
+	if ok {
+		t.Fatal("expected loose auth file not to be usable")
+	}
+	if !strings.Contains(err.Error(), "permissions") {
+		t.Fatalf("expected permissions error, got %v", err)
+	}
+}
+
 func TestBuildRateLimitWindowsFromOAuthAdditionalLimitsKeepsPrimaryOnlyLimit(t *testing.T) {
 	windows := buildRateLimitWindowsFromOAuthAdditionalLimits([]oauthAdditionalRateLimit{
 		{

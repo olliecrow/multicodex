@@ -10,6 +10,7 @@
 - Never commit auth files or secret-bearing local state.
 - Never copy, sync, transmit, transfer, or share Codex auth files or auth details between machines. Each machine must sign in through the official Codex login flow.
 - Keep auth directories permissioned to the local user only.
+- Keep profile `auth.json` files readable only by the local user.
 - Use atomic writes to prevent partial secret files.
 - Zero secret data from logs and diagnostics by default.
 - Heartbeat output must never echo raw `codex exec` stdout or stderr on failures.

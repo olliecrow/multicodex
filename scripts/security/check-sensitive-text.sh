@@ -15,6 +15,7 @@ fi
 local_path_regex='(/Users/[A-Za-z0-9._-]+|/home/[A-Za-z0-9._-]+|[A-Za-z]:\\+Users\\+[A-Za-z0-9._-]+)'
 allowed_path_placeholder_regex='(/Users/(YOU|USER|username)|/home/(user|USER|username)|[A-Za-z]:\\+Users\\+(YOU|USER|USERNAME|username))'
 secret_assignment_regex='([Aa][Pp][Ii][_-]?[Kk][Ee][Yy]|[Tt][Oo][Kk][Ee][Nn]|[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Ss][Ee][Cc][Rr][Ee][Tt])[[:space:]]*[:=][[:space:]]*["'"'"']?[A-Za-z0-9_./+=-]{12,}'
+json_secret_regex='["'"'"']([Aa][Cc][Cc][Ee][Ss][Ss]_[Tt][Oo][Kk][Ee][Nn]|[Rr][Ee][Ff][Rr][Ee][Ss][Hh]_[Tt][Oo][Kk][Ee][Nn]|[Ii][Dd]_[Tt][Oo][Kk][Ee][Nn]|[Aa][Pp][Ii][_-]?[Kk][Ee][Yy]|[Oo][Pp][Ee][Nn][Aa][Ii]_[Aa][Pp][Ii]_[Kk][Ee][Yy])["'"'"'][[:space:]]*:[[:space:]]*["'"'"'][A-Za-z0-9_./+=-]{20,}["'"'"']'
 known_token_regex='((ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|sk-[A-Za-z0-9]{20,})'
 
 search_pattern() {
@@ -40,6 +41,7 @@ filter_allowed_path_placeholders() {
 redact_matches() {
   sed -E \
     -e "s#${local_path_regex}#<redacted-local-path>#g" \
+    -e "s#${json_secret_regex}#<redacted-json-secret>#g" \
     -e "s#${known_token_regex}#<redacted-token>#g" \
     -e "s#([Aa][Pp][Ii][_-]?[Kk][Ee][Yy]|[Tt][Oo][Kk][Ee][Nn]|[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Ss][Ee][Cc][Rr][Ee][Tt])[[:space:]]*[:=][[:space:]]*[\"']?[^[:space:]\"']+#\\1=<redacted-secret>#g"
 }
@@ -56,9 +58,10 @@ for target in "$@"; do
   fi
 
   secret_assignment_matches="$(search_pattern "$secret_assignment_regex" "$target")"
+  json_secret_matches="$(search_pattern "$json_secret_regex" "$target")"
   known_token_matches="$(search_pattern "$known_token_regex" "$target")"
 
-  matches="$(printf '%s\n%s\n%s\n' "$path_matches" "$secret_assignment_matches" "$known_token_matches" | sed '/^$/d' | sort -u)"
+  matches="$(printf '%s\n%s\n%s\n%s\n' "$path_matches" "$secret_assignment_matches" "$json_secret_matches" "$known_token_matches" | sed '/^$/d' | sort -u)"
   if [[ -n "$matches" ]]; then
     echo "policy violation in ${context}: ${target}" >&2
     printf '%s\n' "$matches" | redact_matches >&2

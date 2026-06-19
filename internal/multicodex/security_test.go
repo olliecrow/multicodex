@@ -33,6 +33,28 @@ func TestSecureAuthFilePermissions(t *testing.T) {
 	}
 }
 
+func TestEnsureProfileAuthPathSafeRejectsLoosePermissions(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	codexHome := filepath.Join(root, "codex-home")
+	if err := os.MkdirAll(codexHome, 0o700); err != nil {
+		t.Fatalf("mkdir codex home: %v", err)
+	}
+	authPath := filepath.Join(codexHome, "auth.json")
+	if err := os.WriteFile(authPath, []byte(`{"tokens":{"access_token":"a"}}`), 0o644); err != nil {
+		t.Fatalf("write auth file: %v", err)
+	}
+
+	_, _, err := ensureProfileAuthPathSafe(codexHome)
+	if err == nil {
+		t.Fatal("expected loose auth permissions to fail")
+	}
+	if !strings.Contains(err.Error(), "permissions") {
+		t.Fatalf("expected permissions error, got %v", err)
+	}
+}
+
 func TestSecureAuthFilePermissionsRejectsSymlink(t *testing.T) {
 	t.Parallel()
 
