@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 )
@@ -332,10 +333,10 @@ func monitorConfigFileUsesFileStore(path string) (bool, error) {
 		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
 			return false, nil
 		}
-		parts := strings.SplitN(line, "=", 2)
-		if len(parts) != 2 || monitorTOMLKey(strings.TrimSpace(parts[0])) != "cli_auth_credentials_store" {
-			if len(parts) == 2 {
-				value := strings.TrimSpace(parts[1])
+		assignIdx := monitorIndexTOMLUnquotedByte(line, '=')
+		if assignIdx == -1 || monitorTOMLKey(strings.TrimSpace(line[:assignIdx])) != "cli_auth_credentials_store" {
+			if assignIdx != -1 {
+				value := strings.TrimSpace(line[assignIdx+1:])
 				if strings.HasPrefix(value, `"""`) && strings.Count(value, `"""`)%2 == 1 {
 					multilineDelimiter = `"""`
 				} else if strings.HasPrefix(value, `'''`) && strings.Count(value, `'''`)%2 == 1 {
@@ -344,24 +345,76 @@ func monitorConfigFileUsesFileStore(path string) (bool, error) {
 			}
 			continue
 		}
-		rawValue := strings.TrimSpace(parts[1])
-		if len(rawValue) < 2 {
+		value, ok := monitorTOMLStringValue(strings.TrimSpace(line[assignIdx+1:]))
+		if !ok {
 			return false, nil
 		}
-		quote := rawValue[0]
-		if (quote != '"' && quote != '\'') || rawValue[len(rawValue)-1] != quote {
-			return false, nil
-		}
-		return rawValue[1:len(rawValue)-1] == "file", nil
+		return value == "file", nil
 	}
 	return false, nil
 }
 
 func monitorTOMLKey(raw string) string {
-	if len(raw) >= 2 && ((raw[0] == '"' && raw[len(raw)-1] == '"') || (raw[0] == '\'' && raw[len(raw)-1] == '\'')) {
+	if len(raw) >= 2 && raw[0] == '"' && raw[len(raw)-1] == '"' {
+		unquoted, err := strconv.Unquote(raw)
+		if err == nil {
+			return unquoted
+		}
+	}
+	if len(raw) >= 2 && raw[0] == '\'' && raw[len(raw)-1] == '\'' {
 		return raw[1 : len(raw)-1]
 	}
 	return raw
+}
+
+func monitorTOMLStringValue(raw string) (string, bool) {
+	if len(raw) < 2 {
+		return "", false
+	}
+	if raw[0] == '"' && raw[len(raw)-1] == '"' {
+		unquoted, err := strconv.Unquote(raw)
+		if err != nil {
+			return "", false
+		}
+		return unquoted, true
+	}
+	if raw[0] == '\'' && raw[len(raw)-1] == '\'' {
+		return raw[1 : len(raw)-1], true
+	}
+	return "", false
+}
+
+func monitorIndexTOMLUnquotedByte(s string, needle byte) int {
+	inDouble := false
+	inSingle := false
+	escaped := false
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		switch {
+		case escaped:
+			escaped = false
+		case inDouble:
+			if ch == '\\' {
+				escaped = true
+			} else if ch == '"' {
+				inDouble = false
+			}
+		case inSingle:
+			if ch == '\'' {
+				inSingle = false
+			}
+		default:
+			switch ch {
+			case '"':
+				inDouble = true
+			case '\'':
+				inSingle = true
+			case needle:
+				return i
+			}
+		}
+	}
+	return -1
 }
 
 func monitorResolveExistingPath(path string) (string, error) {
