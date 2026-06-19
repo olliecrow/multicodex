@@ -56,6 +56,7 @@ func RunDoctor(store *Store, cfg *Config, timeout time.Duration) DoctorReport {
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 		cmd := exec.CommandContext(ctx, "codex", "--version")
+		cmd.Env = neutralCodexEnv(os.Environ())
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			detail = fmt.Sprintf("%s (codex --version failed: %v)", path, err)

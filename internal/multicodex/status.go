@@ -162,6 +162,9 @@ func codexLoginStatus(codexHome string) (state, account, detail string) {
 	}
 
 	if err == nil {
+		if loginStatusTextIndicatesLoggedOut(lower) {
+			return "logged-out", account, firstLineOrDash(all)
+		}
 		if strings.Contains(lower, "logged") || strings.Contains(lower, "active") || strings.Contains(lower, "authenticated") {
 			return "logged-in", account, firstLineOrDash(all)
 		}
@@ -173,13 +176,30 @@ func codexLoginStatus(codexHome string) (state, account, detail string) {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return "error", account, fmt.Sprintf("codex login status timed out after %s", codexLoginStatusTimeout)
 		}
-		if strings.Contains(lower, "not logged") || strings.Contains(lower, "log in") || strings.Contains(lower, "unauth") {
+		if loginStatusTextIndicatesLoggedOut(lower) {
 			return "logged-out", account, firstLineOrDash(all)
 		}
 		return "error", account, firstLineOrDash(all)
 	}
 
 	return "error", account, err.Error()
+}
+
+func loginStatusTextIndicatesLoggedOut(lower string) bool {
+	for _, phrase := range []string{
+		"not logged",
+		"logged out",
+		"not authenticated",
+		"unauth",
+		"log in",
+		"sign in",
+		"signed out",
+	} {
+		if strings.Contains(lower, phrase) {
+			return true
+		}
+	}
+	return false
 }
 
 func firstLineOrDash(s string) string {

@@ -111,6 +111,27 @@ func TestCmdStatusRequiresFileStoreBeforeCodexStatus(t *testing.T) {
 	}
 }
 
+func TestCodexLoginStatusTreatsZeroExitNegativeOutputAsLoggedOut(t *testing.T) {
+	root := t.TempDir()
+	fakeBin := filepath.Join(root, "bin")
+	if err := os.MkdirAll(fakeBin, 0o700); err != nil {
+		t.Fatalf("mkdir fake bin: %v", err)
+	}
+	script := "#!/bin/sh\nprintf 'not logged in\\n'\n"
+	if err := os.WriteFile(filepath.Join(fakeBin, "codex"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake codex: %v", err)
+	}
+	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	state, _, detail := codexLoginStatus(filepath.Join(root, "codex-home"))
+	if state != "logged-out" {
+		t.Fatalf("expected logged-out for zero-exit negative status, got state=%q detail=%q", state, detail)
+	}
+	if detail != "not logged in" {
+		t.Fatalf("expected negative status detail to be preserved, got %q", detail)
+	}
+}
+
 func newStatusTestApp(t *testing.T) (*App, string) {
 	t.Helper()
 
