@@ -222,6 +222,9 @@ func usableAuthFile(path string) (bool, error) {
 	if monitorFileHasMultipleLinks(info) {
 		return false, fmt.Errorf("auth.json has multiple hard links: %s", path)
 	}
+	if info.Mode().Perm()&0o077 != 0 {
+		return false, fmt.Errorf("auth.json permissions are %o, expected 600: %s", info.Mode().Perm(), path)
+	}
 	return true, nil
 }
 

@@ -64,11 +64,19 @@ jobs:
           set -euo pipefail
           tmp_ok="$(mktemp)"
           tmp_bad="$(mktemp)"
+          tmp_bad_json="$(mktemp)"
           printf 'docs: keep /Users/YOU as placeholder only\n' > "${tmp_ok}"
           printf 'fix: %s=%s\n' "token" "abc123456789XYZ" > "${tmp_bad}"
+          printf '{"tokens":{"%s":"%s","%s":"%s"}}\n' \
+            "access_token" "abcdefghijklmnopqrstuvwxyz123456" \
+            "refresh_token" "ABCDEFGHIJKLMNOPQRSTUVWXYZ123456" > "${tmp_bad_json}"
           bash scripts/security/check-sensitive-text.sh --context=policy-selftest "${tmp_ok}"
           if bash scripts/security/check-sensitive-text.sh --context=policy-selftest "${tmp_bad}"; then
             echo "expected policy self-test failure did not occur" >&2
+            exit 1
+          fi
+          if bash scripts/security/check-sensitive-text.sh --context=policy-selftest "${tmp_bad_json}"; then
+            echo "expected JSON policy self-test failure did not occur" >&2
             exit 1
           fi
 
@@ -76,9 +84,15 @@ jobs:
         run: |
           set -euo pipefail
           tmp_bad="$(mktemp)"
+          tmp_bad_json="$(mktemp)"
           printf 'fix: %s=%s\n' "token" "abc123456789XYZ" > "${tmp_bad}"
+          printf '{"tokens":{"%s":"%s"}}\n' "access_token" "abcdefghijklmnopqrstuvwxyz123456" > "${tmp_bad_json}"
           if PATH="/usr/bin:/bin" bash scripts/security/check-sensitive-text.sh --context=policy-fallback-selftest "${tmp_bad}"; then
             echo "expected fallback policy self-test failure did not occur" >&2
+            exit 1
+          fi
+          if PATH="/usr/bin:/bin" bash scripts/security/check-sensitive-text.sh --context=policy-fallback-selftest "${tmp_bad_json}"; then
+            echo "expected fallback JSON policy self-test failure did not occur" >&2
             exit 1
           fi
 
