@@ -27,15 +27,6 @@ search_pattern() {
   fi
 }
 
-exclude_pattern() {
-  local pattern="$1"
-  if command -v rg >/dev/null 2>&1; then
-    rg --invert-match --ignore-case --no-heading -e "$pattern" || true
-  else
-    grep -viE "$pattern" || true
-  fi
-}
-
 filter_allowed_path_placeholders() {
   local line redacted
   while IFS= read -r line; do

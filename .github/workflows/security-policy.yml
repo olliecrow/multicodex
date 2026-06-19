@@ -28,7 +28,7 @@ jobs:
         run: go test ./...
 
       - name: Check Go vulnerabilities
-        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.4.0 ./...
 
       - name: Install gitleaks
         run: |
@@ -100,6 +100,25 @@ jobs:
           temp_file="$(mktemp)"
           git log --format='%H%n%s%n%b%n' "${range}" > "${temp_file}"
           bash scripts/security/check-sensitive-text.sh --context=commit-message "${temp_file}"
+
+      - name: Check pushed/PR patch for policy violations
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            range="${PR_BASE_SHA}..${PR_HEAD_SHA}"
+          elif [[ "${PUSH_BEFORE_SHA}" == "0000000000000000000000000000000000000000" ]]; then
+            range="${GITHUB_SHA}^!"
+          else
+            range="${PUSH_BEFORE_SHA}..${GITHUB_SHA}"
+          fi
+
+          temp_file="$(mktemp)"
+          git show --format= --patch --no-color "${range}" > "${temp_file}"
+          bash scripts/security/check-sensitive-text.sh --context=patch "${temp_file}"
 
       - name: Check pull request title/body for policy violations
         if: github.event_name == 'pull_request'
