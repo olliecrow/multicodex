@@ -99,7 +99,7 @@ multicodex monitor tui [flags]
 multicodex monitor doctor [flags]
 multicodex monitor completion [shell]
 multicodex doctor [--json] [--timeout 8s]
-multicodex dry-run [login]
+multicodex dry-run [operation]
 multicodex completion <bash|zsh|fish>
 multicodex version
 multicodex help [command [subcommand]]
