@@ -17,7 +17,7 @@ func RenderDryRun(store *Store, cfg *Config, args []string) (string, error) {
 		}
 		return renderDryRunLogin(cfg, args[1])
 	default:
-		return "", &ExitError{Code: 2, Message: "usage: multicodex dry-run [login] ..."}
+		return "", &ExitError{Code: 2, Message: "usage: multicodex dry-run [operation]"}
 	}
 }
 
