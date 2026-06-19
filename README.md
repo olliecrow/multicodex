@@ -16,6 +16,7 @@ Profile login requires file-backed auth. If the effective Codex config does not 
 ## Prerequisites
 
 - Go 1.24 or newer for building from source.
+- Development and CI checks use the patched Go toolchain listed in `go.mod`.
 - Official `codex` CLI installed and available in `PATH`.
 - macOS or Linux.
 
@@ -235,6 +236,7 @@ multicodex help monitor doctor
 go test ./...
 go test -race ./...
 go vet ./...
+go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 go build -o multicodex ./cmd/multicodex
 ```
 
