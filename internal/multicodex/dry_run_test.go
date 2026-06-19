@@ -47,7 +47,7 @@ func TestRenderDryRunRejectsUnsupportedOperation(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error")
 	}
-	if !strings.Contains(err.Error(), "usage: multicodex dry-run [login]") {
+	if !strings.Contains(err.Error(), "usage: multicodex dry-run [operation]") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
