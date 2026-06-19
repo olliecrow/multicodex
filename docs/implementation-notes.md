@@ -28,7 +28,6 @@
 - Unit tests for heartbeat success, failure, timeout, locking, retries, and read-only exec behavior.
 - Imported and preserved monitor tests for account discovery, source fetching, observed-token aggregation, and TUI layout stability.
 - Unit tests for profile-local CLI `/goal` state across simultaneous terminals.
-- Unit tests for unknown commands that must not create multicodex state or touch default auth.
 - Routine static and race checks with `go vet ./...` and `go test -race ./...`.
 - End-to-end battletest harness in isolated temporary homes using a controlled fake `codex` binary for workflow and failure-mode replay.
 - Manual smoke tests for profile-local workflows with temporary homes.

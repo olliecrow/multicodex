@@ -650,7 +650,7 @@ func TestCmdExecReturnsErrorWhenUsageSelectionFails(t *testing.T) {
 	}
 }
 
-func TestCmdExecSkipsInvalidConfiguredProfileBeforeSelection(t *testing.T) {
+func TestCmdExecRejectsAnyInvalidConfiguredProfileBeforeSelection(t *testing.T) {
 	app, logPath := newExecTestApp(t)
 	createExecProfiles(t, app, "alpha", "beta")
 
@@ -663,28 +663,26 @@ func TestCmdExecSkipsInvalidConfiguredProfileBeforeSelection(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
+	selectorCalled := false
 	originalSelector := defaultExecAccountSelector
-	defaultExecAccountSelector = func(_ context.Context, accounts []usage.MonitorAccount, _ int, _ string) (usage.SelectedAccount, error) {
-		if len(accounts) != 2 || accounts[0].Label != "beta" || accounts[1].Label != defaultExecAccountLabel {
-			t.Fatalf("expected selector to see ready beta profile plus default reserve account, got %#v", accounts)
-		}
-		if accounts[1].SelectionPriority <= accounts[0].SelectionPriority {
-			t.Fatalf("expected default reserve account to have lower selection priority, got %#v", accounts)
-		}
-		return usage.SelectedAccount{Account: usage.MonitorAccount{Label: "beta"}}, nil
+	defaultExecAccountSelector = func(context.Context, []usage.MonitorAccount, int, string) (usage.SelectedAccount, error) {
+		selectorCalled = true
+		return usage.SelectedAccount{}, nil
 	}
 	defer func() { defaultExecAccountSelector = originalSelector }()
 
-	if err := app.Run([]string{"exec", "--skip-git-repo-check", "hello"}); err != nil {
-		t.Fatalf("exec failed: %v", err)
+	err = app.Run([]string{"exec", "--skip-git-repo-check", "hello"})
+	if err == nil {
+		t.Fatal("expected exec to fail when any configured profile is invalid")
 	}
-
-	data, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("read log: %v", err)
+	if selectorCalled {
+		t.Fatal("expected selector not to run when any configured profile is invalid")
 	}
-	if !strings.Contains(string(data), "profile=beta") {
-		t.Fatalf("expected beta profile in log, got %q", string(data))
+	if !strings.Contains(err.Error(), "profile-local path") {
+		t.Fatalf("expected profile-local path error, got %v", err)
+	}
+	if _, statErr := os.Stat(logPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("expected codex not to be invoked, stat err=%v", statErr)
 	}
 }
 

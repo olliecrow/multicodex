@@ -81,28 +81,15 @@ func (a *App) cmdExec(args []string) error {
 
 func (a *App) execReadyConfig(cfg *Config) (*Config, error) {
 	ready := DefaultConfig()
-	var firstErr error
 	for _, name := range sortedProfileNames(cfg) {
 		profile := cfg.Profiles[name]
 		if err := a.store.EnsureProfileDir(profile); err != nil {
-			if firstErr == nil {
-				firstErr = err
-			}
-			continue
+			return nil, err
 		}
 		if err := ensureProfileCodexExecutionReady(a.store.paths, profile); err != nil {
-			if firstErr == nil {
-				firstErr = err
-			}
-			continue
+			return nil, err
 		}
 		ready.Profiles[name] = profile
-	}
-	if len(ready.Profiles) > 0 {
-		return ready, nil
-	}
-	if firstErr != nil {
-		return nil, firstErr
 	}
 	return ready, nil
 }
