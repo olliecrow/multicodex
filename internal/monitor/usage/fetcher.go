@@ -425,8 +425,9 @@ func (f *Fetcher) replaceAccountFetchers(accounts []MonitorAccount) {
 		}
 
 		next = append(next, accountFetcher{
-			account: account,
-			primary: NewOAuthSourceForHome(home),
+			account:  account,
+			primary:  NewAppServerSourceForHome(home),
+			fallback: NewOAuthSourceForHome(home),
 		})
 		usedHomes[home] = struct{}{}
 	}
