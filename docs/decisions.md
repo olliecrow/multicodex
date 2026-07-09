@@ -107,7 +107,7 @@ References: `internal/multicodex/status.go`, `internal/multicodex/status_timeout
 
 Decision: Add a profile-scoped `heartbeat` keepalive command using minimal Codex calls.
 Context: Users want a simple fire-and-forget way to keep subscription windows active and verify each logged-in profile still works.
-Rationale: Running `codex exec --skip-git-repo-check hello` inside each profile context is simple, independent, and compatible with official auth flows.
+Rationale: Running `codex exec --skip-git-repo-check --ephemeral --sandbox read-only --color never hello` inside each profile context is simple, independent, compatible with official auth flows, and avoids polluting session history.
 Trade-offs: Heartbeat sends a tiny real request for each logged-in profile, so there is a small per-run usage cost.
 Enforcement: `multicodex heartbeat` first checks login state per profile, skips logged-out profiles, and exits non-zero for failures or no logged-in profiles.
 References: `internal/multicodex/heartbeat.go`, `internal/multicodex/heartbeat_test.go`, `README.md`, `docs/command-spec.md`
@@ -156,9 +156,9 @@ References: `README.md`, `docs/implementation-notes.md`, `docs/command-spec.md`
 
 Decision: Make heartbeat cron-safe with local locking, bounded retries, and read-only execution.
 Context: Scheduled keepalive runs should not overlap, should tolerate transient failures, and should never need to mutate the current workspace or the default Codex account.
-Rationale: A local OS lock avoids duplicate overlapping work, one retry with linear backoff handles short-lived provider hiccups, and forcing `codex exec` into read-only mode reduces accidental side effects during automated refresh runs.
+Rationale: A local OS lock avoids duplicate overlapping work, one retry with linear backoff handles short-lived provider hiccups, and forcing `codex exec` into ephemeral read-only mode avoids session-history pollution and reduces accidental side effects during automated refresh runs.
 Trade-offs: Slightly more heartbeat code and a small delay before final failure when retries are used.
-Enforcement: `multicodex heartbeat` acquires a non-blocking lock under multicodex home, retries failed profile heartbeats, runs `codex exec` with `--sandbox read-only`, and keeps all auth routing profile-scoped via `CODEX_HOME`.
+Enforcement: `multicodex heartbeat` acquires a non-blocking lock under multicodex home, retries failed profile heartbeats, runs `codex exec` with `--ephemeral --sandbox read-only`, and keeps all auth routing profile-scoped via `CODEX_HOME`. Exact-argv tests prevent persistent execution from returning accidentally.
 References: `internal/multicodex/heartbeat.go`, `internal/multicodex/heartbeat_test.go`, `README.md`, `docs/command-spec.md`
 
 Decision: Fold subscription usage monitoring into multicodex under a namespaced `monitor` command.

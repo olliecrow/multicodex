@@ -315,7 +315,7 @@ exit 1
 	}
 }
 
-func TestRunCodexHeartbeatRetriesWithReadOnlyExec(t *testing.T) {
+func TestRunCodexHeartbeatRetriesWithEphemeralReadOnlyExec(t *testing.T) {
 	root := t.TempDir()
 	fakeBin := filepath.Join(root, "bin")
 	if err := os.MkdirAll(fakeBin, 0o755); err != nil {
@@ -376,15 +376,10 @@ exit 1
 	if err != nil {
 		t.Fatalf("read args: %v", err)
 	}
-	argsText := string(argsBytes)
-	if !strings.Contains(argsText, "--sandbox read-only") {
-		t.Fatalf("expected read-only sandbox args, got %q", argsText)
-	}
-	if !strings.Contains(argsText, "--color never") {
-		t.Fatalf("expected color suppression args, got %q", argsText)
-	}
-	if !strings.Contains(argsText, "exec --skip-git-repo-check --sandbox read-only --color never hello") {
-		t.Fatalf("expected heartbeat prompt args, got %q", argsText)
+	argsText := strings.TrimSpace(string(argsBytes))
+	wantArgs := "exec --skip-git-repo-check --ephemeral --sandbox read-only --color never hello"
+	if argsText != wantArgs {
+		t.Fatalf("expected heartbeat args %q, got %q", wantArgs, argsText)
 	}
 
 	cwdBytes, err := os.ReadFile(cwdPath)

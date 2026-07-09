@@ -17,7 +17,7 @@ func TestRenderDryRunOverview(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RenderDryRun: %v", err)
 	}
-	for _, want := range []string{"multicodex dry-run", "planned sequence:", "dry-run only:"} {
+	for _, want := range []string{"multicodex dry-run", "planned sequence:", "without persisting Codex sessions", "dry-run only:"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("missing %q in output", want)
 		}

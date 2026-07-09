@@ -25,7 +25,7 @@
 - Unit tests for interactive CLI handoff into direct `codex` execution.
 - Unit tests for command help, status, and unknown commands that must not move local state or rewrite default auth.
 - Unit tests for exact file-store config parsing and runtime isolation re-checks after shared-config drift.
-- Unit tests for heartbeat success, failure, timeout, locking, retries, and read-only exec behavior.
+- Unit tests for heartbeat success, failure, timeout, locking, retries, and exact ephemeral read-only exec behavior.
 - Imported and preserved monitor tests for account discovery, source fetching, observed-token aggregation, and TUI layout stability.
 - Unit tests for profile-local CLI `/goal` state across simultaneous terminals.
 - Routine static and race checks with `go vet ./...` and `go test -race ./...`.
