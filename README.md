@@ -131,7 +131,7 @@ Two terminals can run `multicodex cli` with different profiles at the same time.
 
 ## Heartbeat
 
-`multicodex heartbeat` sends a minimal read-only keepalive hello to every logged-in profile.
+`multicodex heartbeat` sends a minimal ephemeral, read-only keepalive hello to every logged-in profile. Heartbeat requests do not persist Codex session files.
 
 ```bash
 multicodex heartbeat
@@ -142,7 +142,7 @@ Heartbeat:
 - skips logged-out profiles
 - uses a non-blocking lock under `MULTICODEX_HOME`
 - retries failed profile heartbeats once by default
-- runs profile-scoped `codex exec --skip-git-repo-check --sandbox read-only --color never hello`
+- runs profile-scoped `codex exec --skip-git-repo-check --ephemeral --sandbox read-only --color never hello`
 - redacts raw failure output
 
 Optional environment overrides:

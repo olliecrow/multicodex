@@ -45,6 +45,9 @@ func TestHelpCommandTopic(t *testing.T) {
 	if !strings.Contains(out, "Usage:") || !strings.Contains(out, "multicodex heartbeat") {
 		t.Fatalf("unexpected help topic output: %s", out)
 	}
+	if !strings.Contains(out, "do not persist Codex session files") {
+		t.Fatalf("expected ephemeral session guarantee in heartbeat help: %s", out)
+	}
 }
 
 func TestHelpUnknownTopic(t *testing.T) {

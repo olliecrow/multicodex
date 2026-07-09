@@ -199,6 +199,7 @@ func runCodexHeartbeat(codexHome string, settings heartbeatSettings) (string, er
 		"codex",
 		"exec",
 		"--skip-git-repo-check",
+		"--ephemeral",
 		"--sandbox",
 		"read-only",
 		"--color",
