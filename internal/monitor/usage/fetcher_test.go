@@ -483,10 +483,10 @@ func TestReplaceAccountFetchersClosesRemovedHomes(t *testing.T) {
 	}
 }
 
-func TestReplaceAccountFetchersUsesAppServerWithOAuthFallbackByDefault(t *testing.T) {
+func TestReplaceAccountFetchersUsesAppServerWithOAuthFallbackForVerifiedAccounts(t *testing.T) {
 	f := &Fetcher{}
 	f.replaceAccountFetchers([]MonitorAccount{
-		{Label: "alpha", CodexHome: "/alpha"},
+		{Label: "alpha", CodexHome: "/alpha", UseAppServer: true},
 	})
 
 	if len(f.accounts) != 1 {
@@ -497,6 +497,23 @@ func TestReplaceAccountFetchersUsesAppServerWithOAuthFallbackByDefault(t *testin
 	}
 	if f.accounts[0].fallback == nil || f.accounts[0].fallback.Name() != "oauth" {
 		t.Fatalf("expected oauth fallback source, got %#v", f.accounts[0].fallback)
+	}
+}
+
+func TestReplaceAccountFetchersUsesOAuthOnlyForUnverifiedAccounts(t *testing.T) {
+	f := &Fetcher{}
+	f.replaceAccountFetchers([]MonitorAccount{
+		{Label: "alpha", CodexHome: "/alpha"},
+	})
+
+	if len(f.accounts) != 1 {
+		t.Fatalf("expected one account fetcher")
+	}
+	if f.accounts[0].primary == nil || f.accounts[0].primary.Name() != "oauth" {
+		t.Fatalf("expected oauth primary source, got %#v", f.accounts[0].primary)
+	}
+	if f.accounts[0].fallback != nil {
+		t.Fatalf("expected no fallback source for unverified account, got %#v", f.accounts[0].fallback)
 	}
 }
 
@@ -544,6 +561,61 @@ func TestRefreshAccountsReloadsAndReusesExistingHomes(t *testing.T) {
 	}
 	if alpha.primary != reusedPrimary {
 		t.Fatalf("expected existing source to be reused for unchanged home")
+	}
+}
+
+func TestReplaceAccountFetchersRebuildsSourcesWhenAppServerEligibilityChanges(t *testing.T) {
+	oldPrimary := &fakeSource{name: "old-primary"}
+	oldFallback := &fakeSource{name: "old-fallback"}
+	f := &Fetcher{
+		accounts: []accountFetcher{
+			{
+				account:  MonitorAccount{Label: "alpha", CodexHome: "/alpha"},
+				primary:  oldPrimary,
+				fallback: oldFallback,
+			},
+		},
+	}
+
+	f.replaceAccountFetchers([]MonitorAccount{
+		{Label: "alpha", CodexHome: "/alpha", UseAppServer: true},
+	})
+
+	if !oldPrimary.closed || !oldFallback.closed {
+		t.Fatalf("expected stale sources to be closed when app-server eligibility changes")
+	}
+	if len(f.accounts) != 1 {
+		t.Fatalf("expected one account fetcher")
+	}
+	if f.accounts[0].primary == nil || f.accounts[0].primary.Name() != "app-server" {
+		t.Fatalf("expected rebuilt app-server primary, got %#v", f.accounts[0].primary)
+	}
+	if f.accounts[0].fallback == nil || f.accounts[0].fallback.Name() != "oauth" {
+		t.Fatalf("expected rebuilt oauth fallback, got %#v", f.accounts[0].fallback)
+	}
+
+	oldPrimary = &fakeSource{name: "old-primary-2"}
+	oldFallback = &fakeSource{name: "old-fallback-2"}
+	f.accounts = []accountFetcher{
+		{
+			account:  MonitorAccount{Label: "alpha", CodexHome: "/alpha", UseAppServer: true},
+			primary:  oldPrimary,
+			fallback: oldFallback,
+		},
+	}
+
+	f.replaceAccountFetchers([]MonitorAccount{
+		{Label: "alpha", CodexHome: "/alpha"},
+	})
+
+	if !oldPrimary.closed || !oldFallback.closed {
+		t.Fatalf("expected app-server sources to be closed when eligibility is removed")
+	}
+	if f.accounts[0].primary == nil || f.accounts[0].primary.Name() != "oauth" {
+		t.Fatalf("expected rebuilt oauth primary, got %#v", f.accounts[0].primary)
+	}
+	if f.accounts[0].fallback != nil {
+		t.Fatalf("expected no fallback after eligibility is removed, got %#v", f.accounts[0].fallback)
 	}
 }
 

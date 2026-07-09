@@ -203,8 +203,9 @@ func (a *App) selectExecProfile(cfg *Config, selector execAccountSelector, model
 	for _, name := range names {
 		profile := cfg.Profiles[name]
 		accounts = append(accounts, usage.MonitorAccount{
-			Label:     name,
-			CodexHome: profile.CodexHome,
+			Label:        name,
+			CodexHome:    profile.CodexHome,
+			UseAppServer: true,
 		})
 	}
 	defaultHome := normalizeExecCodexHome(a.store.paths.DefaultCodexHome)

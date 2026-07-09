@@ -178,7 +178,7 @@ Additional sources are opt-in:
 - `--discover` scans compatible Codex homes from the local filesystem
 - `multicodex monitor doctor --app-server` also checks the raw Codex app-server source separately
 
-The monitor's normal usage source asks the Codex app-server for usage first and falls back to direct OAuth from each profile home. This matches Codex CLI auth handling for logged-in profiles whose access token can still be refreshed.
+For validated multicodex profile homes, the monitor asks the Codex app-server for usage first and falls back to direct OAuth from the profile home. This matches Codex CLI auth handling for logged-in profiles whose access token can still be refreshed. Other monitor account homes use direct OAuth unless they dedupe with a validated profile home.
 
 The TUI:
 
