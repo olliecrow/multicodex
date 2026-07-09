@@ -41,10 +41,10 @@ func RunDoctor(ctx context.Context, options DoctorOptions) DoctorReport {
 		expected := 0
 		for _, account := range accounts {
 			account := account
-			oauthSource := NewOAuthSourceForHome(account.CodexHome)
-			defer oauthSource.Close()
+			usageSource := NewUsageSourceForHome(account.CodexHome)
+			defer usageSource.Close()
 			expected++
-			go func() { sourceChecks <- checkSourceFetch(ctx, account, oauthSource) }()
+			go func() { sourceChecks <- checkSourceFetch(ctx, account, usageSource) }()
 			if options.IncludeAppServer {
 				appSource := NewAppServerSourceForHome(account.CodexHome)
 				defer appSource.Close()

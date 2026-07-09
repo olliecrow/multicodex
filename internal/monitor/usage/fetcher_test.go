@@ -483,7 +483,7 @@ func TestReplaceAccountFetchersClosesRemovedHomes(t *testing.T) {
 	}
 }
 
-func TestReplaceAccountFetchersUsesOAuthOnlyByDefault(t *testing.T) {
+func TestReplaceAccountFetchersUsesAppServerWithOAuthFallbackByDefault(t *testing.T) {
 	f := &Fetcher{}
 	f.replaceAccountFetchers([]MonitorAccount{
 		{Label: "alpha", CodexHome: "/alpha"},
@@ -492,11 +492,11 @@ func TestReplaceAccountFetchersUsesOAuthOnlyByDefault(t *testing.T) {
 	if len(f.accounts) != 1 {
 		t.Fatalf("expected one account fetcher")
 	}
-	if f.accounts[0].primary == nil || f.accounts[0].primary.Name() != "oauth" {
-		t.Fatalf("expected oauth primary source, got %#v", f.accounts[0].primary)
+	if f.accounts[0].primary == nil || f.accounts[0].primary.Name() != "app-server" {
+		t.Fatalf("expected app-server primary source, got %#v", f.accounts[0].primary)
 	}
-	if f.accounts[0].fallback != nil {
-		t.Fatalf("expected no fallback source by default, got %#v", f.accounts[0].fallback)
+	if f.accounts[0].fallback == nil || f.accounts[0].fallback.Name() != "oauth" {
+		t.Fatalf("expected oauth fallback source, got %#v", f.accounts[0].fallback)
 	}
 }
 

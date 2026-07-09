@@ -176,9 +176,9 @@ Additional sources are opt-in:
 - `--include-default` includes the default Codex home
 - `--include-active` includes the active `CODEX_HOME`
 - `--discover` scans compatible Codex homes from the local filesystem
-- `multicodex monitor doctor --app-server` also checks the Codex app-server usage source
+- `multicodex monitor doctor --app-server` also checks the raw Codex app-server source separately
 
-The monitor's normal usage source is OAuth from each profile home. The app-server source exists only for explicit doctor checks.
+The monitor's normal usage source asks the Codex app-server for usage first and falls back to direct OAuth from each profile home. This matches Codex CLI auth handling for logged-in profiles whose access token can still be refreshed.
 
 The TUI:
 
