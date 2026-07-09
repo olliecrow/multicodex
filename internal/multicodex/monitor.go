@@ -47,7 +47,7 @@ func (a *App) runMonitorDoctor(args []string) error {
 	includeDefault := fs.Bool("include-default", false, "include the default Codex home")
 	includeActive := fs.Bool("include-active", false, "include the active CODEX_HOME")
 	discover := fs.Bool("discover", false, "discover compatible Codex homes from the filesystem")
-	appServer := fs.Bool("app-server", false, "also check the Codex app-server usage source")
+	appServer := fs.Bool("app-server", false, "also check the raw Codex app-server source separately")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -196,7 +196,7 @@ func printMonitorUsage() {
 	fmt.Println("  --include-default Include the default Codex home")
 	fmt.Println("  --include-active  Include the active CODEX_HOME")
 	fmt.Println("  --discover        Discover compatible Codex homes from the filesystem")
-	fmt.Println("  --app-server      Also check the Codex app-server usage source")
+	fmt.Println("  --app-server      Also check the raw Codex app-server source separately")
 	fmt.Println()
 	fmt.Println("Monitor terminal user interface flags:")
 	fmt.Println("  --interval 60s    Poll interval")

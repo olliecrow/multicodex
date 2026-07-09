@@ -41,7 +41,7 @@ func RunDoctor(ctx context.Context, options DoctorOptions) DoctorReport {
 		expected := 0
 		for _, account := range accounts {
 			account := account
-			usageSource := NewUsageSourceForHome(account.CodexHome)
+			usageSource := NewUsageSourceForAccount(account)
 			defer usageSource.Close()
 			expected++
 			go func() { sourceChecks <- checkSourceFetch(ctx, account, usageSource) }()
