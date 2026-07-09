@@ -80,7 +80,8 @@ Multicodex intentionally has no command for changing the shared default Codex ac
 - Does not manage or inspect the default Codex account as a multicodex profile.
 
 `multicodex heartbeat`
-- Runs `codex exec --skip-git-repo-check --sandbox read-only --color never hello` for each logged-in profile.
+- Runs `codex exec --skip-git-repo-check --ephemeral --sandbox read-only --color never hello` for each logged-in profile.
+- Does not persist Codex session files.
 - Skips logged-out profiles.
 - Re-checks file-backed auth isolation before per-profile execution.
 - Uses a non-blocking lock under `MULTICODEX_HOME`.
