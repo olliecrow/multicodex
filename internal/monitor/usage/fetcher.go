@@ -418,17 +418,19 @@ func (f *Fetcher) replaceAccountFetchers(accounts []MonitorAccount) {
 		}
 		account.CodexHome = home
 		if existing, ok := existingByHome[home]; ok {
+			if existing.account.UseAppServer != account.UseAppServer {
+				closeAccountFetcher(existing)
+				next = append(next, newAccountFetcher(account))
+				usedHomes[home] = struct{}{}
+				continue
+			}
 			existing.account = account
 			next = append(next, existing)
 			usedHomes[home] = struct{}{}
 			continue
 		}
 
-		next = append(next, accountFetcher{
-			account:  account,
-			primary:  NewAppServerSourceForHome(home),
-			fallback: NewOAuthSourceForHome(home),
-		})
+		next = append(next, newAccountFetcher(account))
 		usedHomes[home] = struct{}{}
 	}
 
@@ -436,14 +438,30 @@ func (f *Fetcher) replaceAccountFetchers(accounts []MonitorAccount) {
 		if _, ok := usedHomes[home]; ok {
 			continue
 		}
-		if existing.primary != nil {
-			_ = existing.primary.Close()
-		}
-		if existing.fallback != nil {
-			_ = existing.fallback.Close()
-		}
+		closeAccountFetcher(existing)
 	}
 	f.accounts = next
+}
+
+func closeAccountFetcher(fetcher accountFetcher) {
+	if fetcher.primary != nil {
+		_ = fetcher.primary.Close()
+	}
+	if fetcher.fallback != nil {
+		_ = fetcher.fallback.Close()
+	}
+}
+
+func newAccountFetcher(account MonitorAccount) accountFetcher {
+	fetcher := accountFetcher{
+		account: account,
+		primary: NewOAuthSourceForHome(account.CodexHome),
+	}
+	if account.UseAppServer {
+		fetcher.primary = NewAppServerSourceForHome(account.CodexHome)
+		fetcher.fallback = NewOAuthSourceForHome(account.CodexHome)
+	}
+	return fetcher
 }
 
 func normalizeHome(home string) string {

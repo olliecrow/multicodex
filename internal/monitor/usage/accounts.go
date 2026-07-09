@@ -36,6 +36,7 @@ type MonitorAccount struct {
 	Label             string `json:"label"`
 	CodexHome         string `json:"codex_home"`
 	SelectionPriority int    `json:"-"`
+	UseAppServer      bool   `json:"-"`
 }
 
 type MonitorAccountOptions struct {
@@ -63,7 +64,7 @@ func loadMonitorAccountsWithOptions(options MonitorAccountOptions) ([]MonitorAcc
 		if err != nil {
 			return nil, "", err
 		}
-		collector.add("default", defaultHome, 50, false)
+		collector.add("default", defaultHome, 50, false, false)
 	}
 
 	if options.IncludeActive {
@@ -75,7 +76,7 @@ func loadMonitorAccountsWithOptions(options MonitorAccountOptions) ([]MonitorAcc
 			if expandErr != nil {
 				collector.warnf("could not resolve CODEX_HOME: %v", expandErr)
 			} else {
-				collector.add("active", expanded, 40, true)
+				collector.add("active", expanded, 40, true, false)
 			}
 		}
 	}
@@ -88,7 +89,7 @@ func loadMonitorAccountsWithOptions(options MonitorAccountOptions) ([]MonitorAcc
 			collector.warnf("%s", profileWarning)
 		}
 		for _, account := range profileAccounts {
-			collector.add(account.Label, account.CodexHome, 90, false)
+			collector.add(account.Label, account.CodexHome, 90, false, true)
 		}
 	}
 
@@ -100,7 +101,7 @@ func loadMonitorAccountsWithOptions(options MonitorAccountOptions) ([]MonitorAcc
 			collector.warnf("%s", fileWarning)
 		}
 		for _, account := range fileAccounts {
-			collector.add(account.Label, account.CodexHome, 100, true)
+			collector.add(account.Label, account.CodexHome, 100, true, false)
 		}
 	}
 
@@ -116,7 +117,7 @@ func loadMonitorAccountsWithOptions(options MonitorAccountOptions) ([]MonitorAcc
 				if isMulticodexProfileHome(account.CodexHome) {
 					continue
 				}
-				collector.add(account.Label, account.CodexHome, 30, false)
+				collector.add(account.Label, account.CodexHome, 30, false, false)
 			}
 		}
 	}
@@ -706,7 +707,7 @@ func newAccountCollector() *accountCollector {
 	}
 }
 
-func (c *accountCollector) add(label, codexHome string, priority int, allowWithoutSignals bool) {
+func (c *accountCollector) add(label, codexHome string, priority int, allowWithoutSignals bool, useAppServer bool) {
 	normalized := normalizeHome(codexHome)
 	if normalized == "" {
 		return
@@ -716,13 +717,19 @@ func (c *accountCollector) add(label, codexHome string, priority int, allowWitho
 	}
 	if existing, ok := c.byHome[normalized]; ok {
 		if existing.priority >= priority {
+			if useAppServer && !existing.account.UseAppServer {
+				existing.account.UseAppServer = true
+				c.byHome[normalized] = existing
+			}
 			return
 		}
+		useAppServer = useAppServer || existing.account.UseAppServer
 	}
 	c.byHome[normalized] = accountCandidate{
 		account: MonitorAccount{
-			Label:     safeLabel(label),
-			CodexHome: normalized,
+			Label:        safeLabel(label),
+			CodexHome:    normalized,
+			UseAppServer: useAppServer,
 		},
 		priority: priority,
 	}

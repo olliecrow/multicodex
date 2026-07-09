@@ -20,6 +20,13 @@ func NewUsageSourceForHome(codexHome string) *UsageSource {
 	}
 }
 
+func NewUsageSourceForAccount(account MonitorAccount) Source {
+	if account.UseAppServer {
+		return NewUsageSourceForHome(account.CodexHome)
+	}
+	return NewOAuthSourceForHome(account.CodexHome)
+}
+
 func (s *UsageSource) Name() string {
 	return "usage"
 }

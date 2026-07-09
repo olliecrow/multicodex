@@ -199,6 +199,11 @@ func TestLoadMonitorAccountsFromFileWithDedup(t *testing.T) {
 	if accounts[1].Label != "work" {
 		t.Fatalf("expected second label work, got %q", accounts[1].Label)
 	}
+	for _, account := range accounts {
+		if account.UseAppServer {
+			t.Fatalf("expected unverified account-file entry not to use app-server: %#v", account)
+		}
+	}
 }
 
 func TestLoadMonitorAccountsWarnsOnEmptyAccounts(t *testing.T) {
@@ -393,8 +398,8 @@ func TestAccountCollectorDeduplicatesSymlinkAndRealHomes(t *testing.T) {
 	}
 
 	collector := newAccountCollector()
-	collector.add("real", realHome, 50, false)
-	collector.add("link", symlinkHome, 60, false)
+	collector.add("real", realHome, 50, false, false)
+	collector.add("link", symlinkHome, 60, false, false)
 
 	accounts := collector.toAccounts()
 	if len(accounts) != 1 {
@@ -467,10 +472,35 @@ func TestLoadMonitorAccountsPrefersMulticodexProfiles(t *testing.T) {
 	for _, account := range accounts {
 		if account.Label == "personal" && account.CodexHome == normalizeHome(profileHome) {
 			found = true
+			if !account.UseAppServer {
+				t.Fatalf("expected validated multicodex profile to use app-server")
+			}
 		}
 	}
 	if !found {
 		t.Fatalf("expected multicodex profile account to be included, got %#v", accounts)
+	}
+}
+
+func TestAccountCollectorPreservesVerifiedAppServerUseAcrossHigherPriorityAlias(t *testing.T) {
+	home := t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, "auth.json"), []byte(`{"tokens":{"access_token":"x"}}`), 0o600); err != nil {
+		t.Fatalf("write auth file: %v", err)
+	}
+
+	collector := newAccountCollector()
+	collector.add("profile", home, 90, false, true)
+	collector.add("alias", home, 100, true, false)
+
+	accounts := collector.toAccounts()
+	if len(accounts) != 1 {
+		t.Fatalf("expected deduped account, got %#v", accounts)
+	}
+	if accounts[0].Label != "alias" {
+		t.Fatalf("expected higher-priority label, got %q", accounts[0].Label)
+	}
+	if !accounts[0].UseAppServer {
+		t.Fatalf("expected verified app-server use to survive higher-priority alias")
 	}
 }
 

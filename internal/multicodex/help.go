@@ -107,7 +107,7 @@ var commandHelpByName = map[string]commandHelp{
 	},
 	"monitor doctor": {
 		Usage:       "multicodex monitor doctor [--json] [--timeout 60s] [--include-default] [--include-active] [--discover] [--app-server]",
-		Description: "Run read-only monitor checks against explicit monitor account overrides and configured multicodex profiles. Default Codex home, active CODEX_HOME, filesystem discovery, and app-server checks are opt-in. The command succeeds when at least one usage source works and reports degraded status when another fetch or setup check fails.",
+		Description: "Run read-only monitor checks against explicit monitor account overrides and configured multicodex profiles. Validated profile homes use app-server first with direct OAuth fallback; other homes use direct OAuth unless they dedupe with a validated profile. Default Codex home, active CODEX_HOME, filesystem discovery, and extra raw app-server checks are opt-in. The command succeeds when at least one usage source works and reports degraded status when another fetch or setup check fails.",
 		Examples: []string{
 			"multicodex monitor doctor",
 			"multicodex monitor doctor --json",

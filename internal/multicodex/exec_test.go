@@ -54,16 +54,29 @@ func TestCmdExecRunsCodexExecWithDefaultReserveAccount(t *testing.T) {
 	originalSelector := defaultExecAccountSelector
 	defaultExecAccountSelector = func(_ context.Context, accounts []usage.MonitorAccount, _ int, _ string) (usage.SelectedAccount, error) {
 		var defaultAccount usage.MonitorAccount
+		var profileAccount usage.MonitorAccount
 		for _, account := range accounts {
 			if account.Label == defaultExecAccountLabel {
 				defaultAccount = account
 			}
+			if account.Label == "alpha" {
+				profileAccount = account
+			}
+		}
+		if profileAccount.CodexHome == "" {
+			t.Fatalf("expected configured profile account in selector candidates, got %#v", accounts)
+		}
+		if !profileAccount.UseAppServer {
+			t.Fatalf("expected validated exec profile to use app-server, got %#v", profileAccount)
 		}
 		if defaultAccount.CodexHome == "" {
 			t.Fatalf("expected default reserve account in selector candidates, got %#v", accounts)
 		}
 		if defaultAccount.SelectionPriority <= 0 {
 			t.Fatalf("expected default reserve account to have lower selection priority, got %#v", defaultAccount)
+		}
+		if defaultAccount.UseAppServer {
+			t.Fatalf("expected default reserve account not to use app-server without profile validation, got %#v", defaultAccount)
 		}
 		return usage.SelectedAccount{
 			Account:              defaultAccount,
