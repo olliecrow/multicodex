@@ -127,6 +127,22 @@ func TestNormalizeSummaryMergesClassifiedSlotsAcrossResponseObjects(t *testing.T
 	}
 }
 
+func TestNormalizeSummaryPrefersDeclaredDurationOverPositionalFallback(t *testing.T) {
+	summary, err := normalizeSummary("app-server", rateLimitSnapshotRaw{
+		Primary: &rateLimitWindowRaw{
+			UsedPercent:        34,
+			WindowDurationMins: intPtr(weeklyWindowMinutes),
+		},
+		Secondary: &rateLimitWindowRaw{UsedPercent: 99},
+	}, nil, 0, nil, nil)
+	if err != nil {
+		t.Fatalf("normalizeSummary failed: %v", err)
+	}
+	if summary.PrimaryWindow.UsedPercent != unavailableUsedPercent || summary.SecondaryWindow.UsedPercent != 34 {
+		t.Fatalf("expected declared weekly duration to win, got five-hour=%d weekly=%d", summary.PrimaryWindow.UsedPercent, summary.SecondaryWindow.UsedPercent)
+	}
+}
+
 func TestNormalizeSummaryBuildsRateLimitWindowsFromPrimaryAndAdditionalLimits(t *testing.T) {
 	summary, err := normalizeSummary("app-server", rateLimitSnapshotRaw{
 		LimitID:  "codex",
@@ -254,7 +270,7 @@ func TestNormalizeSummarySkipsInvalidRateLimitWindowEntries(t *testing.T) {
 		t.Fatalf("expected only the base limit window to remain, got %d", got)
 	}
 	if _, ok := summary.RateLimitWindows["codex_bengalfox"]; ok {
-		t.Fatalf("expected codex_bengalfox window without primary to be skipped")
+		t.Fatalf("expected codex_bengalfox window without usage data to be skipped")
 	}
 }
 
