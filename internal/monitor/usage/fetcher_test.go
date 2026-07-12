@@ -1287,6 +1287,31 @@ func TestFetcherMarksWindowUnavailableWhenActiveHomeMissing(t *testing.T) {
 	if out.WindowAccountLabel != "" {
 		t.Fatalf("expected no window account label when active home is missing, got %q", out.WindowAccountLabel)
 	}
+	if warning := strings.Join(out.Warnings, " | "); !strings.Contains(warning, "--include-active") {
+		t.Fatalf("expected actionable active-home warning, got %q", warning)
+	}
+}
+
+func TestFetcherExplainsHowToIncludeDefaultHome(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("CODEX_HOME", "")
+
+	f := &Fetcher{
+		accounts: []accountFetcher{{
+			account: MonitorAccount{Label: "profile", CodexHome: "/profile"},
+			primary: &fakeSource{name: "primary", out: &Summary{
+				PrimaryWindow: WindowSummary{UsedPercent: 10}, SecondaryWindow: WindowSummary{UsedPercent: 20},
+			}},
+		}},
+	}
+	out, err := f.Fetch(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if warning := strings.Join(out.Warnings, " | "); !strings.Contains(warning, "--include-default") {
+		t.Fatalf("expected actionable default-home warning, got %q", warning)
+	}
 }
 
 func TestNormalizeHomeConvertsRelativeToAbsolute(t *testing.T) {

@@ -27,6 +27,55 @@ func TestNormalizeSummaryAllowsMissingSecondaryWindow(t *testing.T) {
 	}
 }
 
+func TestNormalizeSummaryClassifiesWeeklyOnlyPrimaryByDuration(t *testing.T) {
+	summary, err := normalizeSummary("app-server", rateLimitSnapshotRaw{
+		LimitID: "codex",
+		Primary: &rateLimitWindowRaw{
+			UsedPercent:        35,
+			WindowDurationMins: intPtr(weeklyWindowMinutes),
+		},
+	}, map[string]rateLimitSnapshotRaw{
+		"codex": {
+			Primary: &rateLimitWindowRaw{
+				UsedPercent:        35,
+				WindowDurationMins: intPtr(weeklyWindowMinutes),
+			},
+		},
+	}, 0, nil, nil)
+	if err != nil {
+		t.Fatalf("normalizeSummary failed: %v", err)
+	}
+	if summary.PrimaryWindow.UsedPercent != unavailableUsedPercent {
+		t.Fatalf("expected missing five-hour window to stay unavailable, got %d", summary.PrimaryWindow.UsedPercent)
+	}
+	if summary.SecondaryWindow.UsedPercent != 35 {
+		t.Fatalf("expected weekly primary response in weekly slot, got %d", summary.SecondaryWindow.UsedPercent)
+	}
+	window := summary.RateLimitWindows["codex"]
+	if window.PrimaryWindow.UsedPercent != unavailableUsedPercent || window.SecondaryWindow.UsedPercent != 35 {
+		t.Fatalf("expected per-limit window classification to match summary, got %#v", window)
+	}
+}
+
+func TestNormalizeSummaryClassifiesReversedWindowsByDuration(t *testing.T) {
+	summary, err := normalizeSummary("app-server", rateLimitSnapshotRaw{
+		Primary: &rateLimitWindowRaw{
+			UsedPercent:        70,
+			WindowDurationMins: intPtr(weeklyWindowMinutes),
+		},
+		Secondary: &rateLimitWindowRaw{
+			UsedPercent:        20,
+			WindowDurationMins: intPtr(fiveHourWindowMinutes),
+		},
+	}, nil, 0, nil, nil)
+	if err != nil {
+		t.Fatalf("normalizeSummary failed: %v", err)
+	}
+	if summary.PrimaryWindow.UsedPercent != 20 || summary.SecondaryWindow.UsedPercent != 70 {
+		t.Fatalf("expected duration-based window order, got five-hour=%d weekly=%d", summary.PrimaryWindow.UsedPercent, summary.SecondaryWindow.UsedPercent)
+	}
+}
+
 func TestNormalizeSummaryBuildsRateLimitWindowsFromPrimaryAndAdditionalLimits(t *testing.T) {
 	summary, err := normalizeSummary("app-server", rateLimitSnapshotRaw{
 		LimitID:  "codex",

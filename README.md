@@ -186,6 +186,7 @@ The TUI:
 - shows configured account labels before raw identity fields
 - keeps timestamps in UTC internally and renders local time in the UI
 - shows official five-hour and weekly windows plus local observed-token estimates
+- uses each official window's declared duration, so a weekly-only provider response appears under weekly instead of being mislabeled as five-hour
 - keeps last good official window cards visible and marked stale during a full refresh outage
 - prefers short re-login warnings when a profile token has expired
 

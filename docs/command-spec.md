@@ -100,6 +100,7 @@ Multicodex intentionally has no command for changing the shared default Codex ac
 - Supports opt-in account sources with `--include-default`, `--include-active`, and `--discover`.
 - Uses Codex app-server usage fetches for validated multicodex profile homes, with direct OAuth as fallback.
 - Uses direct OAuth for other monitor account homes unless they dedupe with a validated profile home.
+- Classifies official five-hour and weekly windows by their declared duration rather than their response field position.
 - Remains read-only with respect to Codex account state.
 - Renders compact usage lines in each window card.
 - Shows Spark usage inline when Spark data is present.

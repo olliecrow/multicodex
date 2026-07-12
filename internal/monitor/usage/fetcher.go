@@ -221,7 +221,7 @@ func (f *Fetcher) fetchMultiAccount(ctx context.Context) (*Summary, error) {
 		case activeHomes.primary == "":
 			out.Warnings = append(out.Warnings, "active account home is unavailable; window cards are unavailable")
 		case !activeHomeDiscovered:
-			out.Warnings = append(out.Warnings, "active account home is not in discovered accounts; window cards are unavailable")
+			out.Warnings = append(out.Warnings, activeHomeNotMonitoredWarning())
 		case activeFetchFailed:
 			out.Warnings = append(out.Warnings, "active account usage fetch failed; window cards are unavailable")
 		default:
@@ -257,6 +257,13 @@ func (f *Fetcher) fetchMultiAccount(ctx context.Context) (*Summary, error) {
 		return nil, fmt.Errorf("all account fetches failed and observed tokens are unavailable")
 	}
 	return out, nil
+}
+
+func activeHomeNotMonitoredWarning() string {
+	if strings.TrimSpace(os.Getenv("CODEX_HOME")) != "" {
+		return "active CODEX_HOME is not in monitored accounts; rerun with --include-active to show its window cards"
+	}
+	return "default Codex home is not in monitored accounts; rerun with --include-default to show its window cards"
 }
 
 func fetchWithFallback(ctx context.Context, primary Source, fallback Source) (*Summary, error) {
