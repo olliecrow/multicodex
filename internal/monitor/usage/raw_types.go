@@ -46,8 +46,8 @@ type identityInfo struct {
 }
 
 func normalizeSummary(source string, snapshot rateLimitSnapshotRaw, rateLimitsByLimitID map[string]rateLimitSnapshotRaw, additionalLimitCount int, identity *identityInfo, warnings []string) (*Summary, error) {
-	if snapshot.Primary == nil {
-		return nil, errors.New("missing primary window")
+	if snapshot.Primary == nil && snapshot.Secondary == nil {
+		return nil, errors.New("missing usage windows")
 	}
 
 	now := time.Now().UTC()
@@ -73,16 +73,14 @@ func normalizeSummary(source string, snapshot rateLimitSnapshotRaw, rateLimitsBy
 
 func normalizeRateLimitWindows(primary rateLimitSnapshotRaw, byLimitID map[string]rateLimitSnapshotRaw) map[string]RateLimitWindow {
 	limitWindows := make(map[string]RateLimitWindow)
-	rawWindows := make(map[string]rateLimitSnapshotRaw)
 	for rawID, raw := range byLimitID {
 		id := strings.TrimSpace(rawID)
 		if id == "" {
 			continue
 		}
-		if raw.Primary == nil {
+		if raw.Primary == nil && raw.Secondary == nil {
 			continue
 		}
-		rawWindows[id] = raw
 		limitWindows[id] = toRateLimitWindow(id, raw)
 	}
 
@@ -95,17 +93,18 @@ func normalizeRateLimitWindows(primary rateLimitSnapshotRaw, byLimitID map[strin
 		return limitWindows
 	}
 
-	merged := rawWindows[primaryID]
-	if merged.LimitName == nil {
-		merged.LimitName = primary.LimitName
+	existing := limitWindows[primaryID]
+	fallback := toRateLimitWindow(primaryID, primary)
+	if existing.LimitName == "" {
+		existing.LimitName = fallback.LimitName
 	}
-	if merged.Primary == nil {
-		merged.Primary = primary.Primary
+	if existing.PrimaryWindow.UsedPercent == unavailableUsedPercent {
+		existing.PrimaryWindow = fallback.PrimaryWindow
 	}
-	if merged.Secondary == nil {
-		merged.Secondary = primary.Secondary
+	if existing.SecondaryWindow.UsedPercent == unavailableUsedPercent {
+		existing.SecondaryWindow = fallback.SecondaryWindow
 	}
-	limitWindows[primaryID] = toRateLimitWindow(primaryID, merged)
+	limitWindows[primaryID] = existing
 
 	return limitWindows
 }
