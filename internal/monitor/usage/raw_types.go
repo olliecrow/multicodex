@@ -134,9 +134,9 @@ func normalizeWindowPair(primary, secondary *rateLimitWindowRaw) (WindowSummary,
 			weekly = normalized
 		default:
 			// Older responses omitted durations. Preserve their positional contract.
-			if index == 0 {
+			if index == 0 && fiveHour.UsedPercent == unavailableUsedPercent {
 				fiveHour = normalized
-			} else {
+			} else if index == 1 && weekly.UsedPercent == unavailableUsedPercent {
 				weekly = normalized
 			}
 		}
