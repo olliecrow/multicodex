@@ -73,6 +73,7 @@ func normalizeSummary(source string, snapshot rateLimitSnapshotRaw, rateLimitsBy
 
 func normalizeRateLimitWindows(primary rateLimitSnapshotRaw, byLimitID map[string]rateLimitSnapshotRaw) map[string]RateLimitWindow {
 	limitWindows := make(map[string]RateLimitWindow)
+	rawWindows := make(map[string]rateLimitSnapshotRaw)
 	for rawID, raw := range byLimitID {
 		id := strings.TrimSpace(rawID)
 		if id == "" {
@@ -81,6 +82,7 @@ func normalizeRateLimitWindows(primary rateLimitSnapshotRaw, byLimitID map[strin
 		if raw.Primary == nil && raw.Secondary == nil {
 			continue
 		}
+		rawWindows[id] = raw
 		limitWindows[id] = toRateLimitWindow(id, raw)
 	}
 
@@ -93,20 +95,21 @@ func normalizeRateLimitWindows(primary rateLimitSnapshotRaw, byLimitID map[strin
 		return limitWindows
 	}
 
-	existing := limitWindows[primaryID]
-	fallback := toRateLimitWindow(primaryID, primary)
-	if existing.LimitName == "" {
-		existing.LimitName = fallback.LimitName
-	}
-	if existing.PrimaryWindow.UsedPercent == unavailableUsedPercent {
-		existing.PrimaryWindow = fallback.PrimaryWindow
-	}
-	if existing.SecondaryWindow.UsedPercent == unavailableUsedPercent {
-		existing.SecondaryWindow = fallback.SecondaryWindow
-	}
-	limitWindows[primaryID] = existing
+	limitWindows[primaryID] = mergeRateLimitSnapshots(primaryID, rawWindows[primaryID], primary)
 
 	return limitWindows
+}
+
+func mergeRateLimitSnapshots(id string, preferred, fallback rateLimitSnapshotRaw) RateLimitWindow {
+	window := RateLimitWindow{LimitID: id, LimitName: pointerValue(preferred.LimitName)}
+	if window.LimitName == "" {
+		window.LimitName = pointerValue(fallback.LimitName)
+	}
+	window.PrimaryWindow, window.SecondaryWindow = normalizeWindowPairs(
+		fallback.Primary, fallback.Secondary,
+		preferred.Primary, preferred.Secondary,
+	)
+	return window
 }
 
 func toRateLimitWindow(id string, raw rateLimitSnapshotRaw) RateLimitWindow {
@@ -119,26 +122,36 @@ func toRateLimitWindow(id string, raw rateLimitSnapshotRaw) RateLimitWindow {
 }
 
 func normalizeWindowPair(primary, secondary *rateLimitWindowRaw) (WindowSummary, WindowSummary) {
+	return normalizeWindowPairs(primary, secondary)
+}
+
+func normalizeWindowPairs(rawWindows ...*rateLimitWindowRaw) (WindowSummary, WindowSummary) {
 	fiveHour := unavailableWindowSummary()
 	weekly := unavailableWindowSummary()
 
-	for index, raw := range []*rateLimitWindowRaw{primary, secondary} {
+	// Apply positional fallbacks first. Any declared duration then wins its slot.
+	for index, raw := range rawWindows {
 		if raw == nil {
 			continue
 		}
-		normalized := toWindowSummary(raw)
+		if pointerIntValue(raw.WindowDurationMins) != 0 {
+			continue
+		}
+		if index%2 == 0 {
+			fiveHour = toWindowSummary(raw)
+		} else {
+			weekly = toWindowSummary(raw)
+		}
+	}
+	for _, raw := range rawWindows {
+		if raw == nil {
+			continue
+		}
 		switch pointerIntValue(raw.WindowDurationMins) {
 		case fiveHourWindowMinutes:
-			fiveHour = normalized
+			fiveHour = toWindowSummary(raw)
 		case weeklyWindowMinutes:
-			weekly = normalized
-		default:
-			// Older responses omitted durations. Preserve their positional contract.
-			if index == 0 && fiveHour.UsedPercent == unavailableUsedPercent {
-				fiveHour = normalized
-			} else if index == 1 && weekly.UsedPercent == unavailableUsedPercent {
-				weekly = normalized
-			}
+			weekly = toWindowSummary(raw)
 		}
 	}
 	return fiveHour, weekly

@@ -143,6 +143,25 @@ func TestNormalizeSummaryPrefersDeclaredDurationOverPositionalFallback(t *testin
 	}
 }
 
+func TestNormalizeSummaryPrefersDeclaredDurationAcrossResponseObjects(t *testing.T) {
+	summary, err := normalizeSummary("app-server", rateLimitSnapshotRaw{
+		LimitID: "codex",
+		Primary: &rateLimitWindowRaw{
+			UsedPercent:        34,
+			WindowDurationMins: intPtr(weeklyWindowMinutes),
+		},
+	}, map[string]rateLimitSnapshotRaw{
+		"codex": {Secondary: &rateLimitWindowRaw{UsedPercent: 99}},
+	}, 0, nil, nil)
+	if err != nil {
+		t.Fatalf("normalizeSummary failed: %v", err)
+	}
+	window := summary.RateLimitWindows["codex"]
+	if window.PrimaryWindow.UsedPercent != unavailableUsedPercent || window.SecondaryWindow.UsedPercent != 34 {
+		t.Fatalf("expected declared weekly duration to win across response objects, got %#v", window)
+	}
+}
+
 func TestNormalizeSummaryBuildsRateLimitWindowsFromPrimaryAndAdditionalLimits(t *testing.T) {
 	summary, err := normalizeSummary("app-server", rateLimitSnapshotRaw{
 		LimitID:  "codex",
