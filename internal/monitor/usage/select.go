@@ -241,7 +241,7 @@ func selectWindowsForModel(account AccountSummary, model string) (WindowSummary,
 }
 
 func usageWindowsAvailable(primary, secondary WindowSummary) bool {
-	return primary.UsedPercent != unavailableUsedPercent && secondary.UsedPercent != unavailableUsedPercent
+	return primary.UsedPercent != unavailableUsedPercent || secondary.UsedPercent != unavailableUsedPercent
 }
 
 func usageWindowIsKnownExhausted(win WindowSummary) bool {
@@ -249,6 +249,9 @@ func usageWindowIsKnownExhausted(win WindowSummary) bool {
 }
 
 func primaryUsageTier(usedPercent int, greenMaxPercent int) int {
+	if usedPercent == unavailableUsedPercent {
+		return primaryUsageTierRed
+	}
 	if usedPercent <= greenMaxPercent {
 		return primaryUsageTierGreen
 	}

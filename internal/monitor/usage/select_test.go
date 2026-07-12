@@ -313,6 +313,49 @@ func TestSelectBestAccountUsesRedProfileBeforeReserveAccountWhenProfileHasUsageL
 	}
 }
 
+func TestSelectBestAccountUsesWeeklyOnlyProfileBeforeReserveAccount(t *testing.T) {
+	selected, err := selectBestAccountFromResultsForModel([]accountFetchResult{
+		{
+			codexHome:         "/profile",
+			selectionPriority: 0,
+			account: AccountSummary{
+				Label:           "profile",
+				PrimaryWindow:   unavailableWindowSummary(),
+				SecondaryWindow: WindowSummary{UsedPercent: 35, SecondsUntilReset: testInt64Ptr(24 * 60 * 60)},
+			},
+			snapshot: &Summary{},
+		},
+		{
+			codexHome:         "/default",
+			selectionPriority: 100,
+			account: AccountSummary{
+				Label:           "default",
+				PrimaryWindow:   WindowSummary{UsedPercent: 1},
+				SecondaryWindow: WindowSummary{UsedPercent: 1},
+			},
+			snapshot: &Summary{},
+		},
+	}, 40, "")
+	if err != nil {
+		t.Fatalf("selectBestAccountFromResultsForModel: %v", err)
+	}
+	if selected.Account.Label != "profile" {
+		t.Fatalf("expected weekly-only profile before reserve account, got %q", selected.Account.Label)
+	}
+	if selected.PrimaryUsedPercent != unavailableUsedPercent || selected.SecondaryUsedPercent != 35 {
+		t.Fatalf("expected weekly-only selection metadata, got %d/%d", selected.PrimaryUsedPercent, selected.SecondaryUsedPercent)
+	}
+}
+
+func TestSelectBestAccountRejectsExhaustedWeeklyOnlyProfile(t *testing.T) {
+	_, err := selectBestAccountFromResultsForModel([]accountFetchResult{
+		testAccountFetchResult("weekly-exhausted", unavailableUsedPercent, 100, time.Hour),
+	}, 40, "")
+	if err == nil {
+		t.Fatal("expected exhausted weekly-only profile to be rejected")
+	}
+}
+
 func TestSelectBestAccountNeverUsesWeeklyExhaustedAccounts(t *testing.T) {
 	_, err := selectBestAccountFromResultsForModel([]accountFetchResult{
 		testAccountFetchResult("weekly-exhausted", 8, 100, 1*time.Hour),

@@ -8,6 +8,11 @@ import (
 
 const unavailableUsedPercent = -1
 
+const (
+	fiveHourWindowMinutes = 5 * 60
+	weeklyWindowMinutes   = 7 * 24 * 60
+)
+
 type rateLimitWindowRaw struct {
 	UsedPercent        int    `json:"usedPercent"`
 	WindowDurationMins *int   `json:"windowDurationMins"`
@@ -50,16 +55,14 @@ func normalizeSummary(source string, snapshot rateLimitSnapshotRaw, rateLimitsBy
 		Source:               source,
 		PlanType:             snapshot.PlanType,
 		WindowDataAvailable:  true,
-		PrimaryWindow:        toWindowSummary(snapshot.Primary),
+		PrimaryWindow:        unavailableWindowSummary(),
 		SecondaryWindow:      unavailableWindowSummary(),
 		RateLimitWindows:     normalizeRateLimitWindows(snapshot, rateLimitsByLimitID),
 		AdditionalLimitCount: additionalLimitCount,
 		Warnings:             warnings,
 		FetchedAt:            now,
 	}
-	if snapshot.Secondary != nil {
-		out.SecondaryWindow = toWindowSummary(snapshot.Secondary)
-	}
+	out.PrimaryWindow, out.SecondaryWindow = normalizeWindowPair(snapshot.Primary, snapshot.Secondary)
 	if identity != nil {
 		out.AccountEmail = identity.Email
 		out.AccountID = identity.AccountID
@@ -70,6 +73,7 @@ func normalizeSummary(source string, snapshot rateLimitSnapshotRaw, rateLimitsBy
 
 func normalizeRateLimitWindows(primary rateLimitSnapshotRaw, byLimitID map[string]rateLimitSnapshotRaw) map[string]RateLimitWindow {
 	limitWindows := make(map[string]RateLimitWindow)
+	rawWindows := make(map[string]rateLimitSnapshotRaw)
 	for rawID, raw := range byLimitID {
 		id := strings.TrimSpace(rawID)
 		if id == "" {
@@ -78,6 +82,7 @@ func normalizeRateLimitWindows(primary rateLimitSnapshotRaw, byLimitID map[strin
 		if raw.Primary == nil {
 			continue
 		}
+		rawWindows[id] = raw
 		limitWindows[id] = toRateLimitWindow(id, raw)
 	}
 
@@ -90,17 +95,17 @@ func normalizeRateLimitWindows(primary rateLimitSnapshotRaw, byLimitID map[strin
 		return limitWindows
 	}
 
-	existing := limitWindows[primaryID]
-	if existing.LimitName == "" {
-		existing.LimitName = pointerValue(primary.LimitName)
+	merged := rawWindows[primaryID]
+	if merged.LimitName == nil {
+		merged.LimitName = primary.LimitName
 	}
-	if existing.PrimaryWindow.UsedPercent == unavailableUsedPercent && primary.Primary != nil {
-		existing.PrimaryWindow = toWindowSummary(primary.Primary)
+	if merged.Primary == nil {
+		merged.Primary = primary.Primary
 	}
-	if existing.SecondaryWindow.UsedPercent == unavailableUsedPercent && primary.Secondary != nil {
-		existing.SecondaryWindow = toWindowSummary(primary.Secondary)
+	if merged.Secondary == nil {
+		merged.Secondary = primary.Secondary
 	}
-	limitWindows[primaryID] = existing
+	limitWindows[primaryID] = toRateLimitWindow(primaryID, merged)
 
 	return limitWindows
 }
@@ -110,12 +115,41 @@ func toRateLimitWindow(id string, raw rateLimitSnapshotRaw) RateLimitWindow {
 		LimitID:   id,
 		LimitName: pointerValue(raw.LimitName),
 	}
-	window.PrimaryWindow = toWindowSummary(raw.Primary)
-	window.SecondaryWindow = unavailableWindowSummary()
-	if raw.Secondary != nil {
-		window.SecondaryWindow = toWindowSummary(raw.Secondary)
-	}
+	window.PrimaryWindow, window.SecondaryWindow = normalizeWindowPair(raw.Primary, raw.Secondary)
 	return window
+}
+
+func normalizeWindowPair(primary, secondary *rateLimitWindowRaw) (WindowSummary, WindowSummary) {
+	fiveHour := unavailableWindowSummary()
+	weekly := unavailableWindowSummary()
+
+	for index, raw := range []*rateLimitWindowRaw{primary, secondary} {
+		if raw == nil {
+			continue
+		}
+		normalized := toWindowSummary(raw)
+		switch pointerIntValue(raw.WindowDurationMins) {
+		case fiveHourWindowMinutes:
+			fiveHour = normalized
+		case weeklyWindowMinutes:
+			weekly = normalized
+		default:
+			// Older responses omitted durations. Preserve their positional contract.
+			if index == 0 {
+				fiveHour = normalized
+			} else {
+				weekly = normalized
+			}
+		}
+	}
+	return fiveHour, weekly
+}
+
+func pointerIntValue(value *int) int {
+	if value == nil {
+		return 0
+	}
+	return *value
 }
 
 func pointerValue(v *string) string {
