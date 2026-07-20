@@ -212,6 +212,20 @@ func TestFetchResultKeepsLastGoodWeeklyCardsAsStale(t *testing.T) {
 	}
 }
 
+func TestFetchResultKeepsLastGoodWeeklyCardsWhenFetchHasNoWeeklyWindow(t *testing.T) {
+	m := fixtureModel(90, 22, true)
+	m.lastGoodWindowData = cloneSummary(m.summary)
+	current := &usage.Summary{
+		WindowDataAvailable: false, TotalAccounts: 1, SuccessfulAccounts: 1,
+		ObservedTokensStatus: "estimated", FetchedAt: m.now,
+	}
+	updated, _ := m.Update(fetchResultMsg{at: m.now, summary: current})
+	got := updated.(Model)
+	if !got.showingStaleWindows || got.summary.WeeklyWindow.UsedPercent != 35 {
+		t.Fatalf("expected last good weekly snapshot after a weekly-less fetch, got %+v", got.summary)
+	}
+}
+
 func TestHeaderAndFooterStayHumanFriendly(t *testing.T) {
 	m := fixtureModel(80, 16, true)
 	view := ansi.Strip(m.View())
@@ -237,6 +251,24 @@ func TestPreferredDiagnosticWarningOrder(t *testing.T) {
 	warnings := []string{"active account usage unavailable", "account \"alpha\" fetch failed: timeout", "auth expired; sign in again"}
 	if got := preferredDiagnosticWarning(warnings, "alpha"); got != warnings[2] {
 		t.Fatalf("expected auth warning first, got %q", got)
+	}
+}
+
+func TestWeeklyResetCountdownUsesLiveClockWhenExactResetIsKnown(t *testing.T) {
+	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+	reset := now.Add(30 * time.Minute)
+	staleSeconds := int64((3 * time.Hour) / time.Second)
+	m := Model{now: now}
+	window := usage.WindowSummary{ResetsAt: &reset, SecondsUntilReset: &staleSeconds}
+
+	if got := m.renderWindowResetRemaining(window); got != "30m" {
+		t.Fatalf("expected live 30m countdown, got %q", got)
+	}
+	if got, known := m.windowResetSeconds(window); !known || got != int64((30*time.Minute)/time.Second) {
+		t.Fatalf("expected live reset ordering value, got %d known=%v", got, known)
+	}
+	if got := m.renderExactResetTime(usage.WindowSummary{SecondsUntilReset: &staleSeconds}); got != "" {
+		t.Fatalf("expected no drifting exact time for a relative-only reset, got %q", got)
 	}
 }
 

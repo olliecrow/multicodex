@@ -52,6 +52,9 @@ func TestNormalizeSummaryUsesOnlyNarrowLegacySecondaryFallback(t *testing.T) {
 	if primaryOnly.WeeklyWindow.UsedPercent != unavailableUsedPercent {
 		t.Fatalf("expected undeclared primary-only payload to remain unknown, got %+v", primaryOnly.WeeklyWindow)
 	}
+	if primaryOnly.WindowDataAvailable {
+		t.Fatal("expected undeclared primary-only payload not to report weekly data as available")
+	}
 }
 
 func TestNormalizeSummaryDeclaredWeeklyWinsOverPositionalFallback(t *testing.T) {
@@ -108,6 +111,24 @@ func TestNormalizeSummaryBuildsDefaultAndSparkWeeklyBuckets(t *testing.T) {
 	spark := summary.RateLimitWindows["codex_bengalfox"]
 	if spark.LimitName != "Spark" || spark.WeeklyWindow.UsedPercent != 55 {
 		t.Fatalf("unexpected Spark weekly bucket: %+v", spark)
+	}
+}
+
+func TestNormalizeSummaryAcceptsWeeklyBucketWithoutTopLevelWindows(t *testing.T) {
+	summary, err := normalizeSummary("app-server", rateLimitSnapshotRaw{}, map[string]rateLimitSnapshotRaw{
+		"codex_bengalfox": {
+			LimitName: stringPtr("Spark"),
+			Primary:   rawWeeklyWindow(55),
+		},
+	}, 0, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !summary.WindowDataAvailable {
+		t.Fatal("expected the Spark weekly bucket to make weekly data available")
+	}
+	if got := summary.RateLimitWindows["codex_bengalfox"].WeeklyWindow.UsedPercent; got != 55 {
+		t.Fatalf("expected Spark weekly usage 55, got %d", got)
 	}
 }
 

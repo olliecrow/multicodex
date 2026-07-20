@@ -205,7 +205,7 @@ func (f *Fetcher) fetchMultiAccount(ctx context.Context) (*Summary, error) {
 		out.AccountID = activeSuccess.AccountID
 		out.UserID = activeSuccess.UserID
 		out.RateLimitWindows = cloneRateLimitWindows(activeSuccess.RateLimitWindows)
-		out.WindowDataAvailable = true
+		out.WindowDataAvailable = summaryHasWeeklyData(activeSuccess)
 		out.WeeklyWindow = activeSuccess.WeeklyWindow
 		out.AdditionalLimitCount = activeSuccess.AdditionalLimitCount
 		out.FetchedAt = activeSuccess.FetchedAt

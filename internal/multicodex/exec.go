@@ -230,7 +230,7 @@ func (a *App) selectExecProfile(cfg *Config, selector execAccountSelector, model
 		metadata := execSelectionMetadata{
 			Profile:           name,
 			SelectionSource:   "usage_selector",
-			WeeklyUsedPercent: intPtr(selected.WeeklyUsedPercent),
+			WeeklyUsedPercent: availableUsedPercentPtr(selected.WeeklyUsedPercent),
 		}
 		return execSelection{Name: name, CodexHome: profile.CodexHome, IsProfile: true, Profile: profile, Metadata: metadata}, nil
 	}
@@ -238,7 +238,7 @@ func (a *App) selectExecProfile(cfg *Config, selector execAccountSelector, model
 		metadata := execSelectionMetadata{
 			Profile:           defaultExecAccountLabel,
 			SelectionSource:   "usage_selector_default_reserve",
-			WeeklyUsedPercent: intPtr(selected.WeeklyUsedPercent),
+			WeeklyUsedPercent: availableUsedPercentPtr(selected.WeeklyUsedPercent),
 		}
 		return execSelection{Name: defaultExecAccountLabel, CodexHome: home, Metadata: metadata}, nil
 	}
@@ -294,7 +294,10 @@ func parseModelFromExecArgs(args []string) string {
 	return ""
 }
 
-func intPtr(v int) *int {
+func availableUsedPercentPtr(v int) *int {
+	if v < 0 {
+		return nil
+	}
 	return &v
 }
 

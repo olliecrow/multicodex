@@ -321,7 +321,7 @@ func (m Model) renderWeeklyUsageLine(label string, win usage.WindowSummary, avai
 	if width >= 62 {
 		parts = append(parts, m.styles.dim.Render(renderProgressBar(win.UsedPercent, 12)))
 	}
-	parts = append(parts, m.styles.dim.Render("resets in ")+m.styles.value.Render(renderWindowResetRemaining(win)))
+	parts = append(parts, m.styles.dim.Render("resets in ")+m.styles.value.Render(m.renderWindowResetRemaining(win)))
 	if width >= 72 {
 		if exact := m.renderExactResetTime(win); exact != "" {
 			parts = append(parts, m.styles.dim.Render(exact))
@@ -337,24 +337,20 @@ func renderProgressBar(percent, width int) string {
 }
 
 func (m Model) renderExactResetTime(win usage.WindowSummary) string {
-	reset := win.ResetsAt
-	if reset == nil && win.SecondsUntilReset != nil {
-		derived := m.now.Add(time.Duration(*win.SecondsUntilReset) * time.Second)
-		reset = &derived
-	}
-	if reset == nil {
+	if win.ResetsAt == nil {
 		return ""
 	}
-	return reset.In(m.displayLocation).Format("Mon 02 Jan 15:04")
+	return win.ResetsAt.In(m.displayLocation).Format("Mon 02 Jan 15:04")
 }
 
-func renderWindowResetRemaining(win usage.WindowSummary) string {
+func (m Model) renderWindowResetRemaining(win usage.WindowSummary) string {
 	remaining := "unknown"
-	if win.SecondsUntilReset != nil {
-		if *win.SecondsUntilReset <= 0 {
+	seconds, known := m.windowResetSeconds(win)
+	if known {
+		if seconds <= 0 {
 			remaining = "resetting"
 		} else {
-			remaining = humanDuration(time.Duration(*win.SecondsUntilReset) * time.Second)
+			remaining = humanDuration(time.Duration(seconds) * time.Second)
 		}
 	}
 	return remaining
@@ -556,17 +552,17 @@ func isSparkLimitBucket(limitID string, window usage.RateLimitWindow) bool {
 }
 
 func (m Model) windowResetSeconds(win usage.WindowSummary) (int64, bool) {
-	if win.SecondsUntilReset != nil {
-		seconds := *win.SecondsUntilReset
+	if win.ResetsAt != nil {
+		seconds := int64(win.ResetsAt.Sub(m.now).Seconds())
 		if seconds < 0 {
 			seconds = 0
 		}
 		return seconds, true
 	}
-	if win.ResetsAt == nil {
+	if win.SecondsUntilReset == nil {
 		return 0, false
 	}
-	seconds := int64(win.ResetsAt.Sub(m.now).Seconds())
+	seconds := *win.SecondsUntilReset
 	if seconds < 0 {
 		seconds = 0
 	}
@@ -823,7 +819,7 @@ func hasFreshWindowData(summary *usage.Summary) bool {
 }
 
 func shouldReuseLastGoodWindowData(summary, cached *usage.Summary) bool {
-	return summary != nil && cached != nil && summary.SuccessfulAccounts == 0
+	return summary != nil && cached != nil && !hasFreshWindowData(summary)
 }
 
 func mergeStaleWindowData(current, cached *usage.Summary) *usage.Summary {
