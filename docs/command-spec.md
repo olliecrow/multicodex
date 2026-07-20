@@ -33,8 +33,9 @@ Multicodex intentionally has no command for changing the shared default Codex ac
 - Registers a named profile.
 - Creates a profile-local `CODEX_HOME` with private permissions.
 - Defaults profile `config.toml` to a symlink to the default Codex `config.toml`.
-- Fills in missing top-level profile skill entries with symlinks to the default Codex skills tree.
-- Leaves manual profile-local config files and manual top-level skill overrides in place.
+- Applies the configured profile resource policy before saving the profile.
+- With no `profile_resources` block, fills in missing top-level profile skill entries from the default Codex skills tree and leaves guidance untouched.
+- Leaves regular profile-local config, guidance, and skill overrides in place.
 
 `multicodex login <name> [codex login args]`
 - Runs official `codex login` in the selected profile context.
@@ -78,6 +79,7 @@ Multicodex intentionally has no command for changing the shared default Codex ac
 `multicodex status`
 - Shows all profiles and each profile login status.
 - Does not manage or inspect the default Codex account as a multicodex profile.
+- Remains auth-only: it does not validate, reconcile, or claim readiness for configured profile resources.
 
 `multicodex heartbeat`
 - Runs `codex exec --skip-git-repo-check --ephemeral --sandbox read-only --color never hello` for each logged-in profile.
@@ -133,10 +135,23 @@ Multicodex intentionally has no command for changing the shared default Codex ac
 - Reports `ok`, `warn`, and `fail` checks with a final pass or fail summary.
 - Supports JSON output.
 - Includes repository leak-guard checks for auth homes in git worktrees, recommended ignore patterns, and tracked sensitive-looking files.
+- Resolves and validates configured profile resource sources without reconciling profile files.
 
 `multicodex dry-run`
 - Prints planned operations without executing commands or mutating files.
 - Supports an operation-specific preview for `login <name>`.
+- Resolves configured profile resource paths and shows the effective policy and planned reconciliation.
+
+## Profile Resource Reconciliation
+
+- `profile_resources` is an optional version-1 config block. Its omission preserves the established guidance no-op and strict default-skill reconciliation exactly.
+- Present `guidance` and `skills` objects require a boolean `inherit`. Unknown keys inside the resource block are errors; unrelated top-level config keys remain permissive.
+- Guidance uses one source directory and manages only `AGENTS.md` and `AGENTS.override.md`. Either regular profile file overrides the whole inherited pair.
+- Skills use ordered source directories with first-source-wins merging. Regular top-level profile entries override inherited entries.
+- Explicit resource management owns symlinks at its managed profile positions, including pre-existing symlinks. It may retarget or remove them and reports old targets. Regular files and directories are preserved.
+- `inherit: false` removes managed symlinks. Populated source fields are invalid in this mode.
+- `~` expands to the user home. Relative paths resolve from the config file directory. Custom source directories must exist and have the expected type before reconciliation starts.
+- `add`, `login`, `login-all`, `cli`, `exec`, and `heartbeat` reconcile resources before a profile-scoped Codex launch. `doctor`, `dry-run`, `status`, and `monitor` do not mutate profile resources.
 
 `multicodex completion <shell>`
 - Prints tab-completion script for bash, zsh, or fish.

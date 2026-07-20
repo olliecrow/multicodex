@@ -15,6 +15,8 @@
 - Zero secret data from logs and diagnostics by default.
 - Heartbeat output must never echo raw `codex exec` stdout or stderr on failures.
 - Profile-scoped Codex subprocesses must scrub inherited Codex/OpenAI account override environment variables before setting the selected profile `CODEX_HOME`.
+- Profile resource settings may name local directories outside the default Codex home. The user owns the trust decision for those sources; multicodex only creates symlinks and does not execute or copy source contents.
+- Explicit resource reconciliation validates all configured sources before profile mutation. It removes or retargets only symlinks at documented managed positions and preserves regular profile guidance and skill entries.
 
 ## Repository safeguards
 - `.gitignore` must ignore local auth and profile state.
@@ -24,6 +26,7 @@
 - Example files must never include real credentials.
 - CI should run secret scanning before merge.
 - `multicodex doctor` should be used before release to verify leak-guard checks.
+- Committed tests, examples, logs, and review artifacts must use temporary or dummy resource paths and must not include private resource contents or machine-specific paths.
 
 ## Public project standards inherited from broader workspace
 - Default repositories to private unless explicit consent says otherwise.

@@ -16,8 +16,9 @@ const generatedProfileConfigContent = "cli_auth_credentials_store = \"file\"\n"
 
 // Config stores multicodex metadata only. It does not store secrets.
 type Config struct {
-	Version  int                `json:"version"`
-	Profiles map[string]Profile `json:"profiles"`
+	Version          int                `json:"version"`
+	ProfileResources *ProfileResources  `json:"profile_resources,omitempty"`
+	Profiles         map[string]Profile `json:"profiles"`
 }
 
 // Profile maps a user-friendly name to an isolated Codex home path.
@@ -166,47 +167,56 @@ func (s *Store) Save(cfg *Config) error {
 	return nil
 }
 
-func (s *Store) CreateProfile(name string) (Profile, error) {
+func (s *Store) CreateProfile(name string, resources *ProfileResources) (Profile, []ResourceChange, error) {
 	if err := ValidateProfileName(name); err != nil {
-		return Profile{}, err
+		return Profile{}, nil, err
+	}
+	resolved, err := s.ResolveProfileResources(resources)
+	if err != nil {
+		return Profile{}, nil, err
 	}
 	if err := s.EnsureBaseDirs(); err != nil {
-		return Profile{}, err
+		return Profile{}, nil, err
 	}
 	profileDir := filepath.Join(s.paths.ProfilesDir, name)
 	codexHome := filepath.Join(profileDir, "codex-home")
 	profile := Profile{Name: name, CodexHome: codexHome}
 	if err := s.ensureProfileStoragePathSafe(profile); err != nil {
-		return Profile{}, err
+		return Profile{}, nil, err
 	}
 	if err := os.MkdirAll(codexHome, 0o700); err != nil {
-		return Profile{}, fmt.Errorf("create profile dir: %w", err)
+		return Profile{}, nil, fmt.Errorf("create profile dir: %w", err)
 	}
 
 	if err := s.ensureProfileConfig(codexHome); err != nil {
-		return Profile{}, err
+		return Profile{}, nil, err
 	}
-	if err := s.ensureProfileSkills(codexHome); err != nil {
-		return Profile{}, err
+	changes, err := s.reconcileProfileResources(codexHome, resources, resolved)
+	if err != nil {
+		return Profile{}, nil, err
 	}
 
-	return profile, nil
+	return profile, changes, nil
 }
 
-func (s *Store) EnsureProfileDir(profile Profile) error {
+func (s *Store) EnsureProfileDir(profile Profile, resources *ProfileResources) ([]ResourceChange, error) {
 	if profile.CodexHome == "" {
-		return errors.New("profile codex home is empty")
+		return nil, errors.New("profile codex home is empty")
+	}
+	resolved, err := s.ResolveProfileResources(resources)
+	if err != nil {
+		return nil, err
 	}
 	if err := s.ensureProfileStoragePathSafe(profile); err != nil {
-		return err
+		return nil, err
 	}
 	if err := os.MkdirAll(profile.CodexHome, 0o700); err != nil {
-		return fmt.Errorf("create profile codex home: %w", err)
+		return nil, fmt.Errorf("create profile codex home: %w", err)
 	}
 	if err := s.ensureProfileConfig(profile.CodexHome); err != nil {
-		return err
+		return nil, err
 	}
-	return s.ensureProfileSkills(profile.CodexHome)
+	return s.reconcileProfileResources(profile.CodexHome, resources, resolved)
 }
 
 func (s *Store) ensureProfileStoragePathSafe(profile Profile) error {

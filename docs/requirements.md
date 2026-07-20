@@ -18,11 +18,13 @@
 - User can run a monitor-specific read-only doctor check.
 - User can run dry-run previews for key operations.
 - User can install shell tab-completion for command names and profile names.
+- User can optionally inherit profile guidance from one directory and skills from ordered source directories without changing omitted-setting behavior.
 
 ## UX requirements
 - Simple command names.
 - Predictable behavior.
 - Clear output showing what changed and what did not change.
+- Resource link removal or retargeting reports the previous target.
 - Safe defaults with no multicodex commands for global auth effects.
 
 ## Technical requirements
@@ -34,12 +36,16 @@
 - Default persistent multicodex state should live in a single home-level directory (`~/multicodex`) for cross-checkout consistency.
 - Heartbeat should be safe for cron use with overlap protection and bounded retry behavior.
 - Heartbeat requires an official Codex CLI with `codex exec --ephemeral` support and must fail closed when that capability is unavailable.
+- Configured resource paths resolve independently of the process working directory and are validated before profile mutation.
 
 ## Compatibility requirements
 - Compatible with official Codex CLI login flows.
 - No dependence on API-key-only mode for core workflow.
 - Preserve regular Codex CLI behavior.
 - Profile-scoped Codex launches should inherit current global Codex config by default unless the user explicitly creates a per-profile override.
+- Omitting `profile_resources` must leave guidance untouched and preserve the existing strict default skill inheritance path.
+- Regular profile guidance and skill entries must remain local overrides and must never be removed by resource reconciliation.
+- Resource settings use required booleans and strict nested decoding so misspelled keys cannot silently enable isolation.
 
 ## Constraints
 - No third-party credential services.

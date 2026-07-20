@@ -42,6 +42,7 @@ func RunDoctor(store *Store, cfg *Config, timeout time.Duration) DoctorReport {
 		Status:  "ok",
 		Details: fmt.Sprintf("loaded config with %d profile(s)", len(cfg.Profiles)),
 	})
+	checks = append(checks, checkProfileResources(store, cfg.ProfileResources))
 
 	codexFound := false
 	if path, err := exec.LookPath("codex"); err != nil {
@@ -85,6 +86,14 @@ func RunDoctor(store *Store, cfg *Config, timeout time.Duration) DoctorReport {
 	}
 
 	return DoctorReport{Checks: checks}
+}
+
+func checkProfileResources(store *Store, resources *ProfileResources) DoctorCheck {
+	resolved, err := store.ResolveProfileResources(resources)
+	if err != nil {
+		return DoctorCheck{Name: "profile resources", Status: "fail", Details: err.Error()}
+	}
+	return DoctorCheck{Name: "profile resources", Status: "ok", Details: describeProfileResources(resources, resolved)}
 }
 
 func collectProfileDoctorChecks(paths Paths, cfg *Config, names []string, codexFound bool) [][]DoctorCheck {

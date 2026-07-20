@@ -70,7 +70,8 @@ func (a *App) cmdHeartbeat(args []string) error {
 	failed := 0
 	for _, name := range names {
 		profile := cfg.Profiles[name]
-		if err := a.store.EnsureProfileDir(profile); err != nil {
+		changes, err := a.store.EnsureProfileDir(profile, cfg.ProfileResources)
+		if err != nil {
 			failed++
 			rows = append(rows, heartbeatRow{
 				Profile: name,
@@ -79,6 +80,7 @@ func (a *App) cmdHeartbeat(args []string) error {
 			})
 			continue
 		}
+		printResourceChanges(changes)
 		hasAuth, err := HasAuthFile(profile.CodexHome)
 		if err != nil {
 			failed++

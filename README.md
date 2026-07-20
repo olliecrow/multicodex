@@ -81,8 +81,40 @@ multicodex dry-run
 - Profile sessions, threads, and `/goal` state stay under that profile's `codex-home`.
 - Multicodex state directories, profile directories, profile `codex-home`, profile skills directories, `auth.json`, selected-profile metadata under `MULTICODEX_HOME/run`, heartbeat lock files, and config lock files must be profile-local regular filesystem entries with local-user-only directory permissions. Symlinks and hard links are rejected where they could cross account boundaries.
 - Profile `config.toml` defaults to a symlink from `~/multicodex/profiles/<name>/codex-home/config.toml` to the default Codex config at `~/.codex/config.toml`.
-- Profile skills fill in missing top-level entries from `~/.codex/skills` using symlinks. Manual top-level profile skill overrides are left in place.
+- Unless configured otherwise, profile skills fill in missing top-level entries from `~/.codex/skills` using symlinks. Manual top-level profile skill overrides are left in place.
 - To use a per-profile Codex config, replace the profile `config.toml` symlink with a regular profile-local `config.toml` file that still enables file-backed auth.
+
+## Configurable Profile Resources
+
+The optional `profile_resources` block in `~/multicodex/config.json` controls shared guidance and skill links for every profile. If the block is omitted, behavior is unchanged: multicodex does not touch `AGENTS.md` or `AGENTS.override.md`, and skills keep inheriting from the default Codex home.
+
+```json
+{
+  "version": 1,
+  "profile_resources": {
+    "guidance": {
+      "inherit": true,
+      "source": "~/.codex"
+    },
+    "skills": {
+      "inherit": true,
+      "sources": ["~/.codex/skills", "shared-skills"]
+    }
+  },
+  "profiles": {}
+}
+```
+
+- `guidance.inherit: true` links the source directory's `AGENTS.md` and `AGENTS.override.md`. An omitted or empty `source` uses the default Codex home.
+- `skills.inherit: true` merges top-level entries from ordered `sources`; the first source wins name conflicts. An omitted `sources` key uses the default Codex skills directory. An explicit empty list is invalid.
+- `inherit: false` removes symlinks managed at that resource's profile locations. It never removes regular files or directories.
+- Either regular profile guidance file makes both guidance names a local override. Regular top-level profile skill entries override inherited entries with the same name.
+- `~` expands to the user home. Relative paths resolve from the directory containing `config.json`, normally `~/multicodex`, not from the current working directory.
+- Custom source directories must exist. Resource blocks require a correctly spelled boolean `inherit` and reject unknown nested keys.
+- When explicit management is enabled, symlinks at the two guidance names and directly under the profile `skills/` directory are multicodex-owned. Retargeting or removal reports the old target.
+- Codex's existing user-wide `$HOME/.agents/skills` and repository `.agents/skills` discovery stays separate and continues to work normally.
+
+Use `multicodex doctor` to validate configured sources and `multicodex dry-run` to see the effective policy and planned reconciliation without changing files. To recover from a bad link policy, set the affected `inherit` value to `false`, run a normal profile command once, then remove the optional block to return to the original unmanaged-guidance and default-skill behavior.
 
 ## Commands
 
@@ -252,6 +284,7 @@ go build -o multicodex ./cmd/multicodex
 - `monitor` is read-only and does not mutate Codex account data.
 - `doctor` and `dry-run` are non-mutating helpers.
 - `doctor` includes repo leak guards for tracked sensitive files and ignore-pattern coverage.
+- Configured profile resources are local paths chosen by the user. Multicodex links them but does not execute or copy their contents.
 - After successful login, regular auth file permissions are normalized to `0600`.
 
 ## Notes
