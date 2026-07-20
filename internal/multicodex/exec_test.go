@@ -46,6 +46,36 @@ func TestCmdExecRunsCodexExecWithSelectedProfile(t *testing.T) {
 	}
 }
 
+func TestCmdExecPreservesCustomResourcePolicyThroughSelection(t *testing.T) {
+	app, _ := newExecTestApp(t)
+	createExecProfiles(t, app, "alpha")
+	source := filepath.Join(t.TempDir(), "skills")
+	if err := os.MkdirAll(filepath.Join(source, "custom-skill"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := app.store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	inherit := true
+	sources := []string{source}
+	cfg.ProfileResources = &ProfileResources{Skills: &SkillResources{Inherit: &inherit, Sources: &sources}}
+	if err := app.store.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	originalSelector := defaultExecAccountSelector
+	defaultExecAccountSelector = func(context.Context, []usage.MonitorAccount, string) (usage.SelectedAccount, error) {
+		return usage.SelectedAccount{Account: usage.MonitorAccount{Label: "alpha"}}, nil
+	}
+	defer func() { defaultExecAccountSelector = originalSelector }()
+	if err := app.Run([]string{"exec", "hello"}); err != nil {
+		t.Fatal(err)
+	}
+	profile := cfg.Profiles["alpha"]
+	assertLinkTarget(t, filepath.Join(profile.CodexHome, "skills", "custom-skill"), filepath.Join(source, "custom-skill"))
+}
+
 func TestCmdExecRunsCodexExecWithDefaultReserveAccount(t *testing.T) {
 	app, logPath := newExecTestApp(t)
 	createExecProfiles(t, app, "alpha")

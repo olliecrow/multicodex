@@ -21,9 +21,11 @@ func (a *App) cmdCLI(args []string) error {
 	if !ok {
 		return &ExitError{Code: 2, Message: fmt.Sprintf("unknown profile: %s", name)}
 	}
-	if err := a.store.EnsureProfileDir(profile); err != nil {
+	changes, err := a.store.EnsureProfileDir(profile, cfg.ProfileResources)
+	if err != nil {
 		return err
 	}
+	printResourceChanges(changes)
 	if err := ensureProfileCodexExecutionReady(a.store.paths, profile); err != nil {
 		return err
 	}

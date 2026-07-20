@@ -84,6 +84,35 @@ func TestRunDoctorMinimal(t *testing.T) {
 	}
 }
 
+func TestDoctorProfileResourcesIsReadOnly(t *testing.T) {
+	root := t.TempDir()
+	store := NewStore(Paths{ConfigPath: filepath.Join(root, "state", "config.json")})
+	inherit := true
+	sources := []string{"missing"}
+	check := checkProfileResources(store, &ProfileResources{Skills: &SkillResources{Inherit: &inherit, Sources: &sources}})
+	if check.Status != "fail" || !strings.Contains(check.Details, "missing") {
+		t.Fatalf("unexpected check: %#v", check)
+	}
+	if _, err := os.Lstat(filepath.Join(root, "state")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("doctor resource check mutated filesystem: %v", err)
+	}
+}
+
+func TestDoctorProfileResourcesRejectsWrongType(t *testing.T) {
+	root := t.TempDir()
+	file := filepath.Join(root, "skills")
+	if err := os.WriteFile(file, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore(Paths{ConfigPath: filepath.Join(root, "state", "config.json")})
+	inherit := true
+	sources := []string{file}
+	check := checkProfileResources(store, &ProfileResources{Skills: &SkillResources{Inherit: &inherit, Sources: &sources}})
+	if check.Status != "fail" || !strings.Contains(check.Details, "not a directory") {
+		t.Fatalf("unexpected check: %#v", check)
+	}
+}
+
 func TestRunDoctorScrubsCodexVersionEnvironment(t *testing.T) {
 	root := t.TempDir()
 	fakeBin := filepath.Join(root, "bin")

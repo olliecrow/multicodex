@@ -157,6 +157,30 @@ func newStatusTestApp(t *testing.T) (*App, string) {
 	return app, logPath
 }
 
+func TestStatusDoesNotResolveOrMutateProfileResources(t *testing.T) {
+	app, _ := newStatusTestApp(t)
+	if err := app.store.EnsureBaseDirs(); err != nil {
+		t.Fatal(err)
+	}
+	inherit := true
+	sources := []string{"missing"}
+	cfg := DefaultConfig()
+	cfg.ProfileResources = &ProfileResources{Skills: &SkillResources{Inherit: &inherit, Sources: &sources}}
+	if err := app.store.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.cmdStatus(); err != nil {
+		t.Fatalf("auth-only status should not resolve resource paths: %v", err)
+	}
+	entries, err := os.ReadDir(app.store.paths.ProfilesDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("status mutated profile state: %v", entries)
+	}
+}
+
 func syntheticJWT(t *testing.T, claims map[string]any) string {
 	t.Helper()
 

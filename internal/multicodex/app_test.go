@@ -11,7 +11,7 @@ import (
 func TestEnsureProfileDirMigratesGeneratedProfileConfig(t *testing.T) {
 	app, profile, defaultConfigPath := newTestAppWithGeneratedProfileConfig(t)
 
-	if err := app.store.EnsureProfileDir(profile); err != nil {
+	if _, err := app.store.EnsureProfileDir(profile, nil); err != nil {
 		t.Fatalf("EnsureProfileDir: %v", err)
 	}
 
@@ -97,7 +97,7 @@ func TestCmdLoginRejectsAuthSymlinkBeforeRunningCodex(t *testing.T) {
 	if err := app.store.Save(cfg); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
-	if err := app.store.EnsureProfileDir(profile); err != nil {
+	if _, err := app.store.EnsureProfileDir(profile, nil); err != nil {
 		t.Fatalf("EnsureProfileDir: %v", err)
 	}
 	target := filepath.Join(t.TempDir(), "shared-auth.json")
@@ -128,7 +128,7 @@ func TestEnsureProfileCodexExecutionReadyRejectsAuthSymlink(t *testing.T) {
 	if err := os.MkdirAll(profile.CodexHome, 0o700); err != nil {
 		t.Fatalf("mkdir profile codex home: %v", err)
 	}
-	if err := app.store.EnsureProfileDir(profile); err != nil {
+	if _, err := app.store.EnsureProfileDir(profile, nil); err != nil {
 		t.Fatalf("EnsureProfileDir: %v", err)
 	}
 	target := filepath.Join(t.TempDir(), "shared-auth.json")

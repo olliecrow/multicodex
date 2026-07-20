@@ -294,12 +294,12 @@ Trade-offs: Users who want command-specific overrides must pass normal Codex CLI
 Enforcement: `multicodex cli <profile> [codex args...]` launches `codex` in the selected profile context and forwards only user-supplied args. In real interactive terminals it hands off directly into `codex`. Tests cover args, profile env, the interactive handoff path, help, concurrent profile-local state, and auth-isolation preflight.
 References: `internal/multicodex/cli.go`, `internal/multicodex/cli_test.go`, `README.md`, `docs/command-spec.md`
 
-Decision: Profile homes inherit missing top-level skills from the shared default Codex skills tree.
-Context: Some multicodex profile homes were created before newer shared skills existed, which let profile-scoped Codex runs miss skills that were still present in `~/.codex/skills`.
-Rationale: Filling in only missing top-level entries keeps shared skills available across profiles without copying skill trees or overwriting explicit per-profile overrides.
-Trade-offs: Profile homes now depend a bit more on the shared default skills tree for inherited skills, but manual profile-local top-level overrides still work.
-Enforcement: Profile creation and profile-directory repair both fill in missing top-level `skills` entries from the default Codex home while leaving existing profile entries untouched. Tests cover both missing-entry repair and manual-override preservation.
-References: `internal/multicodex/config.go`, `internal/multicodex/config_test.go`, `README.md`, `docs/command-spec.md`, `docs/implementation-notes.md`
+Decision: Keep profile resource sharing optional and preserve the established behavior when it is omitted.
+Context: Profiles already inherit missing top-level skills from the default Codex skills tree, while profile guidance is unmanaged. Some users also need shared guidance or more than one skill source without a second config system or copied trees.
+Rationale: One optional `profile_resources` block adds explicit guidance and ordered skill sources while keeping every old config and omitted setting on the original path. Required booleans and strict nested decoding prevent a typo from becoming destructive isolation.
+Trade-offs: Explicit management owns symlinks at the documented profile positions, so a pre-existing custom symlink can be retargeted or removed. Regular files and directories remain overrides, and every removal or retarget reports the old target.
+Enforcement: Config loading checks resource shape and contradictions without filesystem access. A shared read-only resolver expands `~`, resolves relative paths from `config.json`, and validates sources for doctor, dry-run, and mutation paths. Reconciliation validates the full desired set first, treats either regular guidance file as a whole-pair override, merges skill sources in order, preserves regular overrides, and keeps the nil policy on the original guidance no-op and strict default-skill code.
+References: `internal/multicodex/resources.go`, `internal/multicodex/resources_test.go`, `internal/multicodex/config.go`, `README.md`, `docs/command-spec.md`, `docs/implementation-notes.md`, `docs/security-and-privacy.md`
 
 Decision: Route `multicodex exec` model-aware to Spark buckets when the model name requests Spark.
 Context: A subscription snapshot can include both default (`codex`) and Spark (`codex_bengalfox`/Spark-name) weekly buckets, and Spark model names should use Spark quota.

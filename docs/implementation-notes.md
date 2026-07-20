@@ -4,7 +4,7 @@
 - Single Go binary with a small dependency set for the terminal UI.
 - Entrypoint in `cmd/multicodex/main.go`.
 - Main command router in `internal/multicodex/app.go`.
-- Config and profile state in `internal/multicodex/config.go` and `internal/multicodex/paths.go`.
+- Config and profile state in `internal/multicodex/config.go`, `internal/multicodex/resources.go`, and `internal/multicodex/paths.go`.
 - Command execution and env isolation in `internal/multicodex/process.go`.
 - Status inspection in `internal/multicodex/status.go`.
 - Keepalive heartbeat execution in `internal/multicodex/heartbeat.go`.
@@ -14,15 +14,19 @@
 - Non-mutating preflight and preview helpers in `internal/multicodex/doctor.go` and `internal/multicodex/dry_run.go`.
 
 ## Data layout
-- `~/multicodex/config.json` for profile metadata.
+- `~/multicodex/config.json` for profile metadata and the optional shared profile-resource policy.
 - `~/multicodex/profiles/<name>/` for profile-scoped state.
 - `~/multicodex/profiles/<name>/codex-home/config.toml` defaults to a symlink to the default Codex config so profile runs inherit current global settings.
-- `~/multicodex/profiles/<name>/codex-home/skills/` fills in missing top-level entries from the default Codex skills tree while keeping manual profile overrides.
+- With omitted resource settings, `~/multicodex/profiles/<name>/codex-home/skills/` uses the original strict default-source reconciliation and guidance remains unmanaged.
+- Explicit resource settings resolve `~` from the user home and relative paths from the config directory. Resolution validates every desired source before profile mutation.
+- Explicit guidance management reconciles the two Codex guidance names as one override unit. Explicit skill management merges ordered sources with first-source-wins behavior.
+- Symlinks at explicitly managed positions are position-owned and may be removed or retargeted with old-target reporting. Regular profile files and directories remain overrides.
 - `~/multicodex/heartbeat.lock` for non-overlapping heartbeat runs by default.
 - `~/multicodex/monitor/accounts.json` for optional monitor-owned account overrides.
 
 ## Verification strategy
 - Unit tests for config parsing and profile validation.
+- Resource tests cover omitted behavior, strict nested decoding, path forms, missing and wrong-type sources, guidance pair overrides, ordered skill merging, explicit isolation, source changes, foreign and broken symlinks, and old-target reporting.
 - Unit tests for environment and command wrapper behavior.
 - Unit tests for interactive CLI handoff into direct `codex` execution.
 - Unit tests for command help, status, and unknown commands that must not move local state or rewrite default auth.

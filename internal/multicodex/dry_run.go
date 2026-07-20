@@ -7,21 +7,25 @@ import (
 )
 
 func RenderDryRun(store *Store, cfg *Config, args []string) (string, error) {
+	resolved, err := store.ResolveProfileResources(cfg.ProfileResources)
+	if err != nil {
+		return "", err
+	}
 	if len(args) == 0 {
-		return renderDryRunOverview(store, cfg), nil
+		return renderDryRunOverview(store, cfg, resolved), nil
 	}
 	switch args[0] {
 	case "login":
 		if len(args) != 2 {
 			return "", &ExitError{Code: 2, Message: "usage: multicodex dry-run login <name>"}
 		}
-		return renderDryRunLogin(cfg, args[1])
+		return renderDryRunLogin(cfg, args[1], describeProfileResourcePlan(cfg.ProfileResources))
 	default:
 		return "", &ExitError{Code: 2, Message: "usage: multicodex dry-run [operation]"}
 	}
 }
 
-func renderDryRunOverview(store *Store, cfg *Config) string {
+func renderDryRunOverview(store *Store, cfg *Config, resolved *resolvedProfileResources) string {
 	var b strings.Builder
 	b.WriteString("multicodex dry-run\n")
 	b.WriteString("configured profiles: ")
@@ -32,6 +36,12 @@ func renderDryRunOverview(store *Store, cfg *Config) string {
 	b.WriteString("\n")
 	b.WriteString("default codex home: ")
 	b.WriteString(store.paths.DefaultCodexHome)
+	b.WriteString("\n")
+	b.WriteString("profile resources: ")
+	b.WriteString(describeProfileResources(cfg.ProfileResources, resolved))
+	b.WriteString("\n")
+	b.WriteString("planned profile reconciliation: ")
+	b.WriteString(describeProfileResourcePlan(cfg.ProfileResources))
 	b.WriteString("\n\n")
 	b.WriteString("planned sequence:\n")
 	b.WriteString("1. init creates local multicodex directories and config only.\n")
@@ -45,7 +55,47 @@ func renderDryRunOverview(store *Store, cfg *Config) string {
 	return b.String()
 }
 
-func renderDryRunLogin(cfg *Config, name string) (string, error) {
+func describeProfileResources(resources *ProfileResources, resolved *resolvedProfileResources) string {
+	if resources == nil {
+		return "omitted; guidance is untouched and skills keep current default inheritance"
+	}
+	parts := make([]string, 0, 2)
+	if resources.Guidance == nil {
+		parts = append(parts, "guidance unmanaged")
+	} else if resolved != nil && resolved.guidance != nil && resolved.guidance.inherit {
+		parts = append(parts, "guidance source "+resolved.guidance.source)
+	} else {
+		parts = append(parts, "guidance isolated")
+	}
+	if resources.Skills == nil {
+		parts = append(parts, "skills keep current default inheritance")
+	} else if resolved != nil && resolved.skills != nil && resolved.skills.inherit {
+		parts = append(parts, "skill sources "+strings.Join(resolved.skills.sources, ", "))
+	} else {
+		parts = append(parts, "skills isolated")
+	}
+	return strings.Join(parts, "; ")
+}
+
+func describeProfileResourcePlan(resources *ProfileResources) string {
+	if resources == nil {
+		return "no guidance changes; existing strict default skill reconciliation"
+	}
+	parts := make([]string, 0, 2)
+	if resources.Guidance == nil {
+		parts = append(parts, "leave guidance unchanged")
+	} else {
+		parts = append(parts, "reconcile managed guidance links while preserving regular local guidance")
+	}
+	if resources.Skills == nil {
+		parts = append(parts, "use existing default skill reconciliation")
+	} else {
+		parts = append(parts, "reconcile managed skill links while preserving regular local skills")
+	}
+	return strings.Join(parts, "; ")
+}
+
+func renderDryRunLogin(cfg *Config, name, resourcePlan string) (string, error) {
 	profile, ok := cfg.Profiles[name]
 	if !ok {
 		return "", &ExitError{Code: 2, Message: fmt.Sprintf("unknown profile: %s", name)}
@@ -59,6 +109,9 @@ func renderDryRunLogin(cfg *Config, name string) (string, error) {
 	b.WriteString("CODEX_HOME=")
 	b.WriteString(shellQuoteValue(profile.CodexHome))
 	b.WriteString(" codex login\n")
+	b.WriteString("would reconcile profile resources: ")
+	b.WriteString(resourcePlan)
+	b.WriteString("\n")
 	b.WriteString("dry-run only: no commands were executed and no files were changed.\n")
 	return b.String(), nil
 }
