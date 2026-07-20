@@ -63,16 +63,16 @@ Multicodex intentionally has no command for changing the shared default Codex ac
 - Can run with no configured profiles by using the default Codex home as the only available account.
 - Re-checks file-backed auth isolation before launching configured profiles.
 - Parses model selection arguments (`--model`, `--model=`, and `-m`) for routing.
-- If the model contains `spark` case-insensitively, selects Spark usage windows when available.
+- If the model contains `spark` case-insensitively, selects Spark weekly usage when available.
 - If Spark is requested, configured profiles need Spark usage data to win normal routing.
-- Excludes configured profiles whose five-hour or weekly window is known to be exhausted.
-- Groups configured profiles by five-hour usage: green is 0-40%, amber is 41-60%, and red is 61-99%.
-- Tries green profiles before amber profiles, and amber profiles before red profiles.
-- Within each tier, picks the profile whose weekly reset is soonest.
-- Uses the default Codex home only when no configured profile has current usable five-hour and weekly usage left.
+- Excludes configured profiles whose requested weekly bucket is known to be exhausted.
+- Orders candidates by configured selection priority, then known weekly reset soonest, then unknown weekly reset.
+- Randomizes only exact reset ties or equally unknown reset times.
+- Uses the default Codex home only when no configured profile has usable weekly usage.
 - If the default Codex home is the only remaining destination, uses it as the final fallback even when its usage data is unavailable or exhausted.
 - Returns a usage-selection error only when no configured profile is usable and the default Codex home is not available as a reserve candidate.
 - Writes selected-profile metadata only under `MULTICODEX_HOME/run` when `MULTICODEX_SELECTED_PROFILE_PATH` is set.
+- Selected-profile metadata exposes the optional usage field `weekly_used_percent`; the older generic percent fields are not emitted.
 - Returns the child exit code.
 
 `multicodex status`
@@ -100,14 +100,15 @@ Multicodex intentionally has no command for changing the shared default Codex ac
 - Supports opt-in account sources with `--include-default`, `--include-active`, and `--discover`.
 - Uses Codex app-server usage fetches for validated multicodex profile homes, with direct OAuth as fallback.
 - Uses direct OAuth for other monitor account homes unless they dedupe with a validated profile home.
-- Classifies official five-hour and weekly windows by their declared duration rather than their response field position.
+- Extracts official weekly windows by their declared 10,080-minute duration, with a narrow older-response fallback that treats an undeclared secondary window as weekly.
 - Remains read-only with respect to Codex account state.
-- Renders compact usage lines in each window card.
-- Shows Spark usage inline when Spark data is present.
+- Renders one full-width weekly card per account.
+- Shows default and Spark weekly usage on separate lines when Spark data is present.
+- Shows a restrained progress bar where it fits, the reset countdown, and the exact local reset time where useful.
 - Shows configured labels before raw identity fields.
 - Orders account rows by weekly reset time.
 - Keeps timestamps in UTC internally and renders user-facing timestamps in local time.
-- Treats observed-token totals as local estimates from session logs.
+- Treats the seven-day observed-token total as a local estimate from session logs.
 - Keeps last good official window cards visible and marked stale during full refresh outages.
 
 `multicodex monitor tui`

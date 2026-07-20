@@ -16,17 +16,14 @@ type Summary struct {
 	AccountID             string                     `json:"account_id,omitempty"`
 	UserID                string                     `json:"user_id,omitempty"`
 	WindowDataAvailable   bool                       `json:"window_data_available"`
-	PrimaryWindow         WindowSummary              `json:"primary_window"`
-	SecondaryWindow       WindowSummary              `json:"secondary_window"`
+	WeeklyWindow          WindowSummary              `json:"weekly_window"`
 	WindowAccountLabel    string                     `json:"window_account_label,omitempty"`
 	AdditionalLimitCount  int                        `json:"additional_limit_count,omitempty"`
 	RateLimitWindows      map[string]RateLimitWindow `json:"rate_limit_windows,omitempty"`
 	TotalAccounts         int                        `json:"total_accounts,omitempty"`
 	SuccessfulAccounts    int                        `json:"successful_accounts,omitempty"`
 	Accounts              []AccountSummary           `json:"accounts,omitempty"`
-	ObservedTokens5h      *int64                     `json:"observed_tokens_5h,omitempty"`
 	ObservedTokensWeekly  *int64                     `json:"observed_tokens_weekly,omitempty"`
-	ObservedWindow5h      *ObservedTokenBreakdown    `json:"observed_window_5h,omitempty"`
 	ObservedWindowWeekly  *ObservedTokenBreakdown    `json:"observed_window_weekly,omitempty"`
 	ObservedTokensStatus  string                     `json:"observed_tokens_status,omitempty"`
 	ObservedTokensWarming bool                       `json:"observed_tokens_warming,omitempty"`
@@ -49,13 +46,10 @@ type AccountSummary struct {
 	AccountEmail          string                     `json:"account_email,omitempty"`
 	AccountID             string                     `json:"account_id,omitempty"`
 	UserID                string                     `json:"user_id,omitempty"`
-	PrimaryWindow         WindowSummary              `json:"primary_window,omitempty"`
-	SecondaryWindow       WindowSummary              `json:"secondary_window,omitempty"`
+	WeeklyWindow          WindowSummary              `json:"weekly_window,omitempty"`
 	AdditionalLimitCount  int                        `json:"additional_limit_count,omitempty"`
 	RateLimitWindows      map[string]RateLimitWindow `json:"rate_limit_windows,omitempty"`
-	ObservedTokens5h      *int64                     `json:"observed_tokens_5h,omitempty"`
 	ObservedTokensWeekly  *int64                     `json:"observed_tokens_weekly,omitempty"`
-	ObservedWindow5h      *ObservedTokenBreakdown    `json:"observed_window_5h,omitempty"`
 	ObservedWindowWeekly  *ObservedTokenBreakdown    `json:"observed_window_weekly,omitempty"`
 	ObservedTokensStatus  string                     `json:"observed_tokens_status,omitempty"`
 	ObservedTokensWarming bool                       `json:"observed_tokens_warming,omitempty"`
@@ -66,10 +60,9 @@ type AccountSummary struct {
 }
 
 type RateLimitWindow struct {
-	LimitID         string        `json:"limit_id"`
-	LimitName       string        `json:"limit_name,omitempty"`
-	PrimaryWindow   WindowSummary `json:"primary_window"`
-	SecondaryWindow WindowSummary `json:"secondary_window"`
+	LimitID      string        `json:"limit_id"`
+	LimitName    string        `json:"limit_name,omitempty"`
+	WeeklyWindow WindowSummary `json:"weekly_window"`
 }
 
 func (s *Summary) RateLimitWindowForModel(model string) (string, RateLimitWindow, bool) {

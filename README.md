@@ -121,11 +121,10 @@ Two terminals can run `multicodex cli` with different profiles at the same time.
 
 - Help requests such as `multicodex exec --help` delegate directly to `codex exec` and do not require profiles.
 - Exec can run with no configured profiles by using the default Codex home as the only available account.
-- Configured profiles at 100% five-hour or weekly usage are not selected.
-- Configured profiles are grouped by five-hour usage: green is 0-40%, amber is 41-60%, and red is 61-99%.
-- Exec tries green profiles before amber profiles, and amber profiles before red profiles.
-- Within each tier, exec picks the profile whose weekly reset is soonest.
-- The default Codex home is a protected reserve. It is used only when no configured profile has current usable five-hour and weekly usage left.
+- Configured profiles at 100% weekly usage are not selected.
+- Exec uses configured selection priority first, then prefers the profile whose known weekly reset is soonest.
+- Profiles with an unknown weekly reset follow profiles with a known reset. Exact ties are randomized.
+- The default Codex home is a protected reserve. It is used only when no configured profile has usable weekly usage.
 - If the default Codex home is the only remaining destination, exec uses it as the final fallback even when its usage data is unavailable or exhausted.
 - For explicit Spark model names, configured profiles need Spark usage windows to win normal routing; the default Codex home still remains the final fallback.
 
@@ -185,8 +184,10 @@ The TUI:
 - orders account rows by weekly reset time
 - shows configured account labels before raw identity fields
 - keeps timestamps in UTC internally and renders local time in the UI
-- shows official five-hour and weekly windows plus local observed-token estimates
-- uses each official window's declared duration, so a weekly-only provider response appears under weekly instead of being mislabeled as five-hour
+- shows one full-width weekly card per account, with default and Spark usage on separate lines when available
+- shows a compact progress bar where space permits, plus the reset countdown and exact local reset time
+- shows one local seven-day observed-token estimate from session logs
+- uses each official window's declared duration, with a narrow positional fallback for older provider responses
 - keeps last good official window cards visible and marked stale during a full refresh outage
 - prefers short re-login warnings when a profile token has expired
 

@@ -13,20 +13,18 @@ import (
 )
 
 const (
-	execSelectionGreenPrimaryMaxPercent = 40
-	execSelectionTimeout                = 10 * time.Second
-	envSelectedProfilePath              = "MULTICODEX_SELECTED_PROFILE_PATH"
-	defaultExecAccountLabel             = "default"
-	defaultExecAccountPriority          = 100
+	execSelectionTimeout       = 10 * time.Second
+	envSelectedProfilePath     = "MULTICODEX_SELECTED_PROFILE_PATH"
+	defaultExecAccountLabel    = "default"
+	defaultExecAccountPriority = 100
 )
 
-type execAccountSelector func(context.Context, []usage.MonitorAccount, int, string) (usage.SelectedAccount, error)
+type execAccountSelector func(context.Context, []usage.MonitorAccount, string) (usage.SelectedAccount, error)
 
 type execSelectionMetadata struct {
-	Profile              string `json:"profile"`
-	SelectionSource      string `json:"selection_source,omitempty"`
-	PrimaryUsedPercent   *int   `json:"primary_used_percent,omitempty"`
-	SecondaryUsedPercent *int   `json:"secondary_used_percent,omitempty"`
+	Profile           string `json:"profile"`
+	SelectionSource   string `json:"selection_source,omitempty"`
+	WeeklyUsedPercent *int   `json:"weekly_used_percent,omitempty"`
 }
 
 type execSelection struct {
@@ -37,8 +35,8 @@ type execSelection struct {
 	Metadata  execSelectionMetadata
 }
 
-var defaultExecAccountSelector execAccountSelector = func(ctx context.Context, accounts []usage.MonitorAccount, greenPrimaryMaxPercent int, model string) (usage.SelectedAccount, error) {
-	return usage.SelectBestAccountForModel(ctx, accounts, greenPrimaryMaxPercent, model)
+var defaultExecAccountSelector execAccountSelector = func(ctx context.Context, accounts []usage.MonitorAccount, model string) (usage.SelectedAccount, error) {
+	return usage.SelectBestAccountForModel(ctx, accounts, model)
 }
 
 func (a *App) cmdExec(args []string) error {
@@ -224,25 +222,23 @@ func (a *App) selectExecProfile(cfg *Config, selector execAccountSelector, model
 	ctx, cancel := context.WithTimeout(context.Background(), execSelectionTimeout)
 	defer cancel()
 
-	selected, err := selector(ctx, accounts, execSelectionGreenPrimaryMaxPercent, model)
+	selected, err := selector(ctx, accounts, model)
 	if err != nil {
 		return execSelection{}, err
 	}
 	if name, profile, ok := lookupSelectedExecProfile(cfg, selected); ok {
 		metadata := execSelectionMetadata{
-			Profile:              name,
-			SelectionSource:      "usage_selector",
-			PrimaryUsedPercent:   intPtr(selected.PrimaryUsedPercent),
-			SecondaryUsedPercent: intPtr(selected.SecondaryUsedPercent),
+			Profile:           name,
+			SelectionSource:   "usage_selector",
+			WeeklyUsedPercent: intPtr(selected.WeeklyUsedPercent),
 		}
 		return execSelection{Name: name, CodexHome: profile.CodexHome, IsProfile: true, Profile: profile, Metadata: metadata}, nil
 	}
 	if home, ok := lookupDefaultExecAccount(a.store.paths, selected); ok {
 		metadata := execSelectionMetadata{
-			Profile:              defaultExecAccountLabel,
-			SelectionSource:      "usage_selector_default_reserve",
-			PrimaryUsedPercent:   intPtr(selected.PrimaryUsedPercent),
-			SecondaryUsedPercent: intPtr(selected.SecondaryUsedPercent),
+			Profile:           defaultExecAccountLabel,
+			SelectionSource:   "usage_selector_default_reserve",
+			WeeklyUsedPercent: intPtr(selected.WeeklyUsedPercent),
 		}
 		return execSelection{Name: defaultExecAccountLabel, CodexHome: home, Metadata: metadata}, nil
 	}

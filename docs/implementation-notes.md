@@ -9,6 +9,8 @@
 - Status inspection in `internal/multicodex/status.go`.
 - Keepalive heartbeat execution in `internal/multicodex/heartbeat.go`.
 - Subscription usage monitoring in `internal/monitor/usage` and `internal/monitor/tui`.
+- Provider primary/secondary fields are decoded only at the source boundary. The normalized model stores one weekly window for the default bucket and each model-specific bucket.
+- Exec selection metadata stores only `weekly_used_percent` for usage telemetry.
 - Non-mutating preflight and preview helpers in `internal/multicodex/doctor.go` and `internal/multicodex/dry_run.go`.
 
 ## Data layout
@@ -26,7 +28,7 @@
 - Unit tests for command help, status, and unknown commands that must not move local state or rewrite default auth.
 - Unit tests for exact file-store config parsing and runtime isolation re-checks after shared-config drift.
 - Unit tests for heartbeat success, failure, timeout, locking, retries, and exact ephemeral read-only exec behavior.
-- Imported and preserved monitor tests for account discovery, source fetching, observed-token aggregation, and TUI layout stability.
+- Monitor tests cover weekly normalization, default and Spark routing, observed-token aggregation, stale data, and TUI layout stability across narrow, standard, wide, short, and many-account views.
 - Unit tests for profile-local CLI `/goal` state across simultaneous terminals.
 - Routine static and race checks with `go vet ./...` and `go test -race ./...`.
 - End-to-end battletest harness in isolated temporary homes using a controlled fake `codex` binary for workflow and failure-mode replay.
