@@ -407,6 +407,79 @@ func TestResourceValidationPrecedesProfileMutation(t *testing.T) {
 	}
 }
 
+func TestResourceDestinationValidationPrecedesProfileMutation(t *testing.T) {
+	store, profile := newResourceTestStore(t)
+	if err := os.MkdirAll(profile.CodexHome, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	oldTarget := filepath.Join(t.TempDir(), "old-guidance")
+	if err := os.WriteFile(oldTarget, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	guidancePath := filepath.Join(profile.CodexHome, "AGENTS.md")
+	if err := os.Symlink(oldTarget, guidancePath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(profile.CodexHome, "skills"), []byte("local override"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	guidanceSource := t.TempDir()
+	if err := os.WriteFile(filepath.Join(guidanceSource, "AGENTS.md"), []byte("new"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	skillSource := t.TempDir()
+	inherit := true
+	sources := []string{skillSource}
+	policy := &ProfileResources{
+		Guidance: &GuidanceResources{Inherit: &inherit, Source: guidanceSource},
+		Skills:   &SkillResources{Inherit: &inherit, Sources: &sources},
+	}
+
+	_, err := store.EnsureProfileDir(profile, policy)
+	if err == nil || !strings.Contains(err.Error(), "profile skills path is not a directory") {
+		t.Fatalf("expected destination error, got %v", err)
+	}
+	assertLinkTarget(t, guidancePath, oldTarget)
+	if _, err := os.Lstat(filepath.Join(profile.CodexHome, "config.toml")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("destination validation mutated profile config: %v", err)
+	}
+}
+
+func TestLegacySkillDestinationValidationPrecedesGuidanceMutation(t *testing.T) {
+	store, profile := newResourceTestStore(t)
+	if err := os.MkdirAll(filepath.Join(profile.CodexHome, "skills"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	oldTarget := filepath.Join(t.TempDir(), "old-guidance")
+	if err := os.WriteFile(oldTarget, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	guidancePath := filepath.Join(profile.CodexHome, "AGENTS.md")
+	if err := os.Symlink(oldTarget, guidancePath); err != nil {
+		t.Fatal(err)
+	}
+	foreignSkill := filepath.Join(t.TempDir(), "foreign-skill")
+	if err := os.Mkdir(foreignSkill, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(foreignSkill, filepath.Join(profile.CodexHome, "skills", "foreign")); err != nil {
+		t.Fatal(err)
+	}
+	guidanceSource := t.TempDir()
+	if err := os.WriteFile(filepath.Join(guidanceSource, "AGENTS.md"), []byte("new"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	inherit := true
+	policy := &ProfileResources{Guidance: &GuidanceResources{Inherit: &inherit, Source: guidanceSource}}
+
+	_, err := store.EnsureProfileDir(profile, policy)
+	if err == nil || !strings.Contains(err.Error(), "must point under default skills directory") {
+		t.Fatalf("expected legacy skill destination error, got %v", err)
+	}
+	assertLinkTarget(t, guidancePath, oldTarget)
+}
+
 func TestOmittedResourcePolicyLeavesGuidanceUntouched(t *testing.T) {
 	store, profile := newResourceTestStore(t)
 	if err := os.MkdirAll(profile.CodexHome, 0o700); err != nil {

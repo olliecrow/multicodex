@@ -26,7 +26,8 @@
 
 ## Verification strategy
 - Unit tests for config parsing and profile validation.
-- Resource tests cover omitted behavior, strict nested decoding, path forms, missing and wrong-type sources, guidance pair overrides, ordered skill merging, explicit isolation, source changes, foreign and broken symlinks, and old-target reporting.
+- Resource tests cover omitted behavior, strict nested decoding, path forms, missing and wrong-type sources, guidance pair overrides, ordered skill merging, explicit isolation, source changes, foreign and broken symlinks, destination failures before mutation, and old-target reporting.
+- Command tests cover policy application in add, login, login-all, CLI, exec, and heartbeat. Exec tests also keep resource notices off Codex's standard output.
 - Unit tests for environment and command wrapper behavior.
 - Unit tests for interactive CLI handoff into direct `codex` execution.
 - Unit tests for command help, status, and unknown commands that must not move local state or rewrite default auth.

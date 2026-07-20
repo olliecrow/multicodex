@@ -184,6 +184,9 @@ func (s *Store) CreateProfile(name string, resources *ProfileResources) (Profile
 	if err := s.ensureProfileStoragePathSafe(profile); err != nil {
 		return Profile{}, nil, err
 	}
+	if err := s.validateProfileResourceDestinations(codexHome, resources); err != nil {
+		return Profile{}, nil, err
+	}
 	if err := os.MkdirAll(codexHome, 0o700); err != nil {
 		return Profile{}, nil, fmt.Errorf("create profile dir: %w", err)
 	}
@@ -208,6 +211,9 @@ func (s *Store) EnsureProfileDir(profile Profile, resources *ProfileResources) (
 		return nil, err
 	}
 	if err := s.ensureProfileStoragePathSafe(profile); err != nil {
+		return nil, err
+	}
+	if err := s.validateProfileResourceDestinations(profile.CodexHome, resources); err != nil {
 		return nil, err
 	}
 	if err := os.MkdirAll(profile.CodexHome, 0o700); err != nil {

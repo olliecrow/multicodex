@@ -152,6 +152,7 @@ Multicodex intentionally has no command for changing the shared default Codex ac
 - `inherit: false` removes managed symlinks. Populated source fields are invalid in this mode.
 - `~` expands to the user home. Relative paths resolve from the config file directory. Custom source directories must exist and have the expected type before reconciliation starts.
 - `add`, `login`, `login-all`, `cli`, `exec`, and `heartbeat` reconcile resources before a profile-scoped Codex launch. `doctor`, `dry-run`, `status`, and `monitor` do not mutate profile resources.
+- Resource changes use normal command output, except `exec` writes them to standard error so Codex's standard output remains safe for scripts.
 
 `multicodex completion <shell>`
 - Prints tab-completion script for bash, zsh, or fish.
