@@ -26,6 +26,9 @@ func TestReconcileAppliesResourcesForAllProfiles(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(defaultSkills, "current"), 0o700); err != nil {
 		t.Fatalf("mkdir current skill: %v", err)
 	}
+	if err := os.Mkdir(filepath.Join(defaultSkills, ".system"), 0o700); err != nil {
+		t.Fatalf("mkdir system skills: %v", err)
+	}
 	defaultEntriesBefore, err := os.ReadDir(defaultHome)
 	if err != nil {
 		t.Fatalf("read default home: %v", err)
@@ -48,6 +51,9 @@ func TestReconcileAppliesResourcesForAllProfiles(t *testing.T) {
 		}
 		if err := os.Symlink(filepath.Join(defaultSkills, "retired"), filepath.Join(profileHome, "skills", "retired")); err != nil {
 			t.Fatalf("link retired skill: %v", err)
+		}
+		if err := os.Symlink(filepath.Join(defaultSkills, ".system"), filepath.Join(profileHome, "skills", ".system")); err != nil {
+			t.Fatalf("link system skills: %v", err)
 		}
 		cfg.Profiles[name] = Profile{Name: name, CodexHome: profileHome}
 	}
@@ -74,6 +80,9 @@ func TestReconcileAppliesResourcesForAllProfiles(t *testing.T) {
 		assertLinkTarget(t, filepath.Join(profileHome, "skills", "current"), filepath.Join(defaultSkills, "current"))
 		if _, err := os.Lstat(filepath.Join(profileHome, "skills", "retired")); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("expected retired skill link removed for %s, stat err=%v", name, err)
+		}
+		if _, err := os.Lstat(filepath.Join(profileHome, "skills", ".system")); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("expected runtime-managed .system link removed for %s, stat err=%v", name, err)
 		}
 	}
 	defaultEntriesAfter, err := os.ReadDir(defaultHome)
