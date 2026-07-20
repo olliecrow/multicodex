@@ -69,8 +69,12 @@ func TestCmdExecPreservesCustomResourcePolicyThroughSelection(t *testing.T) {
 		return usage.SelectedAccount{Account: usage.MonitorAccount{Label: "alpha"}}, nil
 	}
 	defer func() { defaultExecAccountSelector = originalSelector }()
-	if err := app.Run([]string{"exec", "hello"}); err != nil {
+	out, err := captureStdout(t, func() error { return app.Run([]string{"exec", "hello"}) })
+	if err != nil {
 		t.Fatal(err)
+	}
+	if strings.Contains(out, "profile resource:") {
+		t.Fatalf("resource reporting polluted exec stdout: %q", out)
 	}
 	profile := cfg.Profiles["alpha"]
 	assertLinkTarget(t, filepath.Join(profile.CodexHome, "skills", "custom-skill"), filepath.Join(source, "custom-skill"))

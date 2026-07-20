@@ -52,6 +52,10 @@ func printResourceChanges(changes []ResourceChange) {
 	printResourceChangesTo(os.Stdout, changes)
 }
 
+func printResourceChangesToStderr(changes []ResourceChange) {
+	printResourceChangesTo(os.Stderr, changes)
+}
+
 func printResourceChangesTo(writer io.Writer, changes []ResourceChange) {
 	for _, change := range changes {
 		fmt.Fprintln(writer, "profile resource:", change.String())
@@ -239,13 +243,6 @@ func (s *Store) resolveSkillResources(settings *SkillResources) (*resolvedSkillR
 		if err != nil {
 			return nil, fmt.Errorf("read skill source %s: %w", source, err)
 		}
-		info, err := os.Stat(source)
-		if err != nil {
-			return nil, fmt.Errorf("inspect skill source %s: %w", source, err)
-		}
-		if !info.IsDir() {
-			return nil, fmt.Errorf("skill source is not a directory: %s", source)
-		}
 		for _, entry := range entries {
 			name := strings.TrimSpace(entry.Name())
 			if name == "" || name == "." || name == ".." {
@@ -257,6 +254,95 @@ func (s *Store) resolveSkillResources(settings *SkillResources) (*resolvedSkillR
 		}
 	}
 	return resolved, nil
+}
+
+// validateProfileResourceDestinations checks profile-owned positions before any
+// profile setup or resource reconciliation changes the filesystem.
+func (s *Store) validateProfileResourceDestinations(codexHome string, policy *ProfileResources) error {
+	if policy == nil {
+		return nil
+	}
+	if policy.Guidance != nil {
+		if err := validateOwnedLinkPositions(codexHome, guidanceNames, "profile guidance"); err != nil {
+			return err
+		}
+	}
+	defaultSkillsPath := filepath.Join(s.paths.DefaultCodexHome, "skills")
+	if policy.Skills == nil {
+		if _, err := os.ReadDir(defaultSkillsPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("read default skills dir: %w", err)
+		}
+	}
+
+	profileSkillsPath := filepath.Join(codexHome, "skills")
+	if err := ensurePathNotSymlinkIfExists(profileSkillsPath); err != nil {
+		return err
+	}
+	info, err := os.Lstat(profileSkillsPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect profile skills path: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("profile skills path is not a directory: %s", profileSkillsPath)
+	}
+	if err := ensurePathPrefixesBelowRootNotSymlinks(codexHome, profileSkillsPath); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(profileSkillsPath)
+	if err != nil {
+		return fmt.Errorf("read profile skills dir: %w", err)
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		names = append(names, entry.Name())
+	}
+	if err := validateOwnedLinkPositions(profileSkillsPath, names, "profile skill"); err != nil {
+		return err
+	}
+	if policy.Skills != nil {
+		return nil
+	}
+	for _, name := range names {
+		path := filepath.Join(profileSkillsPath, name)
+		info, err := os.Lstat(path)
+		if err != nil || info.Mode()&os.ModeSymlink == 0 {
+			continue
+		}
+		target, err := resolveExistingSymlinkTarget(path)
+		if errors.Is(err, os.ErrNotExist) {
+			target, err = resolveBrokenManagedSymlinkTarget(path)
+		}
+		if err != nil {
+			return fmt.Errorf("resolve profile skill symlink %s: %w", path, err)
+		}
+		if !pathIsInsideRoot(defaultSkillsPath, target) {
+			return fmt.Errorf("profile skill symlink must point under default skills directory: %s", path)
+		}
+	}
+	return nil
+}
+
+func validateOwnedLinkPositions(root string, names []string, label string) error {
+	for _, name := range names {
+		path := filepath.Join(root, name)
+		info, err := os.Lstat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("inspect %s %s: %w", label, path, err)
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			continue
+		}
+		if _, err := os.Readlink(path); err != nil {
+			return fmt.Errorf("read %s symlink %s: %w", label, path, err)
+		}
+	}
+	return nil
 }
 
 func (s *Store) resolveResourcePath(value string) (string, error) {

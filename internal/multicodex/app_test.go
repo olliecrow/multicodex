@@ -169,6 +169,46 @@ func TestCmdCLIFailsWhenSharedConfigDoesNotUseFileStoreFromApp(t *testing.T) {
 	}
 }
 
+func TestProfileCommandsApplyCustomResourcePolicy(t *testing.T) {
+	for _, command := range []string{"add", "login", "login-all", "cli"} {
+		t.Run(command, func(t *testing.T) {
+			app, _ := newExecTestApp(t)
+			if command != "add" {
+				createExecProfiles(t, app, "alpha")
+			}
+			source := filepath.Join(t.TempDir(), "skills")
+			if err := os.MkdirAll(filepath.Join(source, "shared"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := app.loadOrInitConfig()
+			if err != nil {
+				t.Fatal(err)
+			}
+			inherit := true
+			sources := []string{source}
+			cfg.ProfileResources = &ProfileResources{Skills: &SkillResources{Inherit: &inherit, Sources: &sources}}
+			if err := app.store.Save(cfg); err != nil {
+				t.Fatal(err)
+			}
+
+			switch command {
+			case "add":
+				err = app.cmdAdd([]string{"alpha"})
+			case "login":
+				err = app.cmdLogin([]string{"alpha"})
+			case "login-all":
+				err = app.cmdLoginAll()
+			case "cli":
+				err = app.cmdCLI([]string{"alpha"})
+			}
+			if err != nil {
+				t.Fatalf("%s failed: %v", command, err)
+			}
+			assertLinkTarget(t, filepath.Join(app.store.paths.ProfilesDir, "alpha", "codex-home", "skills", "shared"), filepath.Join(source, "shared"))
+		})
+	}
+}
+
 func newTestAppWithGeneratedProfileConfig(t *testing.T) (*App, Profile, string) {
 	t.Helper()
 

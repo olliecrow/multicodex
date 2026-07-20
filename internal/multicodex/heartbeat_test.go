@@ -28,6 +28,34 @@ func TestCmdHeartbeatSuccessWithSkippedProfiles(t *testing.T) {
 	}
 }
 
+func TestCmdHeartbeatAppliesCustomResourcePolicy(t *testing.T) {
+	app := newHeartbeatTestApp(t, fakeCodexScript{
+		loginStatusByProfile: map[string]fakeStatus{"alpha": {exitCode: 1, output: "Not logged in"}},
+	})
+	createHeartbeatProfiles(t, app, "alpha")
+	source := filepath.Join(t.TempDir(), "skills")
+	if err := os.MkdirAll(filepath.Join(source, "shared"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := app.store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	inherit := true
+	sources := []string{source}
+	cfg.ProfileResources = &ProfileResources{Skills: &SkillResources{Inherit: &inherit, Sources: &sources}}
+	if err := app.store.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	err = app.cmdHeartbeat(nil)
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) || !strings.Contains(exitErr.Message, "no logged-in profiles") {
+		t.Fatalf("expected logged-out heartbeat result, got %v", err)
+	}
+	assertLinkTarget(t, filepath.Join(cfg.Profiles["alpha"].CodexHome, "skills", "shared"), filepath.Join(source, "shared"))
+}
+
 func TestCmdHeartbeatFailsWhenAnyLoggedInProfileFails(t *testing.T) {
 	app := newHeartbeatTestApp(t, fakeCodexScript{
 		loginStatusByProfile: map[string]fakeStatus{

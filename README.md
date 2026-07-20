@@ -114,7 +114,7 @@ The optional `profile_resources` block in `~/multicodex/config.json` controls sh
 - When explicit management is enabled, symlinks at the two guidance names and directly under the profile `skills/` directory are multicodex-owned. Retargeting or removal reports the old target.
 - Codex's existing user-wide `$HOME/.agents/skills` and repository `.agents/skills` discovery stays separate and continues to work normally.
 
-Use `multicodex doctor` to validate configured sources and `multicodex dry-run` to see the effective policy and planned reconciliation without changing files. To recover from a bad link policy, set the affected `inherit` value to `false`, run a normal profile command once, then remove the optional block to return to the original unmanaged-guidance and default-skill behavior.
+Use `multicodex doctor` to validate configured sources and `multicodex dry-run` to see the effective policy and planned reconciliation without changing files. To recover from a bad link policy, set the affected `inherit` value to `false` and remove its `source` or `sources` field, run a normal profile command once, then remove the optional block to return to the original unmanaged-guidance and default-skill behavior.
 
 ## Commands
 

@@ -63,7 +63,7 @@ func (a *App) cmdExec(args []string) error {
 		if err != nil {
 			return err
 		}
-		printResourceChanges(changes)
+		printResourceChangesToStderr(changes)
 		if err := ensureProfileCodexExecutionReady(a.store.paths, selected.Profile); err != nil {
 			return err
 		}
@@ -88,7 +88,7 @@ func (a *App) execReadyConfig(cfg *Config) (*Config, error) {
 		if err != nil {
 			return nil, err
 		}
-		printResourceChanges(changes)
+		printResourceChangesToStderr(changes)
 		if err := ensureProfileCodexExecutionReady(a.store.paths, profile); err != nil {
 			return nil, err
 		}
