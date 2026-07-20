@@ -171,19 +171,17 @@ func TestFetcherAggregatesMultiAccountObservedTokens(t *testing.T) {
 	t.Setenv("CODEX_HOME", "/b")
 
 	primaryA := &fakeSource{name: "primary-a", out: &Summary{
-		Source:          "app-server",
-		PlanType:        "pro",
-		AccountEmail:    "a@example.com",
-		PrimaryWindow:   WindowSummary{UsedPercent: 20},
-		SecondaryWindow: WindowSummary{UsedPercent: 50},
+		Source:       "app-server",
+		PlanType:     "pro",
+		AccountEmail: "a@example.com",
+		WeeklyWindow: WindowSummary{UsedPercent: 50},
 	}}
 	primaryB := &fakeSource{name: "primary-b", err: errors.New("boom")}
 	fallbackB := &fakeSource{name: "fallback-b", out: &Summary{
-		Source:          "oauth",
-		PlanType:        "pro",
-		AccountEmail:    "b@example.com",
-		PrimaryWindow:   WindowSummary{UsedPercent: 60},
-		SecondaryWindow: WindowSummary{UsedPercent: 70},
+		Source:       "oauth",
+		PlanType:     "pro",
+		AccountEmail: "b@example.com",
+		WeeklyWindow: WindowSummary{UsedPercent: 70},
 	}}
 
 	f := &Fetcher{
@@ -202,12 +200,10 @@ func TestFetcherAggregatesMultiAccountObservedTokens(t *testing.T) {
 		observed: fakeEstimator{
 			values: map[string]ObservedTokenEstimate{
 				"/a": {
-					Window5h:     ObservedTokenBreakdown{Total: 100},
 					WindowWeekly: ObservedTokenBreakdown{Total: 200},
 					Status:       observedTokensStatusEstimated,
 				},
 				"/b": {
-					Window5h:     ObservedTokenBreakdown{Total: 30},
 					WindowWeekly: ObservedTokenBreakdown{Total: 80},
 					Status:       observedTokensStatusEstimated,
 				},
@@ -222,9 +218,6 @@ func TestFetcherAggregatesMultiAccountObservedTokens(t *testing.T) {
 	if out.TotalAccounts != 2 || out.SuccessfulAccounts != 2 {
 		t.Fatalf("expected 2/2 account success, got %d/%d", out.SuccessfulAccounts, out.TotalAccounts)
 	}
-	if out.ObservedTokens5h == nil || *out.ObservedTokens5h != 130 {
-		t.Fatalf("expected aggregated 5h observed total, got %+v", out.ObservedTokens5h)
-	}
 	if out.ObservedTokensWeekly == nil || *out.ObservedTokensWeekly != 280 {
 		t.Fatalf("expected aggregated weekly observed total, got %+v", out.ObservedTokensWeekly)
 	}
@@ -237,16 +230,10 @@ func TestFetcherAggregatesMultiAccountObservedTokens(t *testing.T) {
 	if out.Accounts[1].Source != "oauth" {
 		t.Fatalf("expected fallback source for account b, got %q", out.Accounts[1].Source)
 	}
-	if out.Accounts[0].ObservedTokens5h == nil || *out.Accounts[0].ObservedTokens5h != 100 {
-		t.Fatalf("expected account a observed 5h total")
-	}
-	if out.Accounts[1].ObservedTokens5h == nil || *out.Accounts[1].ObservedTokens5h != 30 {
-		t.Fatalf("expected account b observed 5h total")
-	}
 	if !out.WindowDataAvailable {
 		t.Fatalf("expected active account window data to be available")
 	}
-	if out.SecondaryWindow.UsedPercent != 70 {
+	if out.WeeklyWindow.UsedPercent != 70 {
 		t.Fatalf("expected top window summary from active account")
 	}
 	if out.WindowAccountLabel != "b" {
@@ -266,7 +253,6 @@ func TestFetcherAllowsObservedOnlyWhenAllSourcesFail(t *testing.T) {
 		observed: fakeEstimator{
 			values: map[string]ObservedTokenEstimate{
 				"/a": {
-					Window5h:     ObservedTokenBreakdown{Total: 12},
 					WindowWeekly: ObservedTokenBreakdown{Total: 99},
 					Status:       observedTokensStatusEstimated,
 				},
@@ -284,9 +270,6 @@ func TestFetcherAllowsObservedOnlyWhenAllSourcesFail(t *testing.T) {
 	if out.ObservedTokensStatus != observedTokensStatusEstimated {
 		t.Fatalf("expected observed estimate status")
 	}
-	if out.ObservedTokens5h == nil || *out.ObservedTokens5h != 12 {
-		t.Fatalf("expected observed-only totals at summary level")
-	}
 }
 
 func TestFetcherMarksObservedPartialWhenSomeAccountsUnavailable(t *testing.T) {
@@ -294,19 +277,18 @@ func TestFetcherMarksObservedPartialWhenSomeAccountsUnavailable(t *testing.T) {
 		accounts: []accountFetcher{
 			{
 				account:  MonitorAccount{Label: "a", CodexHome: "/a"},
-				primary:  &fakeSource{name: "primary-a", out: &Summary{PrimaryWindow: WindowSummary{}, SecondaryWindow: WindowSummary{}}},
+				primary:  &fakeSource{name: "primary-a", out: &Summary{WeeklyWindow: WindowSummary{}}},
 				fallback: &fakeSource{name: "fallback-a"},
 			},
 			{
 				account:  MonitorAccount{Label: "b", CodexHome: "/b"},
-				primary:  &fakeSource{name: "primary-b", out: &Summary{PrimaryWindow: WindowSummary{}, SecondaryWindow: WindowSummary{}}},
+				primary:  &fakeSource{name: "primary-b", out: &Summary{WeeklyWindow: WindowSummary{}}},
 				fallback: &fakeSource{name: "fallback-b"},
 			},
 		},
 		observed: fakeEstimator{
 			values: map[string]ObservedTokenEstimate{
 				"/a": {
-					Window5h:     ObservedTokenBreakdown{Total: 10},
 					WindowWeekly: ObservedTokenBreakdown{Total: 20},
 					Status:       observedTokensStatusEstimated,
 				},
@@ -324,9 +306,6 @@ func TestFetcherMarksObservedPartialWhenSomeAccountsUnavailable(t *testing.T) {
 	if out.ObservedTokensStatus != observedTokensStatusPartial {
 		t.Fatalf("expected partial observed status, got %q", out.ObservedTokensStatus)
 	}
-	if out.ObservedTokens5h == nil || *out.ObservedTokens5h != 10 {
-		t.Fatalf("expected partial observed 5h total from available accounts")
-	}
 }
 
 func TestFetcherMarksObservedWarmingWhenUnavailableEstimateIsWarming(t *testing.T) {
@@ -335,8 +314,7 @@ func TestFetcherMarksObservedWarmingWhenUnavailableEstimateIsWarming(t *testing.
 			{
 				account: MonitorAccount{Label: "a", CodexHome: "/a"},
 				primary: &fakeSource{name: "primary-a", out: &Summary{
-					PrimaryWindow:   WindowSummary{UsedPercent: 10},
-					SecondaryWindow: WindowSummary{UsedPercent: 20},
+					WeeklyWindow: WindowSummary{UsedPercent: 20},
 				}},
 				fallback: &fakeSource{name: "fallback-a"},
 			},
@@ -373,18 +351,16 @@ func TestFetcherSumsObservedTotalsAcrossHomesForSameIdentity(t *testing.T) {
 			{
 				account: MonitorAccount{Label: "a", CodexHome: "/a"},
 				primary: &fakeSource{name: "primary-a", out: &Summary{
-					AccountEmail:    "same@example.com",
-					PrimaryWindow:   WindowSummary{UsedPercent: 10},
-					SecondaryWindow: WindowSummary{UsedPercent: 20},
+					AccountEmail: "same@example.com",
+					WeeklyWindow: WindowSummary{UsedPercent: 20},
 				}},
 				fallback: &fakeSource{name: "fallback-a"},
 			},
 			{
 				account: MonitorAccount{Label: "b", CodexHome: "/b"},
 				primary: &fakeSource{name: "primary-b", out: &Summary{
-					AccountEmail:    "same@example.com",
-					PrimaryWindow:   WindowSummary{UsedPercent: 30},
-					SecondaryWindow: WindowSummary{UsedPercent: 40},
+					AccountEmail: "same@example.com",
+					WeeklyWindow: WindowSummary{UsedPercent: 40},
 				}},
 				fallback: &fakeSource{name: "fallback-b"},
 			},
@@ -392,13 +368,6 @@ func TestFetcherSumsObservedTotalsAcrossHomesForSameIdentity(t *testing.T) {
 		observed: fakeEstimator{
 			values: map[string]ObservedTokenEstimate{
 				"/a": {
-					Window5h: ObservedTokenBreakdown{
-						Total:       100,
-						Input:       80,
-						CachedInput: 60,
-						Output:      20,
-						HasSplit:    true,
-					},
 					WindowWeekly: ObservedTokenBreakdown{
 						Total:           200,
 						Input:           150,
@@ -410,14 +379,6 @@ func TestFetcherSumsObservedTotalsAcrossHomesForSameIdentity(t *testing.T) {
 					Status: observedTokensStatusEstimated,
 				},
 				"/b": {
-					Window5h: ObservedTokenBreakdown{
-						Total:           150,
-						Input:           120,
-						CachedInput:     90,
-						Output:          30,
-						ReasoningOutput: 10,
-						HasSplit:        true,
-					},
 					WindowWeekly: ObservedTokenBreakdown{
 						Total:       180,
 						Input:       140,
@@ -435,14 +396,8 @@ func TestFetcherSumsObservedTotalsAcrossHomesForSameIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out.ObservedTokens5h == nil || *out.ObservedTokens5h != 250 {
-		t.Fatalf("expected summed 5h total across same-account homes, got %+v", out.ObservedTokens5h)
-	}
 	if out.ObservedTokensWeekly == nil || *out.ObservedTokensWeekly != 380 {
 		t.Fatalf("expected summed weekly total across same-account homes, got %+v", out.ObservedTokensWeekly)
-	}
-	if out.ObservedWindow5h == nil || out.ObservedWindow5h.Input != 200 || out.ObservedWindow5h.CachedInput != 150 || out.ObservedWindow5h.Output != 50 || out.ObservedWindow5h.ReasoningOutput != 10 {
-		t.Fatalf("expected 5h breakdown to add across same-account homes, got %+v", out.ObservedWindow5h)
 	}
 	if out.ObservedWindowWeekly == nil || out.ObservedWindowWeekly.Input != 290 || out.ObservedWindowWeekly.CachedInput != 210 || out.ObservedWindowWeekly.Output != 90 || out.ObservedWindowWeekly.ReasoningOutput != 10 {
 		t.Fatalf("expected weekly breakdown to add across same-account homes, got %+v", out.ObservedWindowWeekly)
@@ -672,8 +627,8 @@ func TestFetcherRefreshesEmptyAccountLoaderOnFetch(t *testing.T) {
 	if out.TotalAccounts != 1 || len(out.Accounts) != 1 || out.Accounts[0].Label != "alpha" {
 		t.Fatalf("expected refreshed alpha account, got %+v", out)
 	}
-	if out.PrimaryWindow.UsedPercent != 11 || out.SecondaryWindow.UsedPercent != 22 {
-		t.Fatalf("expected OAuth usage windows from refreshed account, got %+v / %+v", out.PrimaryWindow, out.SecondaryWindow)
+	if out.WeeklyWindow.UsedPercent != 22 {
+		t.Fatalf("expected OAuth weekly usage from refreshed account, got %+v", out.WeeklyWindow)
 	}
 }
 
@@ -700,18 +655,16 @@ func TestFetcherAddsObservedTotalsAcrossHomesWhenDedupingByAccountID(t *testing.
 			{
 				account: MonitorAccount{Label: "a", CodexHome: "/a"},
 				primary: &fakeSource{name: "primary-a", out: &Summary{
-					AccountID:       "same-account-id",
-					PrimaryWindow:   WindowSummary{UsedPercent: 10},
-					SecondaryWindow: WindowSummary{UsedPercent: 20},
+					AccountID:    "same-account-id",
+					WeeklyWindow: WindowSummary{UsedPercent: 20},
 				}},
 				fallback: &fakeSource{name: "fallback-a"},
 			},
 			{
 				account: MonitorAccount{Label: "b", CodexHome: "/b"},
 				primary: &fakeSource{name: "primary-b", out: &Summary{
-					AccountID:       "same-account-id",
-					PrimaryWindow:   WindowSummary{UsedPercent: 20},
-					SecondaryWindow: WindowSummary{UsedPercent: 30},
+					AccountID:    "same-account-id",
+					WeeklyWindow: WindowSummary{UsedPercent: 30},
 				}},
 				fallback: &fakeSource{name: "fallback-b"},
 			},
@@ -719,12 +672,10 @@ func TestFetcherAddsObservedTotalsAcrossHomesWhenDedupingByAccountID(t *testing.
 		observed: fakeEstimator{
 			values: map[string]ObservedTokenEstimate{
 				"/a": {
-					Window5h:     ObservedTokenBreakdown{Total: 100},
 					WindowWeekly: ObservedTokenBreakdown{Total: 200},
 					Status:       observedTokensStatusEstimated,
 				},
 				"/b": {
-					Window5h:     ObservedTokenBreakdown{Total: 150},
 					WindowWeekly: ObservedTokenBreakdown{Total: 180},
 					Status:       observedTokensStatusEstimated,
 				},
@@ -735,9 +686,6 @@ func TestFetcherAddsObservedTotalsAcrossHomesWhenDedupingByAccountID(t *testing.
 	out, err := f.Fetch(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
-	}
-	if out.ObservedTokens5h == nil || *out.ObservedTokens5h != 250 {
-		t.Fatalf("expected totals to add across homes for one account id, got %+v", out.ObservedTokens5h)
 	}
 	if out.TotalAccounts != 1 || out.SuccessfulAccounts != 1 {
 		t.Fatalf("expected deduped identity counts 1/1, got %d/%d", out.SuccessfulAccounts, out.TotalAccounts)
@@ -757,24 +705,22 @@ func TestFetcherKeepsUnverifiedAccountsDistinctByHome(t *testing.T) {
 			{
 				account: MonitorAccount{Label: "a", CodexHome: "/a"},
 				primary: &fakeSource{name: "primary-a", out: &Summary{
-					PrimaryWindow:   WindowSummary{UsedPercent: 10},
-					SecondaryWindow: WindowSummary{UsedPercent: 20},
+					WeeklyWindow: WindowSummary{UsedPercent: 20},
 				}},
 				fallback: &fakeSource{name: "fallback-a"},
 			},
 			{
 				account: MonitorAccount{Label: "b", CodexHome: "/b"},
 				primary: &fakeSource{name: "primary-b", out: &Summary{
-					PrimaryWindow:   WindowSummary{UsedPercent: 30},
-					SecondaryWindow: WindowSummary{UsedPercent: 40},
+					WeeklyWindow: WindowSummary{UsedPercent: 40},
 				}},
 				fallback: &fakeSource{name: "fallback-b"},
 			},
 		},
 		observed: fakeEstimator{
 			values: map[string]ObservedTokenEstimate{
-				"/a": {Window5h: ObservedTokenBreakdown{Total: 100}, WindowWeekly: ObservedTokenBreakdown{Total: 200}, Status: observedTokensStatusEstimated},
-				"/b": {Window5h: ObservedTokenBreakdown{Total: 150}, WindowWeekly: ObservedTokenBreakdown{Total: 180}, Status: observedTokensStatusEstimated},
+				"/a": {WindowWeekly: ObservedTokenBreakdown{Total: 200}, Status: observedTokensStatusEstimated},
+				"/b": {WindowWeekly: ObservedTokenBreakdown{Total: 180}, Status: observedTokensStatusEstimated},
 			},
 		},
 	}
@@ -788,9 +734,6 @@ func TestFetcherKeepsUnverifiedAccountsDistinctByHome(t *testing.T) {
 	}
 	if len(out.Accounts) != 2 {
 		t.Fatalf("expected two account rows for unverified homes, got %d", len(out.Accounts))
-	}
-	if out.ObservedTokens5h == nil || *out.ObservedTokens5h != 250 {
-		t.Fatalf("expected summed unverified observed 5h total, got %+v", out.ObservedTokens5h)
 	}
 	if out.ObservedTokensWeekly == nil || *out.ObservedTokensWeekly != 380 {
 		t.Fatalf("expected summed unverified observed weekly total, got %+v", out.ObservedTokensWeekly)
@@ -806,19 +749,19 @@ func TestFetcherUsesActiveHomeIdentityForCurrentAccount(t *testing.T) {
 		accounts: []accountFetcher{
 			{
 				account:  MonitorAccount{Label: "a", CodexHome: "/a"},
-				primary:  &fakeSource{name: "primary-a", out: &Summary{AccountEmail: "a@example.com", PrimaryWindow: WindowSummary{UsedPercent: 10}, SecondaryWindow: WindowSummary{UsedPercent: 20}}},
+				primary:  &fakeSource{name: "primary-a", out: &Summary{AccountEmail: "a@example.com", WeeklyWindow: WindowSummary{UsedPercent: 20}}},
 				fallback: &fakeSource{name: "fallback-a"},
 			},
 			{
 				account:  MonitorAccount{Label: "b", CodexHome: "/b"},
-				primary:  &fakeSource{name: "primary-b", out: &Summary{AccountEmail: "b@example.com", PrimaryWindow: WindowSummary{UsedPercent: 15}, SecondaryWindow: WindowSummary{UsedPercent: 19}}},
+				primary:  &fakeSource{name: "primary-b", out: &Summary{AccountEmail: "b@example.com", WeeklyWindow: WindowSummary{UsedPercent: 19}}},
 				fallback: &fakeSource{name: "fallback-b"},
 			},
 		},
 		observed: fakeEstimator{
 			values: map[string]ObservedTokenEstimate{
-				"/a": {Window5h: ObservedTokenBreakdown{Total: 1}, WindowWeekly: ObservedTokenBreakdown{Total: 2}, Status: observedTokensStatusEstimated},
-				"/b": {Window5h: ObservedTokenBreakdown{Total: 3}, WindowWeekly: ObservedTokenBreakdown{Total: 4}, Status: observedTokensStatusEstimated},
+				"/a": {WindowWeekly: ObservedTokenBreakdown{Total: 2}, Status: observedTokensStatusEstimated},
+				"/b": {WindowWeekly: ObservedTokenBreakdown{Total: 4}, Status: observedTokensStatusEstimated},
 			},
 		},
 	}
@@ -833,8 +776,8 @@ func TestFetcherUsesActiveHomeIdentityForCurrentAccount(t *testing.T) {
 	if out.WindowAccountLabel != "b" {
 		t.Fatalf("expected window account to follow active CODEX_HOME, got %q", out.WindowAccountLabel)
 	}
-	if out.PrimaryWindow.UsedPercent != 15 || out.SecondaryWindow.UsedPercent != 19 {
-		t.Fatalf("expected window cards to reflect active account limits")
+	if out.WeeklyWindow.UsedPercent != 19 {
+		t.Fatalf("expected weekly card to reflect active account limit")
 	}
 }
 
@@ -846,20 +789,14 @@ func TestFetcherClonesRateLimitWindowsForActiveAndAccountRows(t *testing.T) {
 	baseWindows := map[string]RateLimitWindow{
 		"codex": {
 			LimitID: "codex",
-			PrimaryWindow: WindowSummary{
-				UsedPercent: 10,
-			},
-			SecondaryWindow: WindowSummary{
+			WeeklyWindow: WindowSummary{
 				UsedPercent: 20,
 			},
 		},
 		"codex_bengalfox": {
 			LimitID:   "codex_bengalfox",
 			LimitName: "Spark",
-			PrimaryWindow: WindowSummary{
-				UsedPercent: 40,
-			},
-			SecondaryWindow: WindowSummary{
+			WeeklyWindow: WindowSummary{
 				UsedPercent: 30,
 			},
 		},
@@ -870,8 +807,7 @@ func TestFetcherClonesRateLimitWindowsForActiveAndAccountRows(t *testing.T) {
 		PlanType:             "pro",
 		AccountEmail:         "a@example.com",
 		WindowDataAvailable:  true,
-		PrimaryWindow:        WindowSummary{UsedPercent: 10},
-		SecondaryWindow:      WindowSummary{UsedPercent: 20},
+		WeeklyWindow:         WindowSummary{UsedPercent: 20},
 		AdditionalLimitCount: 1,
 		RateLimitWindows:     baseWindows,
 		ObservedTokensStatus: observedTokensStatusUnavailable,
@@ -905,10 +841,10 @@ func TestFetcherClonesRateLimitWindowsForActiveAndAccountRows(t *testing.T) {
 	if got := len(out.Accounts[0].RateLimitWindows); got != 2 {
 		t.Fatalf("expected 2 account rate-limit windows, got %d", got)
 	}
-	if out.RateLimitWindows["codex_bengalfox"].PrimaryWindow.UsedPercent != 40 {
+	if out.RateLimitWindows["codex_bengalfox"].WeeklyWindow.UsedPercent != 30 {
 		t.Fatalf("expected top-level codex_bengalfox usage preserved")
 	}
-	if out.Accounts[0].RateLimitWindows["codex_bengalfox"].PrimaryWindow.UsedPercent != 40 {
+	if out.Accounts[0].RateLimitWindows["codex_bengalfox"].WeeklyWindow.UsedPercent != 30 {
 		t.Fatalf("expected account row codex_bengalfox usage preserved")
 	}
 	if out.AdditionalLimitCount != 1 {
@@ -916,16 +852,16 @@ func TestFetcherClonesRateLimitWindowsForActiveAndAccountRows(t *testing.T) {
 	}
 
 	mutated := baseWindows["codex_bengalfox"]
-	mutated.PrimaryWindow.UsedPercent = 99
+	mutated.WeeklyWindow.UsedPercent = 99
 	baseWindows["codex_bengalfox"] = mutated
 	mutatedSecondary := outSummary.RateLimitWindows["codex_bengalfox"]
-	mutatedSecondary.PrimaryWindow.UsedPercent = 88
+	mutatedSecondary.WeeklyWindow.UsedPercent = 88
 	outSummary.RateLimitWindows["codex_bengalfox"] = mutatedSecondary
 
-	if out.RateLimitWindows["codex_bengalfox"].PrimaryWindow.UsedPercent != 40 {
+	if out.RateLimitWindows["codex_bengalfox"].WeeklyWindow.UsedPercent != 30 {
 		t.Fatalf("expected top-level snapshot clone to be isolated from source mutation")
 	}
-	if out.Accounts[0].RateLimitWindows["codex_bengalfox"].PrimaryWindow.UsedPercent != 40 {
+	if out.Accounts[0].RateLimitWindows["codex_bengalfox"].WeeklyWindow.UsedPercent != 30 {
 		t.Fatalf("expected account row snapshot clone to be isolated from source mutation")
 	}
 }
@@ -940,24 +876,19 @@ func TestFetcherKeepsPerLimitWindowsDistinctForActiveAndNonActiveAccounts(t *tes
 		PlanType:             "pro",
 		AccountEmail:         "a@example.com",
 		WindowDataAvailable:  true,
-		PrimaryWindow:        WindowSummary{UsedPercent: 10},
-		SecondaryWindow:      WindowSummary{UsedPercent: 20},
+		WeeklyWindow:         WindowSummary{UsedPercent: 20},
 		AdditionalLimitCount: 1,
 		RateLimitWindows: map[string]RateLimitWindow{
 			"codex": {
-				LimitID:       "codex",
-				PrimaryWindow: WindowSummary{UsedPercent: 10},
-				SecondaryWindow: WindowSummary{
+				LimitID: "codex",
+				WeeklyWindow: WindowSummary{
 					UsedPercent: 20,
 				},
 			},
 			"codex_bengalfox": {
 				LimitID:   "codex_bengalfox",
 				LimitName: "spark",
-				PrimaryWindow: WindowSummary{
-					UsedPercent: 30,
-				},
-				SecondaryWindow: WindowSummary{
+				WeeklyWindow: WindowSummary{
 					UsedPercent: 40,
 				},
 			},
@@ -969,24 +900,19 @@ func TestFetcherKeepsPerLimitWindowsDistinctForActiveAndNonActiveAccounts(t *tes
 		PlanType:             "pro",
 		AccountEmail:         "b@example.com",
 		WindowDataAvailable:  true,
-		PrimaryWindow:        WindowSummary{UsedPercent: 60},
-		SecondaryWindow:      WindowSummary{UsedPercent: 70},
+		WeeklyWindow:         WindowSummary{UsedPercent: 70},
 		AdditionalLimitCount: 1,
 		RateLimitWindows: map[string]RateLimitWindow{
 			"codex": {
-				LimitID:       "codex",
-				PrimaryWindow: WindowSummary{UsedPercent: 60},
-				SecondaryWindow: WindowSummary{
+				LimitID: "codex",
+				WeeklyWindow: WindowSummary{
 					UsedPercent: 70,
 				},
 			},
 			"codex_bengalfox": {
 				LimitID:   "codex_bengalfox",
 				LimitName: "spark",
-				PrimaryWindow: WindowSummary{
-					UsedPercent: 80,
-				},
-				SecondaryWindow: WindowSummary{
+				WeeklyWindow: WindowSummary{
 					UsedPercent: 90,
 				},
 			},
@@ -1016,7 +942,7 @@ func TestFetcherKeepsPerLimitWindowsDistinctForActiveAndNonActiveAccounts(t *tes
 	if out.TotalAccounts != 2 || out.SuccessfulAccounts != 2 {
 		t.Fatalf("expected 2/2 accounts, got %d/%d", out.SuccessfulAccounts, out.TotalAccounts)
 	}
-	if out.RateLimitWindows["codex_bengalfox"].PrimaryWindow.UsedPercent != 30 {
+	if out.RateLimitWindows["codex_bengalfox"].WeeklyWindow.UsedPercent != 40 {
 		t.Fatalf("expected top-level spark usage from active account")
 	}
 	if len(out.Accounts) < 2 {
@@ -1038,27 +964,27 @@ func TestFetcherKeepsPerLimitWindowsDistinctForActiveAndNonActiveAccounts(t *tes
 	if len(activeRow.RateLimitWindows) != 2 {
 		t.Fatalf("expected active account map to include both windows, got %d", len(activeRow.RateLimitWindows))
 	}
-	if activeRow.RateLimitWindows["codex_bengalfox"].PrimaryWindow.UsedPercent != 30 {
+	if activeRow.RateLimitWindows["codex_bengalfox"].WeeklyWindow.UsedPercent != 40 {
 		t.Fatalf("expected active account spark usage to stay account-specific")
 	}
-	if inactiveRow.RateLimitWindows["codex_bengalfox"].PrimaryWindow.UsedPercent != 80 {
+	if inactiveRow.RateLimitWindows["codex_bengalfox"].WeeklyWindow.UsedPercent != 90 {
 		t.Fatalf("expected inactive account spark usage to stay account-specific")
 	}
 
 	activeSparkWindow := activeSummary.RateLimitWindows["codex_bengalfox"]
-	activeSparkWindow.PrimaryWindow.UsedPercent = 99
+	activeSparkWindow.WeeklyWindow.UsedPercent = 99
 	activeSummary.RateLimitWindows["codex_bengalfox"] = activeSparkWindow
 	inactiveSparkWindow := inactiveSummary.RateLimitWindows["codex_bengalfox"]
-	inactiveSparkWindow.PrimaryWindow.UsedPercent = 88
+	inactiveSparkWindow.WeeklyWindow.UsedPercent = 88
 	inactiveSummary.RateLimitWindows["codex_bengalfox"] = inactiveSparkWindow
 
-	if out.RateLimitWindows["codex_bengalfox"].PrimaryWindow.UsedPercent != 30 {
+	if out.RateLimitWindows["codex_bengalfox"].WeeklyWindow.UsedPercent != 40 {
 		t.Fatalf("expected top-level clone to ignore source mutation")
 	}
-	if activeRow.RateLimitWindows["codex_bengalfox"].PrimaryWindow.UsedPercent != 30 {
+	if activeRow.RateLimitWindows["codex_bengalfox"].WeeklyWindow.UsedPercent != 40 {
 		t.Fatalf("expected active account clone to ignore source mutation")
 	}
-	if inactiveRow.RateLimitWindows["codex_bengalfox"].PrimaryWindow.UsedPercent != 80 {
+	if inactiveRow.RateLimitWindows["codex_bengalfox"].WeeklyWindow.UsedPercent != 90 {
 		t.Fatalf("expected inactive account clone to ignore source mutation")
 	}
 }
@@ -1072,7 +998,7 @@ func TestFetcherMarksWindowUnavailableWhenActiveFetchFails(t *testing.T) {
 		accounts: []accountFetcher{
 			{
 				account:  MonitorAccount{Label: "a", CodexHome: "/a"},
-				primary:  &fakeSource{name: "primary-a", out: &Summary{AccountEmail: "a@example.com", PrimaryWindow: WindowSummary{UsedPercent: 10}, SecondaryWindow: WindowSummary{UsedPercent: 20}}},
+				primary:  &fakeSource{name: "primary-a", out: &Summary{AccountEmail: "a@example.com", WeeklyWindow: WindowSummary{UsedPercent: 20}}},
 				fallback: &fakeSource{name: "fallback-a"},
 			},
 			{
@@ -1083,8 +1009,8 @@ func TestFetcherMarksWindowUnavailableWhenActiveFetchFails(t *testing.T) {
 		},
 		observed: fakeEstimator{
 			values: map[string]ObservedTokenEstimate{
-				"/a": {Window5h: ObservedTokenBreakdown{Total: 1}, WindowWeekly: ObservedTokenBreakdown{Total: 2}, Status: observedTokensStatusEstimated},
-				"/b": {Window5h: ObservedTokenBreakdown{Total: 3}, WindowWeekly: ObservedTokenBreakdown{Total: 4}, Status: observedTokensStatusEstimated},
+				"/a": {WindowWeekly: ObservedTokenBreakdown{Total: 2}, Status: observedTokensStatusEstimated},
+				"/b": {WindowWeekly: ObservedTokenBreakdown{Total: 4}, Status: observedTokensStatusEstimated},
 			},
 		},
 	}
@@ -1121,7 +1047,6 @@ func TestFetcherSummarizesExpiredAuthWarning(t *testing.T) {
 		observed: fakeEstimator{
 			values: map[string]ObservedTokenEstimate{
 				"/personal": {
-					Window5h:     ObservedTokenBreakdown{Total: 3},
 					WindowWeekly: ObservedTokenBreakdown{Total: 7},
 					Status:       observedTokensStatusEstimated,
 				},
@@ -1177,7 +1102,7 @@ func TestFetcherPrioritizesActiveAccountWhenWorkerPoolIsFull(t *testing.T) {
 			},
 			{
 				account:  MonitorAccount{Label: "active", CodexHome: "/active"},
-				primary:  &fakeSource{name: "primary-active", out: &Summary{AccountEmail: "active@example.com", PrimaryWindow: WindowSummary{UsedPercent: 12}, SecondaryWindow: WindowSummary{UsedPercent: 18}}},
+				primary:  &fakeSource{name: "primary-active", out: &Summary{AccountEmail: "active@example.com", WeeklyWindow: WindowSummary{UsedPercent: 18}}},
 				fallback: &fakeSource{name: "fallback-active"},
 			},
 		},
@@ -1206,19 +1131,19 @@ func TestFetcherUpdatesWindowCardsWhenActiveHomeSwitches(t *testing.T) {
 		accounts: []accountFetcher{
 			{
 				account:  MonitorAccount{Label: "a", CodexHome: "/a"},
-				primary:  &fakeSource{name: "primary-a", out: &Summary{AccountEmail: "a@example.com", PrimaryWindow: WindowSummary{UsedPercent: 11}, SecondaryWindow: WindowSummary{UsedPercent: 12}}},
+				primary:  &fakeSource{name: "primary-a", out: &Summary{AccountEmail: "a@example.com", WeeklyWindow: WindowSummary{UsedPercent: 12}}},
 				fallback: &fakeSource{name: "fallback-a"},
 			},
 			{
 				account:  MonitorAccount{Label: "b", CodexHome: "/b"},
-				primary:  &fakeSource{name: "primary-b", out: &Summary{AccountEmail: "b@example.com", PrimaryWindow: WindowSummary{UsedPercent: 65}, SecondaryWindow: WindowSummary{UsedPercent: 99}}},
+				primary:  &fakeSource{name: "primary-b", out: &Summary{AccountEmail: "b@example.com", WeeklyWindow: WindowSummary{UsedPercent: 99}}},
 				fallback: &fakeSource{name: "fallback-b"},
 			},
 		},
 		observed: fakeEstimator{
 			values: map[string]ObservedTokenEstimate{
-				"/a": {Window5h: ObservedTokenBreakdown{Total: 1}, WindowWeekly: ObservedTokenBreakdown{Total: 2}, Status: observedTokensStatusEstimated},
-				"/b": {Window5h: ObservedTokenBreakdown{Total: 3}, WindowWeekly: ObservedTokenBreakdown{Total: 4}, Status: observedTokensStatusEstimated},
+				"/a": {WindowWeekly: ObservedTokenBreakdown{Total: 2}, Status: observedTokensStatusEstimated},
+				"/b": {WindowWeekly: ObservedTokenBreakdown{Total: 4}, Status: observedTokensStatusEstimated},
 			},
 		},
 	}
@@ -1231,7 +1156,7 @@ func TestFetcherUpdatesWindowCardsWhenActiveHomeSwitches(t *testing.T) {
 	if first.AccountEmail != "a@example.com" || first.WindowAccountLabel != "a" {
 		t.Fatalf("expected first fetch to follow account a, got email=%q label=%q", first.AccountEmail, first.WindowAccountLabel)
 	}
-	if first.SecondaryWindow.UsedPercent != 12 {
+	if first.WeeklyWindow.UsedPercent != 12 {
 		t.Fatalf("expected first window values from account a")
 	}
 
@@ -1243,7 +1168,7 @@ func TestFetcherUpdatesWindowCardsWhenActiveHomeSwitches(t *testing.T) {
 	if second.AccountEmail != "b@example.com" || second.WindowAccountLabel != "b" {
 		t.Fatalf("expected second fetch to follow account b, got email=%q label=%q", second.AccountEmail, second.WindowAccountLabel)
 	}
-	if second.SecondaryWindow.UsedPercent != 99 {
+	if second.WeeklyWindow.UsedPercent != 99 {
 		t.Fatalf("expected second window values from account b")
 	}
 }
@@ -1257,19 +1182,19 @@ func TestFetcherMarksWindowUnavailableWhenActiveHomeMissing(t *testing.T) {
 		accounts: []accountFetcher{
 			{
 				account:  MonitorAccount{Label: "a", CodexHome: "/a"},
-				primary:  &fakeSource{name: "primary-a", out: &Summary{AccountEmail: "a@example.com", PrimaryWindow: WindowSummary{UsedPercent: 10}, SecondaryWindow: WindowSummary{UsedPercent: 20}}},
+				primary:  &fakeSource{name: "primary-a", out: &Summary{AccountEmail: "a@example.com", WeeklyWindow: WindowSummary{UsedPercent: 20}}},
 				fallback: &fakeSource{name: "fallback-a"},
 			},
 			{
 				account:  MonitorAccount{Label: "b", CodexHome: "/b"},
-				primary:  &fakeSource{name: "primary-b", out: &Summary{AccountEmail: "b@example.com", PrimaryWindow: WindowSummary{UsedPercent: 25}, SecondaryWindow: WindowSummary{UsedPercent: 70}}},
+				primary:  &fakeSource{name: "primary-b", out: &Summary{AccountEmail: "b@example.com", WeeklyWindow: WindowSummary{UsedPercent: 70}}},
 				fallback: &fakeSource{name: "fallback-b"},
 			},
 		},
 		observed: fakeEstimator{
 			values: map[string]ObservedTokenEstimate{
-				"/a": {Window5h: ObservedTokenBreakdown{Total: 1}, WindowWeekly: ObservedTokenBreakdown{Total: 2}, Status: observedTokensStatusEstimated},
-				"/b": {Window5h: ObservedTokenBreakdown{Total: 3}, WindowWeekly: ObservedTokenBreakdown{Total: 4}, Status: observedTokensStatusEstimated},
+				"/a": {WindowWeekly: ObservedTokenBreakdown{Total: 2}, Status: observedTokensStatusEstimated},
+				"/b": {WindowWeekly: ObservedTokenBreakdown{Total: 4}, Status: observedTokensStatusEstimated},
 			},
 		},
 	}
@@ -1300,9 +1225,7 @@ func TestFetcherExplainsHowToIncludeDefaultHome(t *testing.T) {
 	f := &Fetcher{
 		accounts: []accountFetcher{{
 			account: MonitorAccount{Label: "profile", CodexHome: "/profile"},
-			primary: &fakeSource{name: "primary", out: &Summary{
-				PrimaryWindow: WindowSummary{UsedPercent: 10}, SecondaryWindow: WindowSummary{UsedPercent: 20},
-			}},
+			primary: &fakeSource{name: "primary", out: &Summary{WeeklyWindow: WindowSummary{UsedPercent: 20}}},
 		}},
 	}
 	out, err := f.Fetch(context.Background())
@@ -1360,17 +1283,15 @@ func TestFetcherRandomizedSelectionAndCountInvariants(t *testing.T) {
 			homes[i] = home
 
 			id := identityPool[rng.Intn(len(identityPool))]
-			primaryWindow := WindowSummary{UsedPercent: rng.Intn(101)}
-			secondaryWindow := WindowSummary{UsedPercent: rng.Intn(101)}
+			weeklyWindow := WindowSummary{UsedPercent: rng.Intn(101)}
 			summary := &Summary{
-				Source:          "app-server",
-				PlanType:        "pro",
-				AccountEmail:    id.email,
-				AccountID:       id.accountID,
-				UserID:          id.userID,
-				PrimaryWindow:   primaryWindow,
-				SecondaryWindow: secondaryWindow,
-				FetchedAt:       time.Date(2026, 2, 27, 0, 0, i, 0, time.UTC),
+				Source:       "app-server",
+				PlanType:     "pro",
+				AccountEmail: id.email,
+				AccountID:    id.accountID,
+				UserID:       id.userID,
+				WeeklyWindow: weeklyWindow,
+				FetchedAt:    time.Date(2026, 2, 27, 0, 0, i, 0, time.UTC),
 			}
 
 			fail := rng.Intn(5) == 0
@@ -1385,9 +1306,6 @@ func TestFetcherRandomizedSelectionAndCountInvariants(t *testing.T) {
 
 			observedValues[home] = ObservedTokenEstimate{
 				Status: observedTokensStatusEstimated,
-				Window5h: ObservedTokenBreakdown{
-					Total: int64(100 + rng.Intn(900)),
-				},
 				WindowWeekly: ObservedTokenBreakdown{
 					Total: int64(1000 + rng.Intn(9000)),
 				},
@@ -1426,9 +1344,8 @@ func TestFetcherRandomizedSelectionAndCountInvariants(t *testing.T) {
 		totalIdentities := map[string]struct{}{}
 		successfulIdentities := map[string]struct{}{}
 		var activeSummary *Summary
-		expectedObserved5h := int64(0)
 		expectedObserved1w := int64(0)
-		observedByIdentity := map[string]observedWindowPair{}
+		observedByIdentity := map[string]ObservedTokenBreakdown{}
 
 		for idx, account := range fetchers {
 			home := account.account.CodexHome
@@ -1450,15 +1367,10 @@ func TestFetcherRandomizedSelectionAndCountInvariants(t *testing.T) {
 				successfulIdentities[key] = struct{}{}
 			}
 			observed := observedValues[home]
-			prev := observedByIdentity[key]
-			observedByIdentity[key] = addObservedPairs(prev, observedWindowPair{
-				Window5h:     observed.Window5h,
-				WindowWeekly: observed.WindowWeekly,
-			})
+			observedByIdentity[key] = addBreakdowns(observedByIdentity[key], observed.WindowWeekly)
 		}
-		for _, pair := range observedByIdentity {
-			expectedObserved5h += pair.Window5h.Total
-			expectedObserved1w += pair.WindowWeekly.Total
+		for _, weekly := range observedByIdentity {
+			expectedObserved1w += weekly.Total
 		}
 
 		if out.TotalAccounts != len(totalIdentities) {
@@ -1469,9 +1381,6 @@ func TestFetcherRandomizedSelectionAndCountInvariants(t *testing.T) {
 		}
 		if len(out.Accounts) != len(totalIdentities) {
 			t.Fatalf("iter %d: expected account row count %d, got %d", iter, len(totalIdentities), len(out.Accounts))
-		}
-		if out.ObservedTokens5h == nil || *out.ObservedTokens5h != expectedObserved5h {
-			t.Fatalf("iter %d: expected observed 5h %d, got %+v", iter, expectedObserved5h, out.ObservedTokens5h)
 		}
 		if out.ObservedTokensWeekly == nil || *out.ObservedTokensWeekly != expectedObserved1w {
 			t.Fatalf("iter %d: expected observed weekly %d, got %+v", iter, expectedObserved1w, out.ObservedTokensWeekly)
@@ -1484,14 +1393,11 @@ func TestFetcherRandomizedSelectionAndCountInvariants(t *testing.T) {
 			if out.AccountEmail != activeSummary.AccountEmail {
 				t.Fatalf("iter %d: expected active account email %q, got %q", iter, activeSummary.AccountEmail, out.AccountEmail)
 			}
-			if out.PrimaryWindow.UsedPercent != activeSummary.PrimaryWindow.UsedPercent ||
-				out.SecondaryWindow.UsedPercent != activeSummary.SecondaryWindow.UsedPercent {
-				t.Fatalf("iter %d: expected active window pair %d/%d, got %d/%d",
+			if out.WeeklyWindow.UsedPercent != activeSummary.WeeklyWindow.UsedPercent {
+				t.Fatalf("iter %d: expected active weekly window %d, got %d",
 					iter,
-					activeSummary.PrimaryWindow.UsedPercent,
-					activeSummary.SecondaryWindow.UsedPercent,
-					out.PrimaryWindow.UsedPercent,
-					out.SecondaryWindow.UsedPercent,
+					activeSummary.WeeklyWindow.UsedPercent,
+					out.WeeklyWindow.UsedPercent,
 				)
 			}
 		} else {

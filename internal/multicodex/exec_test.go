@@ -21,11 +21,10 @@ func TestCmdExecRunsCodexExecWithSelectedProfile(t *testing.T) {
 	createExecProfiles(t, app, "alpha", "beta")
 
 	originalSelector := defaultExecAccountSelector
-	defaultExecAccountSelector = func(context.Context, []usage.MonitorAccount, int, string) (usage.SelectedAccount, error) {
+	defaultExecAccountSelector = func(context.Context, []usage.MonitorAccount, string) (usage.SelectedAccount, error) {
 		return usage.SelectedAccount{
-			Account:              usage.MonitorAccount{Label: "beta"},
-			PrimaryUsedPercent:   15,
-			SecondaryUsedPercent: 10,
+			Account:           usage.MonitorAccount{Label: "beta"},
+			WeeklyUsedPercent: 10,
 		}, nil
 	}
 	defer func() { defaultExecAccountSelector = originalSelector }()
@@ -52,7 +51,7 @@ func TestCmdExecRunsCodexExecWithDefaultReserveAccount(t *testing.T) {
 	createExecProfiles(t, app, "alpha")
 
 	originalSelector := defaultExecAccountSelector
-	defaultExecAccountSelector = func(_ context.Context, accounts []usage.MonitorAccount, _ int, _ string) (usage.SelectedAccount, error) {
+	defaultExecAccountSelector = func(_ context.Context, accounts []usage.MonitorAccount, _ string) (usage.SelectedAccount, error) {
 		var defaultAccount usage.MonitorAccount
 		var profileAccount usage.MonitorAccount
 		for _, account := range accounts {
@@ -79,9 +78,8 @@ func TestCmdExecRunsCodexExecWithDefaultReserveAccount(t *testing.T) {
 			t.Fatalf("expected default reserve account not to use app-server without profile validation, got %#v", defaultAccount)
 		}
 		return usage.SelectedAccount{
-			Account:              defaultAccount,
-			PrimaryUsedPercent:   5,
-			SecondaryUsedPercent: 5,
+			Account:           defaultAccount,
+			WeeklyUsedPercent: 5,
 		}, nil
 	}
 	defer func() { defaultExecAccountSelector = originalSelector }()
@@ -108,11 +106,10 @@ func TestCmdExecWritesSelectedProfileMetadata(t *testing.T) {
 	createExecProfiles(t, app, "alpha", "beta")
 
 	originalSelector := defaultExecAccountSelector
-	defaultExecAccountSelector = func(context.Context, []usage.MonitorAccount, int, string) (usage.SelectedAccount, error) {
+	defaultExecAccountSelector = func(context.Context, []usage.MonitorAccount, string) (usage.SelectedAccount, error) {
 		return usage.SelectedAccount{
-			Account:              usage.MonitorAccount{Label: "beta"},
-			PrimaryUsedPercent:   15,
-			SecondaryUsedPercent: 10,
+			Account:           usage.MonitorAccount{Label: "beta"},
+			WeeklyUsedPercent: 10,
 		}, nil
 	}
 	defer func() { defaultExecAccountSelector = originalSelector }()
@@ -129,10 +126,9 @@ func TestCmdExecWritesSelectedProfileMetadata(t *testing.T) {
 		t.Fatalf("read metadata: %v", err)
 	}
 	var payload struct {
-		Profile              string `json:"profile"`
-		SelectionSource      string `json:"selection_source"`
-		PrimaryUsedPercent   *int   `json:"primary_used_percent"`
-		SecondaryUsedPercent *int   `json:"secondary_used_percent"`
+		Profile           string `json:"profile"`
+		SelectionSource   string `json:"selection_source"`
+		WeeklyUsedPercent *int   `json:"weekly_used_percent"`
 	}
 	if err := json.Unmarshal(data, &payload); err != nil {
 		t.Fatalf("unmarshal metadata: %v", err)
@@ -143,11 +139,11 @@ func TestCmdExecWritesSelectedProfileMetadata(t *testing.T) {
 	if payload.SelectionSource != "usage_selector" {
 		t.Fatalf("expected selection source usage_selector, got %q", payload.SelectionSource)
 	}
-	if payload.PrimaryUsedPercent == nil || *payload.PrimaryUsedPercent != 15 {
-		t.Fatalf("expected primary_used_percent 15, got %v", payload.PrimaryUsedPercent)
+	if payload.WeeklyUsedPercent == nil || *payload.WeeklyUsedPercent != 10 {
+		t.Fatalf("expected weekly_used_percent 10, got %v", payload.WeeklyUsedPercent)
 	}
-	if payload.SecondaryUsedPercent == nil || *payload.SecondaryUsedPercent != 10 {
-		t.Fatalf("expected secondary_used_percent 10, got %v", payload.SecondaryUsedPercent)
+	if strings.Contains(string(data), "primary_used_percent") || strings.Contains(string(data), "secondary_used_percent") {
+		t.Fatalf("did not expect old percent fields in metadata: %s", data)
 	}
 }
 
@@ -178,7 +174,7 @@ func TestCmdExecFailsWhenSharedConfigDoesNotUseFileStore(t *testing.T) {
 
 	selectorCalled := false
 	originalSelector := defaultExecAccountSelector
-	defaultExecAccountSelector = func(context.Context, []usage.MonitorAccount, int, string) (usage.SelectedAccount, error) {
+	defaultExecAccountSelector = func(context.Context, []usage.MonitorAccount, string) (usage.SelectedAccount, error) {
 		selectorCalled = true
 		return usage.SelectedAccount{Account: usage.MonitorAccount{Label: "alpha"}}, nil
 	}
@@ -217,7 +213,7 @@ func TestCmdExecRejectsUnsafeAuthBeforeSelection(t *testing.T) {
 
 	selectorCalled := false
 	originalSelector := defaultExecAccountSelector
-	defaultExecAccountSelector = func(context.Context, []usage.MonitorAccount, int, string) (usage.SelectedAccount, error) {
+	defaultExecAccountSelector = func(context.Context, []usage.MonitorAccount, string) (usage.SelectedAccount, error) {
 		selectorCalled = true
 		return usage.SelectedAccount{Account: usage.MonitorAccount{Label: "alpha"}}, nil
 	}
@@ -249,7 +245,7 @@ func TestCmdExecPreparesMissingProfileBeforeSelection(t *testing.T) {
 
 	selectorCalled := false
 	originalSelector := defaultExecAccountSelector
-	defaultExecAccountSelector = func(context.Context, []usage.MonitorAccount, int, string) (usage.SelectedAccount, error) {
+	defaultExecAccountSelector = func(context.Context, []usage.MonitorAccount, string) (usage.SelectedAccount, error) {
 		selectorCalled = true
 		return usage.SelectedAccount{Account: usage.MonitorAccount{Label: "alpha"}}, nil
 	}
@@ -335,14 +331,11 @@ func TestSelectExecProfilePassesModelToSelector(t *testing.T) {
 
 	model := "gpt-5-codex-spark"
 	calledWith := ""
-	calledGreenMax := 0
-	selected, err := app.selectExecProfile(cfg, func(_ context.Context, _ []usage.MonitorAccount, greenPrimaryMaxPercent int, selectedModel string) (usage.SelectedAccount, error) {
+	selected, err := app.selectExecProfile(cfg, func(_ context.Context, _ []usage.MonitorAccount, selectedModel string) (usage.SelectedAccount, error) {
 		calledWith = selectedModel
-		calledGreenMax = greenPrimaryMaxPercent
 		return usage.SelectedAccount{
-			Account:              usage.MonitorAccount{Label: "alpha"},
-			PrimaryUsedPercent:   10,
-			SecondaryUsedPercent: 20,
+			Account:           usage.MonitorAccount{Label: "alpha"},
+			WeeklyUsedPercent: 20,
 		}, nil
 	}, model)
 	if err != nil {
@@ -353,9 +346,6 @@ func TestSelectExecProfilePassesModelToSelector(t *testing.T) {
 	}
 	if calledWith != model {
 		t.Fatalf("expected selector called with %q model, got %q", model, calledWith)
-	}
-	if calledGreenMax != 40 {
-		t.Fatalf("expected selector called with 40%% green primary limit, got %d", calledGreenMax)
 	}
 }
 
@@ -375,8 +365,8 @@ func TestCmdExecSelectsBestProfileUsingDefaultSelector(t *testing.T) {
 		t.Fatalf("read log: %v", err)
 	}
 	log := string(data)
-	if !strings.Contains(log, "profile=beta") {
-		t.Fatalf("expected beta profile from default selector, got %q", log)
+	if !strings.Contains(log, "profile=gamma") {
+		t.Fatalf("expected gamma with the soonest weekly reset, got %q", log)
 	}
 	if !strings.Contains(log, "arg[2]=prompt with spaces") {
 		t.Fatalf("expected prompt arg to pass through unchanged, got %q", log)
@@ -402,8 +392,8 @@ func TestCmdExecSkipsWeeklyExhaustedProfileUsingDefaultSelector(t *testing.T) {
 		t.Fatalf("read log: %v", err)
 	}
 	log := string(data)
-	if !strings.Contains(log, "profile=beta") {
-		t.Fatalf("expected beta profile from default selector, got %q", log)
+	if !strings.Contains(log, "profile=gamma") {
+		t.Fatalf("expected usable gamma with the soonest weekly reset, got %q", log)
 	}
 
 	metadata, err := os.ReadFile(metadataPath)
@@ -411,25 +401,21 @@ func TestCmdExecSkipsWeeklyExhaustedProfileUsingDefaultSelector(t *testing.T) {
 		t.Fatalf("read metadata: %v", err)
 	}
 	var payload struct {
-		Profile              string `json:"profile"`
-		SelectionSource      string `json:"selection_source"`
-		PrimaryUsedPercent   *int   `json:"primary_used_percent"`
-		SecondaryUsedPercent *int   `json:"secondary_used_percent"`
+		Profile           string `json:"profile"`
+		SelectionSource   string `json:"selection_source"`
+		WeeklyUsedPercent *int   `json:"weekly_used_percent"`
 	}
 	if err := json.Unmarshal(metadata, &payload); err != nil {
 		t.Fatalf("unmarshal metadata: %v", err)
 	}
-	if payload.Profile != "beta" {
-		t.Fatalf("expected selected profile beta, got %q", payload.Profile)
+	if payload.Profile != "gamma" {
+		t.Fatalf("expected selected profile gamma, got %q", payload.Profile)
 	}
 	if payload.SelectionSource != "usage_selector" {
 		t.Fatalf("expected selection source usage_selector, got %q", payload.SelectionSource)
 	}
-	if payload.PrimaryUsedPercent == nil || *payload.PrimaryUsedPercent != 0 {
-		t.Fatalf("expected primary_used_percent 0, got %v", payload.PrimaryUsedPercent)
-	}
-	if payload.SecondaryUsedPercent == nil || *payload.SecondaryUsedPercent != 85 {
-		t.Fatalf("expected secondary_used_percent 85, got %v", payload.SecondaryUsedPercent)
+	if payload.WeeklyUsedPercent == nil || *payload.WeeklyUsedPercent != 10 {
+		t.Fatalf("expected weekly_used_percent 10, got %v", payload.WeeklyUsedPercent)
 	}
 }
 
@@ -564,14 +550,13 @@ func TestCmdExecTreatsFlagsAfterTerminatorAsPromptText(t *testing.T) {
 	createExecProfiles(t, app, "alpha")
 
 	originalSelector := defaultExecAccountSelector
-	defaultExecAccountSelector = func(_ context.Context, _ []usage.MonitorAccount, _ int, model string) (usage.SelectedAccount, error) {
+	defaultExecAccountSelector = func(_ context.Context, _ []usage.MonitorAccount, model string) (usage.SelectedAccount, error) {
 		if model != "" {
 			t.Fatalf("expected args after -- not to be parsed as model, got %q", model)
 		}
 		return usage.SelectedAccount{
-			Account:              usage.MonitorAccount{Label: "alpha"},
-			PrimaryUsedPercent:   15,
-			SecondaryUsedPercent: 10,
+			Account:           usage.MonitorAccount{Label: "alpha"},
+			WeeklyUsedPercent: 10,
 		}, nil
 	}
 	defer func() { defaultExecAccountSelector = originalSelector }()
@@ -602,7 +587,7 @@ func TestSelectExecProfileReturnsErrorWhenSelectionFails(t *testing.T) {
 		t.Fatalf("loadConfigIfExists: %v", err)
 	}
 
-	selected, err := app.selectExecProfile(cfg, func(context.Context, []usage.MonitorAccount, int, string) (usage.SelectedAccount, error) {
+	selected, err := app.selectExecProfile(cfg, func(context.Context, []usage.MonitorAccount, string) (usage.SelectedAccount, error) {
 		return usage.SelectedAccount{}, errors.New("boom")
 	}, "")
 	if err == nil {
@@ -619,7 +604,7 @@ func TestSelectExecProfileReturnsErrorForOnlyProfileWhenSelectionFails(t *testin
 		t.Fatalf("loadConfigIfExists: %v", err)
 	}
 
-	selected, err := app.selectExecProfile(cfg, func(context.Context, []usage.MonitorAccount, int, string) (usage.SelectedAccount, error) {
+	selected, err := app.selectExecProfile(cfg, func(context.Context, []usage.MonitorAccount, string) (usage.SelectedAccount, error) {
 		return usage.SelectedAccount{}, errors.New("boom")
 	}, "")
 	if err == nil {
@@ -636,7 +621,7 @@ func TestSelectExecProfileReturnsErrorForSparkModelWhenNoModelWindowAvailable(t 
 		t.Fatalf("loadConfigIfExists: %v", err)
 	}
 
-	selected, err := app.selectExecProfile(cfg, func(context.Context, []usage.MonitorAccount, int, string) (usage.SelectedAccount, error) {
+	selected, err := app.selectExecProfile(cfg, func(context.Context, []usage.MonitorAccount, string) (usage.SelectedAccount, error) {
 		return usage.SelectedAccount{}, errors.New("usage selection failed")
 	}, "gpt-5-codex-spark")
 	if err == nil {
@@ -649,7 +634,7 @@ func TestCmdExecReturnsErrorWhenUsageSelectionFails(t *testing.T) {
 	createExecProfiles(t, app, "alpha", "beta")
 
 	originalSelector := defaultExecAccountSelector
-	defaultExecAccountSelector = func(context.Context, []usage.MonitorAccount, int, string) (usage.SelectedAccount, error) {
+	defaultExecAccountSelector = func(context.Context, []usage.MonitorAccount, string) (usage.SelectedAccount, error) {
 		return usage.SelectedAccount{}, errors.New("boom")
 	}
 	defer func() { defaultExecAccountSelector = originalSelector }()
@@ -678,7 +663,7 @@ func TestCmdExecRejectsAnyInvalidConfiguredProfileBeforeSelection(t *testing.T) 
 
 	selectorCalled := false
 	originalSelector := defaultExecAccountSelector
-	defaultExecAccountSelector = func(context.Context, []usage.MonitorAccount, int, string) (usage.SelectedAccount, error) {
+	defaultExecAccountSelector = func(context.Context, []usage.MonitorAccount, string) (usage.SelectedAccount, error) {
 		selectorCalled = true
 		return usage.SelectedAccount{}, nil
 	}
@@ -714,7 +699,7 @@ func TestCmdExecFailsBeforeSelectionWhenNoProfilesAreReady(t *testing.T) {
 
 	selectorCalled := false
 	originalSelector := defaultExecAccountSelector
-	defaultExecAccountSelector = func(context.Context, []usage.MonitorAccount, int, string) (usage.SelectedAccount, error) {
+	defaultExecAccountSelector = func(context.Context, []usage.MonitorAccount, string) (usage.SelectedAccount, error) {
 		selectorCalled = true
 		return usage.SelectedAccount{}, nil
 	}
@@ -744,11 +729,10 @@ func TestSelectExecProfilePersistsUsageSelectionMetadata(t *testing.T) {
 		t.Fatalf("loadConfigIfExists: %v", err)
 	}
 
-	selected, err := app.selectExecProfile(cfg, func(context.Context, []usage.MonitorAccount, int, string) (usage.SelectedAccount, error) {
+	selected, err := app.selectExecProfile(cfg, func(context.Context, []usage.MonitorAccount, string) (usage.SelectedAccount, error) {
 		return usage.SelectedAccount{
-			Account:              usage.MonitorAccount{Label: "beta"},
-			PrimaryUsedPercent:   39,
-			SecondaryUsedPercent: 7,
+			Account:           usage.MonitorAccount{Label: "beta"},
+			WeeklyUsedPercent: 7,
 		}, nil
 	}, "")
 	if err != nil {
@@ -760,11 +744,8 @@ func TestSelectExecProfilePersistsUsageSelectionMetadata(t *testing.T) {
 	if selected.Metadata.SelectionSource != "usage_selector" {
 		t.Fatalf("expected usage_selector selection source, got %q", selected.Metadata.SelectionSource)
 	}
-	if selected.Metadata.PrimaryUsedPercent == nil || *selected.Metadata.PrimaryUsedPercent != 39 {
-		t.Fatalf("expected primary_used_percent 39, got %v", selected.Metadata.PrimaryUsedPercent)
-	}
-	if selected.Metadata.SecondaryUsedPercent == nil || *selected.Metadata.SecondaryUsedPercent != 7 {
-		t.Fatalf("expected secondary_used_percent 7, got %v", selected.Metadata.SecondaryUsedPercent)
+	if selected.Metadata.WeeklyUsedPercent == nil || *selected.Metadata.WeeklyUsedPercent != 7 {
+		t.Fatalf("expected weekly_used_percent 7, got %v", selected.Metadata.WeeklyUsedPercent)
 	}
 }
 
@@ -970,7 +951,7 @@ usage_path = os.path.join(home, "usage.json")
 with open(usage_path, "r", encoding="utf-8") as fh:
     usage = json.load(fh)
 
-primary = int(usage["primary_used_percent"])
+primary = 0
 secondary = int(usage["weekly_used_percent"])
 email = usage.get("email", "")
 primary_resets_at = usage.get("primary_resets_at")
@@ -1061,11 +1042,10 @@ func (t execSelectionOAuthTransport) RoundTrip(req *http.Request) (*http.Respons
 		return nil, err
 	}
 	var usage struct {
-		PrimaryUsedPercent int    `json:"primary_used_percent"`
-		WeeklyUsedPercent  int    `json:"weekly_used_percent"`
-		Email              string `json:"email"`
-		PrimaryResetsAt    int64  `json:"primary_resets_at"`
-		SecondaryResetsAt  int64  `json:"secondary_resets_at"`
+		WeeklyUsedPercent int    `json:"weekly_used_percent"`
+		Email             string `json:"email"`
+		PrimaryResetsAt   int64  `json:"primary_resets_at"`
+		SecondaryResetsAt int64  `json:"secondary_resets_at"`
 	}
 	if err := json.Unmarshal(data, &usage); err != nil {
 		return nil, err
@@ -1079,7 +1059,7 @@ func (t execSelectionOAuthTransport) RoundTrip(req *http.Request) (*http.Respons
   }
 }`,
 		usage.Email,
-		usage.PrimaryUsedPercent,
+		0,
 		usage.PrimaryResetsAt,
 		usage.WeeklyUsedPercent,
 		usage.SecondaryResetsAt,
@@ -1117,7 +1097,7 @@ func createTestProfiles(t *testing.T, app *App, names ...string) {
 	}
 }
 
-func writeExecSelectionProfileData(t *testing.T, root, name string, primaryUsed, weeklyUsed int, weeklyResetIn time.Duration) {
+func writeExecSelectionProfileData(t *testing.T, root, name string, _ int, weeklyUsed int, weeklyResetIn time.Duration) {
 	t.Helper()
 
 	home := filepath.Join(root, "multi", "profiles", name, "codex-home")
@@ -1126,8 +1106,7 @@ func writeExecSelectionProfileData(t *testing.T, root, name string, primaryUsed,
 	}
 	now := time.Now().UTC()
 	usageJSON := fmt.Sprintf(
-		`{"primary_used_percent": %d, "weekly_used_percent": %d, "email": "%s@example.com", "primary_resets_at": %d, "secondary_resets_at": %d}`,
-		primaryUsed,
+		`{"weekly_used_percent": %d, "email": "%s@example.com", "primary_resets_at": %d, "secondary_resets_at": %d}`,
 		weeklyUsed,
 		name,
 		now.Add(5*time.Hour).Unix(),
@@ -1138,7 +1117,7 @@ func writeExecSelectionProfileData(t *testing.T, root, name string, primaryUsed,
 	}
 }
 
-func writeExecSelectionDefaultData(t *testing.T, app *App, primaryUsed, weeklyUsed int, weeklyResetIn time.Duration) {
+func writeExecSelectionDefaultData(t *testing.T, app *App, _ int, weeklyUsed int, weeklyResetIn time.Duration) {
 	t.Helper()
 
 	home := app.store.paths.DefaultCodexHome
@@ -1150,8 +1129,7 @@ func writeExecSelectionDefaultData(t *testing.T, app *App, primaryUsed, weeklyUs
 	}
 	now := time.Now().UTC()
 	usageJSON := fmt.Sprintf(
-		`{"primary_used_percent": %d, "weekly_used_percent": %d, "email": "default@example.com", "primary_resets_at": %d, "secondary_resets_at": %d}`,
-		primaryUsed,
+		`{"weekly_used_percent": %d, "email": "default@example.com", "primary_resets_at": %d, "secondary_resets_at": %d}`,
 		weeklyUsed,
 		now.Add(5*time.Hour).Unix(),
 		now.Add(weeklyResetIn).Unix(),
