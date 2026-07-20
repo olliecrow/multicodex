@@ -40,6 +40,11 @@ func TestWeeklyAccountCardNarrowViewKeepsCoreValuesAndHidesDecoration(t *testing
 			t.Fatalf("expected narrow view to keep %q:\n%s", want, view)
 		}
 	}
+	for _, want := range []string{"multicodex", "healthy", "<1m", "12:00"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("expected narrow header to keep %q:\n%s", want, view)
+		}
+	}
 	if strings.Contains(view, "████") || strings.Contains(view, "Mon 20 Jul") {
 		t.Fatalf("expected narrow view to hide optional decoration:\n%s", view)
 	}
@@ -101,6 +106,7 @@ func TestFixtureLayoutMatrixFitsViewportAndPinsExitHint(t *testing.T) {
 				m.summary.Accounts = append(m.summary.Accounts, accountFixture(string(rune('a'+i)), 10+i, &reset, true))
 			}
 			view := ansi.Strip(m.View())
+			t.Logf("%s fixture:\n%s", tc.name, view)
 			assertViewport(t, view, tc.width, tc.height)
 			lines := strings.Split(view, "\n")
 			if !strings.Contains(lines[len(lines)-1], "Ctrl+C to exit") {
@@ -209,7 +215,7 @@ func TestFetchResultKeepsLastGoodWeeklyCardsAsStale(t *testing.T) {
 func TestHeaderAndFooterStayHumanFriendly(t *testing.T) {
 	m := fixtureModel(80, 16, true)
 	view := ansi.Strip(m.View())
-	for _, want := range []string{"multicodex monitor", "next refresh in", "local 2026-07-20 12:00", "Ctrl+C to exit"} {
+	for _, want := range []string{"multicodex monitor", "[refresh <1m]", "local 2026-07-20 12:00", "Ctrl+C to exit"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("expected %q in header/footer:\n%s", want, view)
 		}
