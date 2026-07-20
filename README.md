@@ -197,17 +197,19 @@ multicodex monitor doctor
 multicodex monitor completion
 ```
 
-By default, monitor account candidates come only from:
+By default, monitor account candidates come from:
 
+- the global Codex home (normally `~/.codex`), labeled `global`
 - explicit account file under `~/multicodex/monitor/accounts.json`
 - configured multicodex profiles from `~/multicodex/config.json`
 
 Additional sources are opt-in:
 
-- `--include-default` includes the default Codex home
 - `--include-active` includes the active `CODEX_HOME`
 - `--discover` scans compatible Codex homes from the local filesystem
 - `multicodex monitor doctor --app-server` also checks the raw Codex app-server source separately
+
+Pass `--include-default=false` to omit the global Codex home for one run. Explicit account-file labels and configured profile labels take priority when they point to the same home, so duplicate cards are not shown.
 
 For validated multicodex profile homes, the monitor asks the Codex app-server for usage first and falls back to direct OAuth from the profile home. This matches Codex CLI auth handling for logged-in profiles whose access token can still be refreshed. Other monitor account homes use direct OAuth unless they dedupe with a validated profile home.
 

@@ -26,7 +26,7 @@ func TestLoadMonitorAccountsEmptyWhenFileMissingAndNoProfiles(t *testing.T) {
 	}
 }
 
-func TestLoadMonitorAccountsDoesNotIncludeOptionalHomesByDefault(t *testing.T) {
+func TestLoadMonitorAccountsIncludesOnlyGlobalHomeByDefault(t *testing.T) {
 	tmp := t.TempDir()
 	defaultHome := filepath.Join(tmp, ".codex")
 	activeHome := filepath.Join(tmp, "active-codex")
@@ -52,8 +52,11 @@ func TestLoadMonitorAccountsDoesNotIncludeOptionalHomesByDefault(t *testing.T) {
 	if warning != "" {
 		t.Fatalf("expected no warning, got %q", warning)
 	}
-	if len(accounts) != 0 {
-		t.Fatalf("expected no optional homes by default, got %#v", accounts)
+	if len(accounts) != 1 {
+		t.Fatalf("expected only the global home by default, got %#v", accounts)
+	}
+	if accounts[0].Label != "global" || accounts[0].CodexHome != normalizeHome(defaultHome) {
+		t.Fatalf("expected global account for %q, got %#v", normalizeHome(defaultHome), accounts[0])
 	}
 }
 
@@ -72,7 +75,7 @@ func TestLoadMonitorAccountsUsesConfiguredDefaultCodexHome(t *testing.T) {
 	t.Setenv(multicodexHomeEnvVar, filepath.Join(tmp, defaultMulticodexHomeDirName))
 	t.Setenv(accountsFileEnvVar, filepath.Join(tmp, "missing.json"))
 
-	accounts, warning, err := loadMonitorAccountsWithOptions(MonitorAccountOptions{IncludeDefault: true})
+	accounts, warning, err := loadMonitorAccounts()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -82,11 +85,38 @@ func TestLoadMonitorAccountsUsesConfiguredDefaultCodexHome(t *testing.T) {
 	if len(accounts) != 1 {
 		t.Fatalf("expected one default account, got %#v", accounts)
 	}
-	if accounts[0].Label != "default" {
-		t.Fatalf("expected default label, got %q", accounts[0].Label)
+	if accounts[0].Label != "global" {
+		t.Fatalf("expected global label, got %q", accounts[0].Label)
 	}
 	if accounts[0].CodexHome != normalizeHome(configuredHome) {
 		t.Fatalf("expected configured default codex home %q, got %q", normalizeHome(configuredHome), accounts[0].CodexHome)
+	}
+}
+
+func TestLoadMonitorAccountsCanExcludeGlobalHome(t *testing.T) {
+	tmp := t.TempDir()
+	defaultHome := filepath.Join(tmp, ".codex")
+	if err := os.MkdirAll(defaultHome, 0o700); err != nil {
+		t.Fatalf("mkdir default home: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(defaultHome, "auth.json"), []byte(`{"tokens":{"access_token":"x"}}`), 0o600); err != nil {
+		t.Fatalf("write default auth: %v", err)
+	}
+	t.Setenv("HOME", tmp)
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv(defaultCodexHomeEnvVar, defaultHome)
+	t.Setenv(multicodexHomeEnvVar, filepath.Join(tmp, defaultMulticodexHomeDirName))
+	t.Setenv(accountsFileEnvVar, filepath.Join(tmp, "missing.json"))
+
+	accounts, warning, err := loadMonitorAccountsWithOptions(MonitorAccountOptions{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if warning != "" {
+		t.Fatalf("expected no warning, got %q", warning)
+	}
+	if len(accounts) != 0 {
+		t.Fatalf("expected the global home to be excluded, got %#v", accounts)
 	}
 }
 
@@ -151,8 +181,8 @@ func TestLoadMonitorAccountsPrefersConfiguredDefaultOverActiveCodexHome(t *testi
 		byLabel[account.Label] = account.CodexHome
 	}
 	expectedConfiguredHome := normalizeHome(configuredHome)
-	if byLabel["default"] != expectedConfiguredHome {
-		t.Fatalf("expected default account from configured home %q, got %q", expectedConfiguredHome, byLabel["default"])
+	if byLabel["global"] != expectedConfiguredHome {
+		t.Fatalf("expected global account from configured home %q, got %q", expectedConfiguredHome, byLabel["global"])
 	}
 	expectedActiveHome := normalizeHome(activeHome)
 	if byLabel["active"] != expectedActiveHome {

@@ -98,8 +98,9 @@ Multicodex intentionally has no command for changing the shared default Codex ac
 - Runs a live terminal UI for Codex subscription usage.
 - Defaults to the integrated monitor UI when no monitor subcommand is provided.
 - Defaults both poll interval and per-poll fetch timeout to 60 seconds.
-- By default, builds account candidates only from monitor-owned account overrides and configured multicodex profiles.
-- Supports opt-in account sources with `--include-default`, `--include-active`, and `--discover`.
+- By default, builds account candidates from the global Codex home, monitor-owned account overrides, and configured multicodex profiles.
+- Labels the global Codex home `global` and accepts `--include-default=false` to omit it for one run.
+- Supports opt-in account sources with `--include-active` and `--discover`.
 - Uses Codex app-server usage fetches for validated multicodex profile homes, with direct OAuth as fallback.
 - Uses direct OAuth for other monitor account homes unless they dedupe with a validated profile home.
 - Extracts official weekly windows by their declared 10,080-minute duration, with a narrow older-response fallback that treats an undeclared secondary window as weekly.
@@ -120,9 +121,9 @@ Multicodex intentionally has no command for changing the shared default Codex ac
 `multicodex monitor doctor`
 - Runs read-only monitor setup and source checks.
 - Supports JSON output.
-- Checks configured monitor accounts and configured multicodex profiles by default.
+- Checks the global Codex home, configured monitor accounts, and configured multicodex profiles by default.
 - Uses the normal source policy by default: app-server first for validated profile homes, direct OAuth for other homes.
-- Adds default Codex home, active `CODEX_HOME`, filesystem discovery, or raw app-server checks only when the caller passes `--include-default`, `--include-active`, `--discover`, or `--app-server`.
+- Accepts `--include-default=false` to omit the global Codex home, and adds active `CODEX_HOME`, filesystem discovery, or raw app-server checks only when the caller passes `--include-active`, `--discover`, or `--app-server`.
 - Exits success when at least one usage fetch works and fails when no usage fetch works.
 - Reports degraded status when at least one usage fetch works but another usage fetch or setup check fails.
 

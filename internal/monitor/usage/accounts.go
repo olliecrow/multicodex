@@ -53,7 +53,7 @@ type multicodexConfigFile struct {
 }
 
 func loadMonitorAccounts() ([]MonitorAccount, string, error) {
-	return loadMonitorAccountsWithOptions(MonitorAccountOptions{})
+	return loadMonitorAccountsWithOptions(MonitorAccountOptions{IncludeDefault: true})
 }
 
 func loadMonitorAccountsWithOptions(options MonitorAccountOptions) ([]MonitorAccount, string, error) {
@@ -64,7 +64,7 @@ func loadMonitorAccountsWithOptions(options MonitorAccountOptions) ([]MonitorAcc
 		if err != nil {
 			return nil, "", err
 		}
-		collector.add("default", defaultHome, 50, false, false)
+		collector.add("global", defaultHome, 50, false, false)
 	}
 
 	if options.IncludeActive {
@@ -649,7 +649,7 @@ func labelForDiscoveredHome(codexHome string) string {
 		}
 	case strings.HasPrefix(base, ".codex"):
 		if base == ".codex" {
-			return "default"
+			return "global"
 		}
 		return safeLabel(strings.TrimPrefix(base, "."))
 	}
