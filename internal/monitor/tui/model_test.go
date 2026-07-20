@@ -2,919 +2,292 @@ package tui
 
 import (
 	"context"
-	"math"
-	"strconv"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/olliecrow/multicodex/internal/monitor/usage"
 )
 
-func TestViewFitsViewportAcrossSizes(t *testing.T) {
-	sizes := []struct {
-		width  int
-		height int
-	}{
-		{60, 18},
-		{80, 22},
-		{100, 26},
-		{140, 34},
-	}
-
-	for _, s := range sizes {
-		t.Run(strconv.Itoa(s.width)+"x"+strconv.Itoa(s.height), func(t *testing.T) {
-			m := seededModel()
-			m.width = s.width
-			m.height = s.height
-			out := m.View()
-			lines := strings.Split(out, "\n")
-			if len(lines) != s.height {
-				t.Fatalf("expected %d lines, got %d", s.height, len(lines))
-			}
-			for i, line := range lines {
-				if lipgloss.Width(line) > s.width {
-					t.Fatalf("line %d exceeded width: got %d max %d", i+1, lipgloss.Width(line), s.width)
-				}
-			}
-		})
-	}
-}
-
-func TestMultiAccountViewFitsViewportAcrossSizes(t *testing.T) {
-	sizes := []struct {
-		width  int
-		height int
-	}{
-		{60, 18},
-		{80, 24},
-		{100, 28},
-		{140, 40},
-	}
-
-	for _, s := range sizes {
-		t.Run(strconv.Itoa(s.width)+"x"+strconv.Itoa(s.height), func(t *testing.T) {
-			m := seededMultiAccountModel()
-			m.width = s.width
-			m.height = s.height
-			out := m.View()
-			lines := strings.Split(out, "\n")
-			if len(lines) != s.height {
-				t.Fatalf("expected %d lines, got %d", s.height, len(lines))
-			}
-			for i, line := range lines {
-				if lipgloss.Width(line) > s.width {
-					t.Fatalf("line %d exceeded width: got %d max %d", i+1, lipgloss.Width(line), s.width)
-				}
-			}
-		})
-	}
-}
-
-func TestNarrowViewStillRendersCoreFields(t *testing.T) {
-	m := seededModel()
-	m.width = 42
-	m.height = 14
-	out := m.View()
-	t.Log(out)
-	if !strings.Contains(out, "five-hour window") {
-		t.Fatalf("expected five-hour section in output")
-	}
-	if !strings.Contains(out, "weekly window") {
-		t.Fatalf("expected weekly section in output")
-	}
-}
-
-func TestViewRendersWeeklyTokenSection(t *testing.T) {
-	m := seededModel()
-	m.width = 140
-	m.height = 40
-	total1w := int64(450000)
-	m.summary.ObservedTokensStatus = "estimated"
-	m.summary.ObservedTokensWeekly = &total1w
-	m.summary.ObservedWindowWeekly = &usage.ObservedTokenBreakdown{
-		Total:       total1w,
-		Input:       300000,
-		CachedInput: 200000,
-		Output:      150000,
-		HasSplit:    true,
-	}
-	out := m.View()
-	if strings.Contains(out, "five-hour token estimate [") {
-		t.Fatalf("did not expect five-hour token section in output")
-	}
-	if !strings.Contains(out, "weekly token estimate [ready] (sum across accounts):") {
-		t.Fatalf("expected aggregated weekly token line in output")
-	}
-	if !strings.Contains(out, "- total: 450k") {
-		t.Fatalf("expected weekly total bullet line")
-	}
-	if !strings.Contains(out, "- input: 300k") {
-		t.Fatalf("expected weekly input bullet line")
-	}
-	if !strings.Contains(out, "- output (reasoning): 0") {
-		t.Fatalf("expected weekly output(reasoning) bullet line")
-	}
-	if !strings.Contains(out, "- input (cached): 200k") {
-		t.Fatalf("expected weekly input(cached) bullet line")
-	}
-}
-
-func TestWindowTitlesShowAccountNameAndMetaOmitsCurrentAccountLine(t *testing.T) {
-	m := seededModel()
-	m.width = 120
-	m.height = 30
-	out := m.View()
-	if !strings.Contains(out, "five-hour window [me]") {
-		t.Fatalf("expected five-hour title to include account name")
-	}
-	if !strings.Contains(out, "weekly window [me]") {
-		t.Fatalf("expected weekly title to include account name")
-	}
-	if strings.Contains(out, "current account:") {
-		t.Fatalf("did not expect current account line in bottom metadata panel")
-	}
-}
-
-func TestWindowPanelsShowUnavailableWhenActiveWindowDataMissing(t *testing.T) {
-	m := seededModel()
-	m.width = 120
-	m.height = 28
-	m.summary.WindowDataAvailable = false
-	m.summary.AccountEmail = ""
-	out := m.View()
-	if !strings.Contains(out, "five-hour window [me]") {
-		t.Fatalf("expected active account name in five-hour title")
-	}
-	if !strings.Contains(out, "used: unavailable") {
-		t.Fatalf("expected unavailable used value")
-	}
-}
-
-func TestWindowPanelsAllowOnlyWeeklyWindowToBeUnavailable(t *testing.T) {
-	m := seededModel()
-	m.width = 120
-	m.height = 28
-	m.summary.SecondaryWindow = usage.WindowSummary{UsedPercent: -1}
-
-	out := m.View()
-	if !strings.Contains(out, "five-hour window [me]") {
-		t.Fatalf("expected active account name in five-hour title")
-	}
-	if !strings.Contains(out, "used: 41%") {
-		t.Fatalf("expected five-hour window to stay available")
-	}
-	if strings.Count(out, "used: unavailable") != 1 {
-		t.Fatalf("expected only one unavailable panel, got:\n%s", out)
-	}
-}
-
-func TestSingleAccountViewDoesNotRenderExtraAccountWindowRows(t *testing.T) {
-	m := seededModel()
-	m.width = 120
-	m.height = 30
-	now := m.now
-	m.summary.TotalAccounts = 1
-	m.summary.Accounts = []usage.AccountSummary{
-		{
-			Label:        "me",
-			AccountEmail: "me@example.com",
-			FetchedAt:    &now,
-		},
-	}
-
-	out := m.View()
-	if strings.Count(out, "five-hour window [") != 1 {
-		t.Fatalf("expected one five-hour window row, got:\n%s", out)
-	}
-	if strings.Count(out, "weekly window [") != 1 {
-		t.Fatalf("expected one weekly window row, got:\n%s", out)
-	}
-}
-
-func TestMultiAccountViewRendersOneWindowRowPerAccount(t *testing.T) {
-	m := seededMultiAccountModel()
-	m.width = 120
-	m.height = 40
-
-	out := m.View()
-	if strings.Count(out, "five-hour window [") != 3 {
-		t.Fatalf("expected one five-hour row per account, got:\n%s", out)
-	}
-	if strings.Count(out, "weekly window [") != 3 {
-		t.Fatalf("expected one weekly row per account, got:\n%s", out)
-	}
-	bravoIndex := strings.Index(out, "five-hour window [bravo]")
-	meIndex := strings.Index(out, "five-hour window [me]")
-	alphaIndex := strings.Index(out, "five-hour window [alpha]")
-	if bravoIndex < 0 || meIndex < 0 || alphaIndex < 0 {
-		t.Fatalf("expected all account rows, got:\n%s", out)
-	}
-	if !(bravoIndex < alphaIndex && alphaIndex < meIndex) {
-		t.Fatalf("expected account rows ordered by weekly reset, got:\n%s", out)
-	}
-}
-
-func TestMultiAccountViewRendersSparkUsageAsCompactSecondLine(t *testing.T) {
-	m := seededMultiAccountModel()
-	m.width = 140
-	m.height = 44
-
-	spark5hReset := m.now.Add(45 * time.Minute)
-	spark1wReset := m.now.Add(30 * time.Minute)
-	spark5hSec := int64(45 * 60)
-	spark1wSec := int64(30 * 60)
-	m.summary.RateLimitWindows = map[string]usage.RateLimitWindow{
-		"codex": {
-			LimitID: "codex",
-			PrimaryWindow: usage.WindowSummary{
-				UsedPercent:       41,
-				ResetsAt:          m.summary.PrimaryWindow.ResetsAt,
-				SecondsUntilReset: m.summary.PrimaryWindow.SecondsUntilReset,
-			},
-			SecondaryWindow: m.summary.SecondaryWindow,
-		},
-		"codex_bengalfox": {
-			LimitID:   "codex_bengalfox",
-			LimitName: "spark",
-			PrimaryWindow: usage.WindowSummary{
-				UsedPercent:       22,
-				ResetsAt:          &spark5hReset,
-				SecondsUntilReset: &spark5hSec,
-			},
-			SecondaryWindow: usage.WindowSummary{
-				UsedPercent:       66,
-				ResetsAt:          &spark1wReset,
-				SecondsUntilReset: &spark1wSec,
-			},
-		},
-	}
-
-	out := m.accountWindowRows()
-	if len(out) != 3 {
-		t.Fatalf("expected one window row per account, got %d", len(out))
-	}
-	var activeRow *accountWindowRow
-	for i := range out {
-		if out[i].name == "me" {
-			activeRow = &out[i]
-			break
-		}
-	}
-	if activeRow == nil {
-		t.Fatalf("expected active account row in output, got %#v", out)
-	}
-	if !activeRow.hasSparkWindow {
-		t.Fatalf("expected active account row to include spark windows")
-	}
-	if activeRow.sparkPrimaryWindow.UsedPercent != 22 {
-		t.Fatalf("expected spark primary usage to be preserved, got %d", activeRow.sparkPrimaryWindow.UsedPercent)
-	}
-	if activeRow.sparkSecondaryWindow.UsedPercent != 66 {
-		t.Fatalf("expected spark secondary usage to be preserved, got %d", activeRow.sparkSecondaryWindow.UsedPercent)
-	}
-	if activeRow.primaryWindow.UsedPercent != 41 {
-		t.Fatalf("expected primary default usage to remain codex bucket value, got %d", activeRow.primaryWindow.UsedPercent)
-	}
-
-	view := m.View()
-	if strings.Count(view, "five-hour window [me]") != 1 {
-		t.Fatalf("expected one five-hour row for active account, got:\n%s", view)
-	}
-	if strings.Contains(view, "five-hour window [me] [spark]") {
-		t.Fatalf("did not expect spark to appear in the title, got:\n%s", view)
-	}
-	if !strings.Contains(view, "used-spark: 22% [resets in 45m]") {
-		t.Fatalf("expected spark usage label with reset countdown in output, got:\n%s", view)
-	}
-	if !strings.Contains(view, "used-spark: 66% [resets in 30m]") {
-		t.Fatalf("expected spark weekly usage label with reset countdown in output, got:\n%s", view)
-	}
-}
-
-func TestMultiAccountViewDoesNotDuplicateFailedActiveAccountRow(t *testing.T) {
-	m := seededMultiAccountModel()
-	m.width = 120
-	m.height = 40
-	m.summary.WindowDataAvailable = false
-	m.summary.AccountEmail = ""
-	m.summary.WindowAccountLabel = "me"
-
-	out := m.View()
-	if strings.Count(out, "five-hour window [") != 3 {
-		t.Fatalf("expected unavailable active row plus two non-active rows, got:\n%s", out)
-	}
-	if strings.Count(out, "five-hour window [me]") != 1 {
-		t.Fatalf("expected failed active account to appear exactly once, got:\n%s", out)
-	}
-}
-
-func TestMultiAccountShortViewportKeepsAggregatePanelVisible(t *testing.T) {
-	m := seededMultiAccountModel()
-	m.width = 120
-	m.height = 24
-
-	out := m.View()
-	if !strings.Contains(out, "weekly token estimate [") {
-		t.Fatalf("expected weekly aggregate section to remain visible, got:\n%s", out)
-	}
-	if !strings.Contains(out, "five-hour window [bravo]") {
-		t.Fatalf("expected earliest weekly reset account row to stay visible, got:\n%s", out)
-	}
-}
-
-func TestMultiAccountViewOrdersUnknownResetsLast(t *testing.T) {
-	m := seededMultiAccountModel()
-	m.width = 120
-	m.height = 40
-	m.summary.Accounts[0].SecondaryWindow.SecondsUntilReset = nil
-	m.summary.Accounts[1].SecondaryWindow.SecondsUntilReset = nil
-	m.summary.Accounts[1].SecondaryWindow.ResetsAt = nil
-
-	out := m.View()
-	bravoIndex := strings.Index(out, "five-hour window [bravo]")
-	meIndex := strings.Index(out, "five-hour window [me]")
-	alphaIndex := strings.Index(out, "five-hour window [alpha]")
-	if bravoIndex < 0 || meIndex < 0 || alphaIndex < 0 {
-		t.Fatalf("expected all account rows, got:\n%s", out)
-	}
-	if !(alphaIndex < meIndex && meIndex < bravoIndex) {
-		t.Fatalf("expected account with unknown weekly reset to render last, got:\n%s", out)
-	}
-}
-
-func TestTokenBreakdownLinesStayFixedWithNAPlaceholders(t *testing.T) {
-	m := seededModel()
-	m.width = 120
-	m.height = 26
-	m.summary.ObservedWindow5h = nil
-	m.summary.ObservedTokens5h = nil
-	m.summary.ObservedWindowWeekly = nil
-	m.summary.ObservedTokensWeekly = nil
-
-	out := m.View()
-	for _, expected := range []string{
-		"- total: n/a",
-		"- input: n/a",
-		"- input (cached): n/a",
-		"- output: n/a",
-		"- output (reasoning): n/a",
+func TestWeeklyAccountCardShowsDefaultSparkAndExactReset(t *testing.T) {
+	m := fixtureModel(112, 24, true)
+	view := ansi.Strip(m.View())
+	for _, want := range []string{
+		"weekly usage [alpha]", "default", "35%", "Spark", "62%",
+		"resets in", "Mon 20 Jul 14:30", "[████",
 	} {
-		if !strings.Contains(out, expected) {
-			t.Fatalf("expected fixed placeholder token line %q", expected)
+		if !strings.Contains(view, want) {
+			t.Fatalf("expected %q in view:\n%s", want, view)
+		}
+	}
+	for _, unwanted := range []string{"five-hour", "remaining", "primary window", "secondary window"} {
+		if strings.Contains(strings.ToLower(view), unwanted) {
+			t.Fatalf("did not expect %q in weekly-only view:\n%s", unwanted, view)
 		}
 	}
 }
 
-func TestStatusSectionFixedRowsAcrossCounts(t *testing.T) {
-	m := seededModel()
-	m.width = 120
-	m.height = 30
-	m.summary.Warnings = nil
-	base := m.View()
-	baseStatusLines := countStatusRows(base)
-	if baseStatusLines < 1 {
-		t.Fatalf("expected status lines in output")
-	}
-
-	m.summary.Warnings = []string{
-		"first warning",
-		"second warning",
-		"third warning",
-		"fourth warning",
-		"fifth warning",
-	}
-	withWarnings := m.View()
-	withStatusLines := countStatusRows(withWarnings)
-	if withStatusLines != baseStatusLines {
-		t.Fatalf("expected status section row count to remain fixed")
-	}
-	if !strings.Contains(withWarnings, "status [active windows]:") {
-		t.Fatalf("expected descriptive status check labels")
-	}
-	if strings.Contains(withWarnings, "warning [more checks]:") {
-		t.Fatalf("did not expect hidden-check overflow for roomy viewport")
-	}
-}
-
-func TestDiagnosticsStatusPrefersActiveWindowWarning(t *testing.T) {
-	m := seededModel()
-	m.summary.Warnings = []string{
-		`account "apple" fetch failed: primary source "app-server" failed`,
-		"active account usage fetch failed; window cards are unavailable",
-	}
-
-	line := m.diagnosticsStatusLine()
-	if line.level != "warning" {
-		t.Fatalf("expected warning level, got %q", line.level)
-	}
-	if line.value != `account "apple" fetch failed: primary source "app-server" failed (+1 more)` {
-		t.Fatalf("expected concrete fetch failure to be prioritized, got %q", line.value)
-	}
-}
-
-func TestDiagnosticsStatusPreservesFirstWarningWhenNoActiveWindowWarningExists(t *testing.T) {
-	m := seededModel()
-	m.summary.Warnings = []string{
-		`account "apple" fetch failed: primary source "app-server" failed`,
-		`account "personal" observed tokens unavailable: warming token estimate`,
-	}
-
-	line := m.diagnosticsStatusLine()
-	if line.value != `account "apple" fetch failed: primary source "app-server" failed (+1 more)` {
-		t.Fatalf("unexpected diagnostics summary: %q", line.value)
-	}
-}
-
-func TestDiagnosticsStatusPrefersAuthExpiredWarning(t *testing.T) {
-	m := seededModel()
-	m.summary.Warnings = []string{
-		`account "apple" fetch failed: primary source "app-server" failed`,
-		`account "personal" auth expired; sign in again`,
-	}
-
-	line := m.diagnosticsStatusLine()
-	if line.value != `account "personal" auth expired; sign in again (+1 more)` {
-		t.Fatalf("expected auth-expired warning to be prioritized, got %q", line.value)
-	}
-}
-
-func TestDiagnosticsStatusPrefersActiveAccountFetchFailure(t *testing.T) {
-	m := seededModel()
-	m.summary.WindowAccountLabel = "me"
-	m.summary.Warnings = []string{
-		`account "apple" fetch failed: primary source "app-server" failed`,
-		`account "me" fetch failed: primary source "app-server" failed`,
-		"active account usage fetch failed; window cards are unavailable",
-	}
-
-	line := m.diagnosticsStatusLine()
-	if line.value != `account "me" fetch failed: primary source "app-server" failed (+2 more)` {
-		t.Fatalf("expected active-account fetch failure to be prioritized, got %q", line.value)
-	}
-}
-
-func TestStatusRowsForLayoutExpandsInTallViewport(t *testing.T) {
-	rows := statusRowsForLayout(46, 6, 2)
-	if rows <= 4 {
-		t.Fatalf("expected status rows to expand beyond visible checks in tall viewport, got %d", rows)
-	}
-}
-
-func TestAccountWindowRowForRateLimitBucketsSelectsCodexWithSpark(t *testing.T) {
-	rows := accountWindowRowForRateLimitBuckets(
-		"me",
-		map[string]usage.RateLimitWindow{
-			"codex": {
-				LimitID: "codex",
-				PrimaryWindow: usage.WindowSummary{
-					UsedPercent: 10,
-				},
-				SecondaryWindow: usage.WindowSummary{
-					UsedPercent: 20,
-				},
-			},
-			"codex_bengalfox": {
-				LimitID:   "codex_bengalfox",
-				LimitName: "spark",
-				PrimaryWindow: usage.WindowSummary{
-					UsedPercent: 30,
-				},
-				SecondaryWindow: usage.WindowSummary{
-					UsedPercent: 40,
-				},
-			},
-			"other": {
-				LimitID: "other",
-				PrimaryWindow: usage.WindowSummary{
-					UsedPercent: 50,
-				},
-				SecondaryWindow: usage.WindowSummary{
-					UsedPercent: 60,
-				},
-			},
-		},
-		usage.WindowSummary{UsedPercent: 99},
-		usage.WindowSummary{UsedPercent: 99},
-		true,
-		true,
-	)
-	if rows.name != "me" {
-		t.Fatalf("expected row for active account name, got %q", rows.name)
-	}
-	if rows.primaryWindow.UsedPercent != 10 || rows.secondaryWindow.UsedPercent != 20 {
-		t.Fatalf("expected fallback to default bucket for primary/secondary usage, got %d/%d", rows.primaryWindow.UsedPercent, rows.secondaryWindow.UsedPercent)
-	}
-	if !rows.hasSparkWindow {
-		t.Fatalf("expected spark bucket to be detected")
-	}
-	if rows.sparkPrimaryWindow.UsedPercent != 30 || rows.sparkSecondaryWindow.UsedPercent != 40 {
-		t.Fatalf("expected spark bucket usage to be preserved, got %d/%d", rows.sparkPrimaryWindow.UsedPercent, rows.sparkSecondaryWindow.UsedPercent)
-	}
-}
-
-func TestObservedHeaderShowsLoadingWhenUnavailableAndFetching(t *testing.T) {
-	m := seededModel()
-	m.width = 120
-	m.height = 24
-	m.fetching = true
-	m.summary.ObservedWindowWeekly = nil
-	m.summary.ObservedTokensWeekly = nil
-	out := m.View()
-	if !strings.Contains(out, "weekly token estimate [loading") {
-		t.Fatalf("expected loading state in weekly token header when unavailable and fetching")
-	}
-	if strings.Contains(out, "[loading -") || strings.Contains(out, "[refreshing -") {
-		t.Fatalf("did not expect spinner dash in loading/refreshing state")
-	}
-}
-
-func TestObservedHeaderShowsLoadingWhenWarmingWithoutFetchInFlight(t *testing.T) {
-	m := seededModel()
-	m.width = 120
-	m.height = 24
-	m.fetching = false
-	m.summary.ObservedWindowWeekly = nil
-	m.summary.ObservedTokensWeekly = nil
-	m.summary.ObservedTokensStatus = "unavailable"
-	m.summary.ObservedTokensWarming = true
-
-	out := m.View()
-	if !strings.Contains(out, "weekly token estimate [loading] (sum across accounts):") {
-		t.Fatalf("expected loading state from explicit warming flag")
-	}
-}
-
-func TestObservedHeaderShowsPartialWhenSummaryIsPartial(t *testing.T) {
-	m := seededModel()
-	m.width = 120
-	m.height = 40
-	m.fetching = false
-	totalWeekly := int64(120000)
-	m.summary.ObservedTokensStatus = "partial"
-	m.summary.ObservedTokensWeekly = &totalWeekly
-	m.summary.ObservedWindowWeekly = &usage.ObservedTokenBreakdown{
-		Total:       totalWeekly,
-		Input:       100000,
-		CachedInput: 90000,
-		Output:      20000,
-		HasSplit:    true,
-	}
-
-	out := m.View()
-	if !strings.Contains(out, "weekly token estimate [partial] (sum across accounts):") {
-		t.Fatalf("expected partial header state for observed token estimate")
-	}
-	if !strings.Contains(out, "warning [weekly token estimate]: partial") {
-		t.Fatalf("expected warning status line for partial observed estimate")
-	}
-}
-
-func TestHeaderShowsCtrlCOnly(t *testing.T) {
-	m := seededModel()
-	m.width = 100
-	m.height = 20
-	header := m.renderHeader()
-	if strings.Contains(header, "ctrl+c") || strings.Contains(header, "q quit") || strings.Contains(header, "r refresh") {
-		t.Fatalf("expected header without interactive key hints, got: %q", header)
-	}
-}
-
-func TestWindowPanelCompactsResetLineIntoBracketedCountdown(t *testing.T) {
-	m := seededModel()
-	m.width = 100
-	m.height = 20
-	out := m.renderBody()
-	if !strings.Contains(out, "used: 41% [resets in 1h30m]") {
-		t.Fatalf("expected compact usage line with inline countdown in window panel")
-	}
-	if strings.Contains(out, "resets at:") {
-		t.Fatalf("did not expect separate resets in row in window panels")
-	}
-}
-
-func TestWideLayoutPanelsAlignWidths(t *testing.T) {
-	widths := []int{98, 99, 100, 101, 120, 121, 140}
-	heights := []int{18, 24, 32}
-
-	for _, w := range widths {
-		for _, h := range heights {
-			m := seededModel()
-			m.width = w
-			m.height = h
-			body := m.renderBody()
-
-			lines := strings.Split(body, "\n")
-			topLine := ""
-			metaTop := ""
-			for _, line := range lines {
-				if strings.Count(line, "╭") >= 2 && topLine == "" {
-					topLine = line
-					continue
-				}
-				if strings.Count(line, "╭") == 1 {
-					metaTop = line
-				}
-			}
-			if topLine == "" || metaTop == "" {
-				t.Fatalf("expected top and metadata panel border lines for %dx%d", w, h)
-			}
-			topWidth := lipgloss.Width(topLine)
-			metaWidth := lipgloss.Width(metaTop)
-			if topWidth != metaWidth {
-				t.Fatalf("expected aligned widths for %dx%d, got top=%d meta=%d", w, h, topWidth, metaWidth)
-			}
-
-			topRunes := []rune(topLine)
-			firstRight := nthRuneIndex(topRunes, '╮', 1)
-			secondLeft := nthRuneIndex(topRunes, '╭', 2)
-			if firstRight < 0 || secondLeft < 0 || secondLeft <= firstRight {
-				t.Fatalf("expected two top panels for %dx%d", w, h)
-			}
-			gapStart := firstRight + 1
-			gapEnd := secondLeft - 1
-			dividerCenter := (float64(gapStart) + float64(gapEnd)) / 2.0
-			fullCenter := float64(topWidth-1) / 2.0
-			if math.Abs(dividerCenter-fullCenter) > 0.5 {
-				t.Fatalf("expected centered divider for %dx%d, divider=%.1f full=%.1f", w, h, dividerCenter, fullCenter)
-			}
+func TestWeeklyAccountCardNarrowViewKeepsCoreValuesAndHidesDecoration(t *testing.T) {
+	m := fixtureModel(42, 18, true)
+	view := ansi.Strip(m.View())
+	for _, want := range []string{"weekly usage [alpha]", "default", "35%", "Spark", "62%", "resets"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("expected narrow view to keep %q:\n%s", want, view)
 		}
 	}
+	if strings.Contains(view, "████") || strings.Contains(view, "Mon 20 Jul") {
+		t.Fatalf("expected narrow view to hide optional decoration:\n%s", view)
+	}
+	assertViewport(t, view, 42, 18)
 }
 
-func TestHeaderIncludesRefreshBracketOnTopLine(t *testing.T) {
-	m := seededModel()
-	m.width = 100
-	header := m.renderHeader()
-	lines := strings.Split(header, "\n")
-	if len(lines) != 1 {
-		t.Fatalf("expected single-line header")
+func TestWeeklyAccountCardUnavailableAndPartialSparkStates(t *testing.T) {
+	m := fixtureModel(90, 20, true)
+	m.summary.WeeklyWindow = usage.WindowSummary{UsedPercent: -1}
+	defaultBucket := m.summary.RateLimitWindows["codex"]
+	defaultBucket.WeeklyWindow = usage.WindowSummary{UsedPercent: -1}
+	m.summary.RateLimitWindows["codex"] = defaultBucket
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "default unavailable") {
+		t.Fatalf("expected unavailable default weekly line:\n%s", view)
 	}
-	if !strings.Contains(lines[0], "[next refresh in ") {
-		t.Fatalf("expected bracketed refresh countdown on header line")
-	}
-	if strings.Contains(lines[0], "interval") {
-		t.Fatalf("did not expect interval label in header")
-	}
-	if lipgloss.Width(lines[0]) > m.width {
-		t.Fatalf("header line exceeded width")
-	}
-}
-
-func TestHeaderShowsLocalTimestampWithoutSecondsAtNarrowWidth(t *testing.T) {
-	m := seededModel()
-	m.width = 58
-	header := m.renderHeader()
-	lines := strings.Split(header, "\n")
-	if len(lines) != 1 {
-		t.Fatalf("expected single-line header")
-	}
-	if !strings.Contains(lines[0], "local 2026-02-26 10:00") {
-		t.Fatalf("expected narrow header to show local timestamp, got: %q", lines[0])
-	}
-	if strings.Contains(lines[0], ":00:") {
-		t.Fatalf("did not expect seconds in header timestamp, got: %q", lines[0])
-	}
-	if lipgloss.Width(lines[0]) > m.width {
-		t.Fatalf("header line exceeded width")
+	if !strings.Contains(view, "Spark") || !strings.Contains(view, "62%") {
+		t.Fatalf("expected Spark weekly line to remain available:\n%s", view)
 	}
 }
 
-func TestViewportClippingHasNoEllipsisArtifacts(t *testing.T) {
-	m := seededModel()
-	m.width = 95
-	m.height = 22
-	out := m.View()
-	if strings.Contains(out, "…") {
-		t.Fatalf("expected no ellipsis clipping artifacts in viewport output")
-	}
-}
-
-func TestViewShowsExitHintAtBottom(t *testing.T) {
-	m := seededModel()
-	m.width = 120
-	m.height = 30
-	out := m.View()
-	if !strings.Contains(out, "Ctrl+C to exit") {
-		t.Fatalf("expected bottom exit hint in view")
-	}
-	lines := strings.Split(out, "\n")
-	if len(lines) != m.height {
-		t.Fatalf("expected %d lines, got %d", m.height, len(lines))
-	}
-	if !strings.Contains(lines[len(lines)-1], "Ctrl+C to exit") {
-		t.Fatalf("expected exit hint on bottom row, got: %q", lines[len(lines)-1])
-	}
-	if strings.Contains(out, "last successful snapshot") {
-		t.Fatalf("did not expect last successful snapshot footer line")
-	}
-}
-
-func TestFetchResultKeepsLastGoodUsagePanelsWhenOfficialRefreshFails(t *testing.T) {
-	m := seededMultiAccountModel()
-	m.fetching = true
-	lastGood := cloneSummary(m.summary)
-	m.lastGoodWindowData = cloneSummary(m.summary)
-
-	reset5h := int64(100)
-	reset1w := int64(200)
-	observed5h := int64(12345)
-	observed1w := int64(67890)
-	nextSummary := &usage.Summary{
-		WindowDataAvailable:  false,
-		WindowAccountLabel:   "me",
-		TotalAccounts:        3,
-		SuccessfulAccounts:   0,
-		ObservedTokensStatus: "estimated",
-		ObservedTokens5h:     &observed5h,
-		ObservedTokensWeekly: &observed1w,
-		ObservedWindow5h:     &usage.ObservedTokenBreakdown{Total: observed5h},
-		ObservedWindowWeekly: &usage.ObservedTokenBreakdown{Total: observed1w},
-		Warnings: []string{
-			`account "me" fetch failed: primary source "app-server" failed: timeout`,
-			"active account usage fetch failed; window cards are unavailable",
-		},
-		PrimaryWindow: usage.WindowSummary{
-			UsedPercent:       -1,
-			SecondsUntilReset: &reset5h,
-		},
-		SecondaryWindow: usage.WindowSummary{
-			UsedPercent:       -1,
-			SecondsUntilReset: &reset1w,
-		},
-	}
-
-	updated, cmd := m.Update(fetchResultMsg{
-		at:      m.now,
-		summary: nextSummary,
-	})
-	if cmd != nil {
-		t.Fatalf("expected no follow-up command from fetch result")
-	}
-
-	got := updated.(Model)
-	if !got.showingStaleWindows {
-		t.Fatalf("expected stale window mode after full official refresh failure")
-	}
-	if got.summary == nil {
-		t.Fatalf("expected merged summary")
-	}
-	if !got.summary.WindowDataAvailable {
-		t.Fatalf("expected last good official windows to stay visible")
-	}
-	if got.summary.PrimaryWindow.UsedPercent != lastGood.PrimaryWindow.UsedPercent {
-		t.Fatalf("expected active five-hour window to come from last good snapshot")
-	}
-	if len(got.summary.Accounts) != len(lastGood.Accounts) {
-		t.Fatalf("expected last good account rows to stay visible")
-	}
-	if got.summary.ObservedTokens5h == nil || *got.summary.ObservedTokens5h != observed5h {
-		t.Fatalf("expected current observed totals to stay current")
-	}
-
-	got.width = 140
-	got.height = 36
-	out := got.View()
-	if !strings.Contains(out, "five-hour window [me] [stale]") {
-		t.Fatalf("expected stale marker on active panel title, got:\n%s", out)
-	}
-	if !strings.Contains(out, "five-hour window [alpha] [stale]") {
-		t.Fatalf("expected stale marker on extra account panel title, got:\n%s", out)
-	}
-	if !strings.Contains(out, "used: 41%") {
-		t.Fatalf("expected last good usage values to remain visible, got:\n%s", out)
-	}
-	if !strings.Contains(out, "warning [active windows]: stale (<1m old)") {
-		t.Fatalf("expected stale active-window status line, got:\n%s", out)
-	}
-	line := got.diagnosticsStatusLine()
-	if line.value != `account "me" fetch failed: primary source "app-server" failed: timeout (+1 more)` {
-		t.Fatalf("expected concrete fetch failure in diagnostics, got %q", line.value)
-	}
-}
-
-func nthRuneIndex(runes []rune, target rune, n int) int {
-	if n <= 0 {
-		return -1
-	}
-	count := 0
-	for i, r := range runes {
-		if r == target {
-			count++
-			if count == n {
-				return i
-			}
-		}
-	}
-	return -1
-}
-
-func countStatusRows(s string) int {
-	count := 0
-	for _, line := range strings.Split(s, "\n") {
-		if strings.Contains(line, "warning [") || strings.Contains(line, "status [") || strings.Contains(line, "error [") {
-			count++
-		}
-	}
-	return count
-}
-
-func seededModel() Model {
-	now := time.Date(2026, 2, 26, 15, 0, 0, 0, time.UTC)
-	reset1 := now.Add(90 * time.Minute)
-	reset2 := now.Add(7 * 24 * time.Hour)
-	sec1 := int64(90 * 60)
-	sec2 := int64(7 * 24 * 60 * 60)
-	m := NewModel(Options{
-		Interval:        15 * time.Second,
-		Timeout:         8 * time.Second,
-		NoColor:         true,
-		DisplayLocation: time.FixedZone("test-local", -5*60*60),
-		Fetch: func(_ context.Context) (*usage.Summary, error) {
-			return nil, nil
-		},
-	})
-	m.now = now
-	m.fetching = false
-	m.lastAttemptAt = now.Add(-2 * time.Second)
-	m.lastSuccessAt = now.Add(-2 * time.Second)
-	m.lastFetchDuration = 420 * time.Millisecond
-	m.nextFetchAt = now.Add(13 * time.Second)
-	m.summary = &usage.Summary{
-		Source:              "app-server",
-		PlanType:            "pro",
-		AccountEmail:        "me@example.com",
-		WindowAccountLabel:  "me",
-		WindowDataAvailable: true,
-		PrimaryWindow: usage.WindowSummary{
-			UsedPercent:       41,
-			ResetsAt:          &reset1,
-			SecondsUntilReset: &sec1,
-		},
-		SecondaryWindow: usage.WindowSummary{
-			UsedPercent:       69,
-			ResetsAt:          &reset2,
-			SecondsUntilReset: &sec2,
-		},
-		FetchedAt: now.Add(-2 * time.Second),
-	}
-	return m
-}
-
-func seededMultiAccountModel() Model {
-	m := seededModel()
-	now := m.now.Add(-2 * time.Second)
-	alphaReset1 := m.now.Add(2 * time.Hour)
-	alphaReset2 := m.now.Add(5 * 24 * time.Hour)
-	alphaSec1 := int64(2 * 60 * 60)
-	alphaSec2 := int64(5 * 24 * 60 * 60)
-	bravoReset1 := m.now.Add(30 * time.Minute)
-	bravoReset2 := m.now.Add(3 * 24 * time.Hour)
-	bravoSec1 := int64(30 * 60)
-	bravoSec2 := int64(3 * 24 * 60 * 60)
-
-	m.summary.TotalAccounts = 3
-	m.summary.WindowAccountLabel = "me"
+func TestAccountCardsOrderKnownWeeklyResetsThenUnknown(t *testing.T) {
+	m := fixtureModel(90, 28, true)
+	m.summary.WindowAccountLabel = ""
 	m.summary.Accounts = []usage.AccountSummary{
-		{
-			Label:        "alpha",
-			AccountEmail: "alpha@example.com",
-			PrimaryWindow: usage.WindowSummary{
-				UsedPercent:       12,
-				ResetsAt:          &alphaReset1,
-				SecondsUntilReset: &alphaSec1,
-			},
-			SecondaryWindow: usage.WindowSummary{
-				UsedPercent:       28,
-				ResetsAt:          &alphaReset2,
-				SecondsUntilReset: &alphaSec2,
-			},
-			FetchedAt: &now,
-		},
-		{
-			Label:        "bravo",
-			AccountEmail: "bravo@example.com",
-			PrimaryWindow: usage.WindowSummary{
-				UsedPercent:       77,
-				ResetsAt:          &bravoReset1,
-				SecondsUntilReset: &bravoSec1,
-			},
-			SecondaryWindow: usage.WindowSummary{
-				UsedPercent:       84,
-				ResetsAt:          &bravoReset2,
-				SecondsUntilReset: &bravoSec2,
-			},
-			FetchedAt: &now,
-		},
-		{
-			Label:           "me",
-			AccountEmail:    "me@example.com",
-			PrimaryWindow:   m.summary.PrimaryWindow,
-			SecondaryWindow: m.summary.SecondaryWindow,
-			FetchedAt:       &now,
-		},
+		accountFixture("unknown", 10, nil, true),
+		accountFixture("later", 20, int64Ptr(600), true),
+		accountFixture("sooner", 30, int64Ptr(60), true),
 	}
+	view := ansi.Strip(m.View())
+	sooner := strings.Index(view, "weekly usage [sooner]")
+	later := strings.Index(view, "weekly usage [later]")
+	unknown := strings.Index(view, "weekly usage [unknown]")
+	if !(sooner >= 0 && sooner < later && later < unknown) {
+		t.Fatalf("expected known weekly reset ordering then unknown:\n%s", view)
+	}
+}
+
+func TestFixtureLayoutMatrixFitsViewportAndPinsExitHint(t *testing.T) {
+	cases := []struct {
+		name     string
+		width    int
+		height   int
+		accounts int
+	}{
+		{name: "narrow", width: 36, height: 16, accounts: 1},
+		{name: "standard", width: 80, height: 24, accounts: 2},
+		{name: "wide", width: 132, height: 30, accounts: 3},
+		{name: "short", width: 80, height: 12, accounts: 4},
+		{name: "many accounts", width: 100, height: 26, accounts: 8},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := fixtureModel(tc.width, tc.height, true)
+			m.summary.WindowAccountLabel = ""
+			m.summary.Accounts = make([]usage.AccountSummary, 0, tc.accounts)
+			for i := 0; i < tc.accounts; i++ {
+				reset := int64((i + 1) * 600)
+				m.summary.Accounts = append(m.summary.Accounts, accountFixture(string(rune('a'+i)), 10+i, &reset, true))
+			}
+			view := ansi.Strip(m.View())
+			assertViewport(t, view, tc.width, tc.height)
+			lines := strings.Split(view, "\n")
+			if !strings.Contains(lines[len(lines)-1], "Ctrl+C to exit") {
+				t.Fatalf("expected exit hint pinned to bottom:\n%s", view)
+			}
+		})
+	}
+}
+
+func TestLoadingAndErrorViewsFit(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		lastError string
+		want      string
+	}{
+		{name: "loading", want: "loading usage data"},
+		{name: "error", lastError: "provider unavailable", want: "provider unavailable"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := fixtureModel(52, 10, true)
+			m.summary = nil
+			m.lastError = tc.lastError
+			view := ansi.Strip(m.View())
+			if !strings.Contains(view, tc.want) {
+				t.Fatalf("expected %q:\n%s", tc.want, view)
+			}
+			assertViewport(t, view, 52, 10)
+		})
+	}
+}
+
+func TestWeeklyObservedPanelShowsBreakdownAndDiagnostics(t *testing.T) {
+	m := fixtureModel(100, 24, true)
+	m.summary.Warnings = []string{"other warning", "account \"alpha\" fetch failed: auth expired"}
+	view := ansi.Strip(m.View())
+	for _, want := range []string{
+		"weekly token estimate [ready]", "- total: 12.3k", "- input: 8k",
+		"- input (cached): 2k", "- output: 4.34k", "auth expired",
+	} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("expected %q in lower panel:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "five-hour token estimate") {
+		t.Fatalf("did not expect obsolete estimate status:\n%s", view)
+	}
+}
+
+func TestWeeklyObservedPanelShowsLoadingPartialAndUnavailable(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		status   string
+		warming  bool
+		fetching bool
+		want     string
+	}{
+		{name: "loading", status: "unavailable", fetching: true, want: "[loading]"},
+		{name: "warming", status: "unavailable", warming: true, want: "[loading]"},
+		{name: "partial", status: "partial", want: "[partial]"},
+		{name: "unavailable", status: "unavailable", want: "[unavailable]"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := fixtureModel(80, 20, true)
+			m.fetching = tc.fetching
+			m.summary.ObservedTokensStatus = tc.status
+			m.summary.ObservedTokensWarming = tc.warming
+			m.summary.ObservedTokensWeekly = nil
+			m.summary.ObservedWindowWeekly = nil
+			view := ansi.Strip(m.View())
+			if !strings.Contains(view, tc.want) {
+				t.Fatalf("expected %q:\n%s", tc.want, view)
+			}
+		})
+	}
+}
+
+func TestColorAndNoColorModesHaveSameText(t *testing.T) {
+	color := fixtureModel(100, 22, false)
+	plain := fixtureModel(100, 22, true)
+	if ansi.Strip(color.View()) != ansi.Strip(plain.View()) {
+		t.Fatalf("expected color and no-color modes to preserve the same text")
+	}
+	if color.styles.title.GetForeground() == plain.styles.title.GetForeground() {
+		t.Fatalf("expected color mode to configure a distinct title color")
+	}
+}
+
+func TestFetchResultKeepsLastGoodWeeklyCardsAsStale(t *testing.T) {
+	m := fixtureModel(90, 22, true)
+	m.lastGoodWindowData = cloneSummary(m.summary)
+	current := &usage.Summary{
+		WindowDataAvailable: false, TotalAccounts: 1, SuccessfulAccounts: 0,
+		ObservedTokensStatus: "partial", Warnings: []string{"refresh failed"}, FetchedAt: m.now,
+	}
+	updated, _ := m.Update(fetchResultMsg{at: m.now, summary: current})
+	got := updated.(Model)
+	if !got.showingStaleWindows || got.summary.WeeklyWindow.UsedPercent != 35 {
+		t.Fatalf("expected last good weekly snapshot, got %+v", got.summary)
+	}
+	view := ansi.Strip(got.View())
+	if !strings.Contains(view, "weekly usage [alpha] [stale]") {
+		t.Fatalf("expected stale weekly card:\n%s", view)
+	}
+}
+
+func TestHeaderAndFooterStayHumanFriendly(t *testing.T) {
+	m := fixtureModel(80, 16, true)
+	view := ansi.Strip(m.View())
+	for _, want := range []string{"multicodex monitor", "next refresh in", "local 2026-07-20 12:00", "Ctrl+C to exit"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("expected %q in header/footer:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "q to quit") {
+		t.Fatalf("expected Ctrl+C to remain the only exit hint")
+	}
+}
+
+func TestControlCQuits(t *testing.T) {
+	m := fixtureModel(80, 16, true)
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if cmd == nil {
+		t.Fatal("expected Ctrl+C to return a quit command")
+	}
+}
+
+func TestPreferredDiagnosticWarningOrder(t *testing.T) {
+	warnings := []string{"active account usage unavailable", "account \"alpha\" fetch failed: timeout", "auth expired; sign in again"}
+	if got := preferredDiagnosticWarning(warnings, "alpha"); got != warnings[2] {
+		t.Fatalf("expected auth warning first, got %q", got)
+	}
+}
+
+func fixtureModel(width, height int, noColor bool) Model {
+	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+	reset := now.Add(2*time.Hour + 30*time.Minute)
+	resetSeconds := int64((2*time.Hour + 30*time.Minute) / time.Second)
+	sparkReset := now.Add(26 * time.Hour)
+	sparkSeconds := int64(26 * time.Hour / time.Second)
+	weekly := usage.WindowSummary{UsedPercent: 35, ResetsAt: &reset, SecondsUntilReset: &resetSeconds}
+	spark := usage.WindowSummary{UsedPercent: 62, ResetsAt: &sparkReset, SecondsUntilReset: &sparkSeconds}
+	total := int64(12345)
+	summary := &usage.Summary{
+		Source: "app-server", PlanType: "pro", WindowDataAvailable: true,
+		WindowAccountLabel: "alpha", WeeklyWindow: weekly,
+		RateLimitWindows: map[string]usage.RateLimitWindow{
+			"codex":           {LimitID: "codex", WeeklyWindow: weekly},
+			"codex_bengalfox": {LimitID: "codex_bengalfox", LimitName: "Spark", WeeklyWindow: spark},
+		},
+		TotalAccounts: 1, SuccessfulAccounts: 1,
+		ObservedTokensWeekly: &total,
+		ObservedWindowWeekly: &usage.ObservedTokenBreakdown{
+			Total: 12345, Input: 8000, CachedInput: 2000, Output: 4345, ReasoningOutput: 1000, HasSplit: true,
+		},
+		ObservedTokensStatus: "estimated", FetchedAt: now,
+	}
+	m := NewModel(Options{
+		NoColor: noColor, DisplayLocation: time.UTC,
+		Fetch: func(context.Context) (*usage.Summary, error) { return nil, errors.New("unused") },
+	})
+	m.width, m.height, m.now = width, height, now
+	m.fetching, m.summary, m.nextFetchAt = false, summary, now.Add(45*time.Second)
 	return m
 }
+
+func accountFixture(label string, used int, reset *int64, fetched bool) usage.AccountSummary {
+	window := usage.WindowSummary{UsedPercent: used, SecondsUntilReset: reset}
+	var fetchedAt *time.Time
+	if fetched {
+		now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+		fetchedAt = &now
+	}
+	return usage.AccountSummary{
+		Label: label, WeeklyWindow: window,
+		RateLimitWindows: map[string]usage.RateLimitWindow{"codex": {LimitID: "codex", WeeklyWindow: window}},
+		FetchedAt:        fetchedAt,
+	}
+}
+
+func assertViewport(t *testing.T, view string, width, height int) {
+	t.Helper()
+	if got := lipgloss.Width(view); got > width {
+		t.Fatalf("view width %d exceeds %d:\n%s", got, width, view)
+	}
+	if got := lipgloss.Height(view); got > height {
+		t.Fatalf("view height %d exceeds %d:\n%s", got, height, view)
+	}
+}
+
+func int64Ptr(value int64) *int64 { return &value }

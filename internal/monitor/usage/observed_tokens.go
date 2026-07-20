@@ -21,7 +21,6 @@ const (
 )
 
 type ObservedTokenEstimate struct {
-	Window5h     ObservedTokenBreakdown
 	WindowWeekly ObservedTokenBreakdown
 	Status       string
 	Warming      bool
@@ -87,11 +86,6 @@ type tokenAccumulator struct {
 	CachedOutput    int64
 	HasSplit        bool
 	HasCachedOutput bool
-}
-
-type observedWindowPair struct {
-	Window5h     ObservedTokenBreakdown
-	WindowWeekly ObservedTokenBreakdown
 }
 
 func newObservedTokenEstimator(ttl time.Duration, async bool) *observedTokenEstimator {
@@ -190,17 +184,15 @@ func computeObservedTokenEstimate(codexHome string, now time.Time) (ObservedToke
 		return ObservedTokenEstimate{}, err
 	}
 
-	cutoff5h := now.Add(-5 * time.Hour)
 	cutoff1w := now.Add(-7 * 24 * time.Hour)
 
-	total5h, totalWeekly, fileWarnings, err := estimateTokensAcrossFiles(files, cutoff5h, cutoff1w)
+	totalWeekly, fileWarnings, err := estimateTokensAcrossFiles(files, cutoff1w)
 	if err != nil {
 		return ObservedTokenEstimate{}, err
 	}
 	warnings = append(warnings, fileWarnings...)
 
 	return ObservedTokenEstimate{
-		Window5h:     total5h.toBreakdown(),
 		WindowWeekly: totalWeekly.toBreakdown(),
 		Status:       observedTokensStatusEstimated,
 		Note:         "local estimate",
@@ -209,15 +201,14 @@ func computeObservedTokenEstimate(codexHome string, now time.Time) (ObservedToke
 }
 
 type fileEstimateResult struct {
-	window5h     tokenAccumulator
 	windowWeekly tokenAccumulator
 	warnings     []string
 	err          error
 }
 
-func estimateTokensAcrossFiles(files []string, cutoff5h, cutoff1w time.Time) (tokenAccumulator, tokenAccumulator, []string, error) {
+func estimateTokensAcrossFiles(files []string, cutoff1w time.Time) (tokenAccumulator, []string, error) {
 	if len(files) == 0 {
-		return tokenAccumulator{}, tokenAccumulator{}, nil, nil
+		return tokenAccumulator{}, nil, nil
 	}
 
 	parallelism := len(files)
@@ -237,9 +228,8 @@ func estimateTokensAcrossFiles(files []string, cutoff5h, cutoff1w time.Time) (to
 		go func() {
 			defer wg.Done()
 			for file := range jobs {
-				file5h, fileWeekly, fileWarnings, err := estimateTokensFromFile(file, cutoff5h, cutoff1w)
+				fileWeekly, fileWarnings, err := estimateTokensFromFile(file, cutoff1w)
 				results <- fileEstimateResult{
-					window5h:     file5h,
 					windowWeekly: fileWeekly,
 					warnings:     fileWarnings,
 					err:          err,
@@ -257,7 +247,6 @@ func estimateTokensAcrossFiles(files []string, cutoff5h, cutoff1w time.Time) (to
 		close(results)
 	}()
 
-	var total5h tokenAccumulator
 	var totalWeekly tokenAccumulator
 	var warnings []string
 	var firstErr error
@@ -269,14 +258,13 @@ func estimateTokensAcrossFiles(files []string, cutoff5h, cutoff1w time.Time) (to
 			}
 			continue
 		}
-		total5h.add(result.window5h)
 		totalWeekly.add(result.windowWeekly)
 		warnings = append(warnings, result.warnings...)
 	}
 	if firstErr != nil {
-		return tokenAccumulator{}, tokenAccumulator{}, nil, firstErr
+		return tokenAccumulator{}, nil, firstErr
 	}
-	return total5h, totalWeekly, warnings, nil
+	return totalWeekly, warnings, nil
 }
 
 func discoverRecentUsageFiles(codexHome string, now time.Time) ([]string, []string, error) {
@@ -339,10 +327,10 @@ func discoverRecentUsageFiles(codexHome string, now time.Time) ([]string, []stri
 	return files, warnings, nil
 }
 
-func estimateTokensFromFile(path string, cutoff5h, cutoff1w time.Time) (tokenAccumulator, tokenAccumulator, []string, error) {
+func estimateTokensFromFile(path string, cutoff1w time.Time) (tokenAccumulator, []string, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return tokenAccumulator{}, tokenAccumulator{}, nil, fmt.Errorf("open usage file %s: %w", path, err)
+		return tokenAccumulator{}, nil, fmt.Errorf("open usage file %s: %w", path, err)
 	}
 	defer f.Close()
 
@@ -351,7 +339,6 @@ func estimateTokensFromFile(path string, cutoff5h, cutoff1w time.Time) (tokenAcc
 
 	var warnings []string
 	var prevTotal *tokenUsageTotal
-	var sum5h tokenAccumulator
 	var sum1w tokenAccumulator
 	parseErrCount := 0
 
@@ -361,7 +348,7 @@ func estimateTokensFromFile(path string, cutoff5h, cutoff1w time.Time) (tokenAcc
 			if errors.Is(err, io.EOF) {
 				break
 			}
-			return tokenAccumulator{}, tokenAccumulator{}, nil, fmt.Errorf("read usage file %s: %w", path, err)
+			return tokenAccumulator{}, nil, fmt.Errorf("read usage file %s: %w", path, err)
 		}
 
 		var rec tokenCountLine
@@ -383,9 +370,6 @@ func estimateTokensFromFile(path string, cutoff5h, cutoff1w time.Time) (tokenAcc
 			usage, ok := usageForEvent(rec.Payload.Info.Total, rec.Payload.Info.Last, prevTotal)
 			if ok {
 				sum1w.addTokenUsage(usage)
-				if !eventTime.Before(cutoff5h) {
-					sum5h.addTokenUsage(usage)
-				}
 			}
 		}
 		current := rec.Payload.Info.Total
@@ -395,7 +379,7 @@ func estimateTokensFromFile(path string, cutoff5h, cutoff1w time.Time) (tokenAcc
 	if parseErrCount > 0 {
 		warnings = append(warnings, fmt.Sprintf("skipped %d unparsable lines in %s", parseErrCount, filepath.Base(path)))
 	}
-	return sum5h, sum1w, warnings, nil
+	return sum1w, warnings, nil
 }
 
 func readJSONLLine(reader *bufio.Reader, longLineBuf *[]byte) ([]byte, error) {
@@ -488,10 +472,6 @@ func (a *tokenAccumulator) add(other tokenAccumulator) {
 	a.CachedOutput += other.CachedOutput
 	a.HasSplit = a.HasSplit || other.HasSplit
 	a.HasCachedOutput = a.HasCachedOutput || other.HasCachedOutput
-}
-
-func (a *tokenAccumulator) addTotalOnly(total int64) {
-	a.Total += total
 }
 
 func (a *tokenAccumulator) addTokenUsage(usage tokenUsageTotal) {

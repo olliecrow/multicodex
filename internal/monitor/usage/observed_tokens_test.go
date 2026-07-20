@@ -50,9 +50,6 @@ func TestComputeObservedTokenEstimate(t *testing.T) {
 	if estimate.Status != observedTokensStatusEstimated {
 		t.Fatalf("expected estimated status, got %q", estimate.Status)
 	}
-	if estimate.Window5h.Total != 160 {
-		t.Fatalf("expected 5h tokens 160, got %d", estimate.Window5h.Total)
-	}
 	if estimate.WindowWeekly.Total != 190 {
 		t.Fatalf("expected weekly tokens 190, got %d", estimate.WindowWeekly.Total)
 	}
@@ -96,7 +93,6 @@ func TestObservedEstimatorAsyncWarmupSetsWarmingFlag(t *testing.T) {
 
 func TestEstimateTokensFromFileDoesNotDoubleCountDuplicateTotals(t *testing.T) {
 	now := time.Date(2026, 2, 26, 20, 0, 0, 0, time.UTC)
-	cutoff5h := now.Add(-5 * time.Hour)
 	cutoff1w := now.Add(-7 * 24 * time.Hour)
 
 	path := filepath.Join(t.TempDir(), "session.jsonl")
@@ -108,12 +104,9 @@ func TestEstimateTokensFromFileDoesNotDoubleCountDuplicateTotals(t *testing.T) {
 		t.Fatalf("write usage file: %v", err)
 	}
 
-	sum5h, sum1w, _, err := estimateTokensFromFile(path, cutoff5h, cutoff1w)
+	sum1w, _, err := estimateTokensFromFile(path, cutoff1w)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
-	}
-	if sum5h.Total != 100 {
-		t.Fatalf("expected 100 tokens in 5h window, got %d", sum5h.Total)
 	}
 	if sum1w.Total != 100 {
 		t.Fatalf("expected 100 tokens in weekly window, got %d", sum1w.Total)
@@ -122,7 +115,6 @@ func TestEstimateTokensFromFileDoesNotDoubleCountDuplicateTotals(t *testing.T) {
 
 func TestEstimateTokensFromFileFallsBackToLastWhenTotalResets(t *testing.T) {
 	now := time.Date(2026, 2, 26, 20, 0, 0, 0, time.UTC)
-	cutoff5h := now.Add(-5 * time.Hour)
 	cutoff1w := now.Add(-7 * 24 * time.Hour)
 
 	path := filepath.Join(t.TempDir(), "session.jsonl")
@@ -139,12 +131,9 @@ func TestEstimateTokensFromFileFallsBackToLastWhenTotalResets(t *testing.T) {
 		t.Fatalf("write usage file: %v", err)
 	}
 
-	sum5h, sum1w, _, err := estimateTokensFromFile(path, cutoff5h, cutoff1w)
+	sum1w, _, err := estimateTokensFromFile(path, cutoff1w)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
-	}
-	if sum5h.Total != 130 {
-		t.Fatalf("expected reset fallback total 130 in 5h window, got %d", sum5h.Total)
 	}
 	if sum1w.Total != 130 {
 		t.Fatalf("expected reset fallback total 130 in weekly window, got %d", sum1w.Total)
@@ -153,7 +142,6 @@ func TestEstimateTokensFromFileFallsBackToLastWhenTotalResets(t *testing.T) {
 
 func TestEstimateTokensFromFileAccumulatesSplitBreakdown(t *testing.T) {
 	now := time.Date(2026, 2, 26, 20, 0, 0, 0, time.UTC)
-	cutoff5h := now.Add(-5 * time.Hour)
 	cutoff1w := now.Add(-7 * 24 * time.Hour)
 
 	path := filepath.Join(t.TempDir(), "session.jsonl")
@@ -198,26 +186,23 @@ func TestEstimateTokensFromFileAccumulatesSplitBreakdown(t *testing.T) {
 		t.Fatalf("write usage file: %v", err)
 	}
 
-	sum5h, sum1w, _, err := estimateTokensFromFile(path, cutoff5h, cutoff1w)
+	sum1w, _, err := estimateTokensFromFile(path, cutoff1w)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	for _, sum := range []tokenAccumulator{sum5h, sum1w} {
-		if sum.Total != 27 || sum.Input != 18 || sum.CachedInput != 7 || sum.Output != 9 || sum.ReasoningOutput != 4 || sum.CachedOutput != 2 {
-			t.Fatalf("unexpected split totals: %+v", sum)
-		}
-		if !sum.HasSplit {
-			t.Fatalf("expected split flag to be set")
-		}
-		if !sum.HasCachedOutput {
-			t.Fatalf("expected cached output flag to be set")
-		}
+	if sum1w.Total != 27 || sum1w.Input != 18 || sum1w.CachedInput != 7 || sum1w.Output != 9 || sum1w.ReasoningOutput != 4 || sum1w.CachedOutput != 2 {
+		t.Fatalf("unexpected split totals: %+v", sum1w)
+	}
+	if !sum1w.HasSplit {
+		t.Fatalf("expected split flag to be set")
+	}
+	if !sum1w.HasCachedOutput {
+		t.Fatalf("expected cached output flag to be set")
 	}
 }
 
 func TestEstimateTokensFromFileHandlesLargeJSONLLine(t *testing.T) {
 	now := time.Date(2026, 2, 26, 20, 0, 0, 0, time.UTC)
-	cutoff5h := now.Add(-5 * time.Hour)
 	cutoff1w := now.Add(-7 * 24 * time.Hour)
 
 	path := filepath.Join(t.TempDir(), "session.jsonl")
@@ -233,12 +218,9 @@ func TestEstimateTokensFromFileHandlesLargeJSONLLine(t *testing.T) {
 		t.Fatalf("write usage file: %v", err)
 	}
 
-	sum5h, sum1w, warnings, err := estimateTokensFromFile(path, cutoff5h, cutoff1w)
+	sum1w, warnings, err := estimateTokensFromFile(path, cutoff1w)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
-	}
-	if sum5h.Total != 40 {
-		t.Fatalf("expected 40 tokens in 5h window, got %d", sum5h.Total)
 	}
 	if sum1w.Total != 40 {
 		t.Fatalf("expected 40 tokens in weekly window, got %d", sum1w.Total)

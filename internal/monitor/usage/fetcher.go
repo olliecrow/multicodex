@@ -124,7 +124,7 @@ func (f *Fetcher) fetchMultiAccount(ctx context.Context) (*Summary, error) {
 	unavailableObservedCount := 0
 	totalAccountIdentities := map[string]struct{}{}
 	successfulAccountIdentities := map[string]struct{}{}
-	seenObservedByIdentity := map[string]observedWindowPair{}
+	seenObservedByIdentity := map[string]ObservedTokenBreakdown{}
 	accountByIdentity := map[string]accountSummaryWithHome{}
 	activeHomes := resolveActiveCodexHomes()
 	var activeSuccessChoice *accountFetchResult
@@ -167,18 +167,13 @@ func (f *Fetcher) fetchMultiAccount(ctx context.Context) (*Summary, error) {
 		}
 		if result.observedAvailable {
 			anyObservedAvailable = true
-			pair := observedWindowPair{}
-			if accountOut.ObservedWindow5h != nil {
-				pair.Window5h = *accountOut.ObservedWindow5h
-			}
+			weekly := ObservedTokenBreakdown{}
 			if accountOut.ObservedWindowWeekly != nil {
-				pair.WindowWeekly = *accountOut.ObservedWindowWeekly
+				weekly = *accountOut.ObservedWindowWeekly
 			}
 
 			identity := accountIdentityOrHomeKey(accountOut, result.codexHome)
-			prev := seenObservedByIdentity[identity]
-			next := addObservedPairs(prev, pair)
-			seenObservedByIdentity[identity] = next
+			seenObservedByIdentity[identity] = addBreakdowns(seenObservedByIdentity[identity], weekly)
 		}
 		if result.observedUnavailable {
 			unavailableObservedCount++
@@ -211,8 +206,7 @@ func (f *Fetcher) fetchMultiAccount(ctx context.Context) (*Summary, error) {
 		out.UserID = activeSuccess.UserID
 		out.RateLimitWindows = cloneRateLimitWindows(activeSuccess.RateLimitWindows)
 		out.WindowDataAvailable = true
-		out.PrimaryWindow = activeSuccess.PrimaryWindow
-		out.SecondaryWindow = activeSuccess.SecondaryWindow
+		out.WeeklyWindow = activeSuccess.WeeklyWindow
 		out.AdditionalLimitCount = activeSuccess.AdditionalLimitCount
 		out.FetchedAt = activeSuccess.FetchedAt
 	} else {
@@ -230,15 +224,13 @@ func (f *Fetcher) fetchMultiAccount(ctx context.Context) (*Summary, error) {
 	}
 
 	if anyObservedAvailable {
-		observedTotal := observedWindowPair{}
-		for _, pair := range seenObservedByIdentity {
-			observedTotal = addObservedPairs(observedTotal, pair)
+		observedTotal := ObservedTokenBreakdown{}
+		for _, weekly := range seenObservedByIdentity {
+			observedTotal = addBreakdowns(observedTotal, weekly)
 		}
 		out.ObservedTokensStatus = observedTokensStatusEstimated
-		out.ObservedWindow5h = &observedTotal.Window5h
-		out.ObservedWindowWeekly = &observedTotal.WindowWeekly
-		out.ObservedTokens5h = int64Ptr(observedTotal.Window5h.Total)
-		out.ObservedTokensWeekly = int64Ptr(observedTotal.WindowWeekly.Total)
+		out.ObservedWindowWeekly = &observedTotal
+		out.ObservedTokensWeekly = int64Ptr(observedTotal.Total)
 		out.ObservedTokensNote = "sum across accounts"
 		out.ObservedTokensWarming = false
 		if unavailableObservedCount > 0 {
@@ -613,13 +605,6 @@ func accountSummariesFromIdentityMap(byIdentity map[string]accountSummaryWithHom
 	return accounts
 }
 
-func addObservedPairs(a, b observedWindowPair) observedWindowPair {
-	return observedWindowPair{
-		Window5h:     addBreakdowns(a.Window5h, b.Window5h),
-		WindowWeekly: addBreakdowns(a.WindowWeekly, b.WindowWeekly),
-	}
-}
-
 func addBreakdowns(a, b ObservedTokenBreakdown) ObservedTokenBreakdown {
 	return ObservedTokenBreakdown{
 		Total:           a.Total + b.Total,
@@ -689,8 +674,7 @@ func (f *Fetcher) fetchAccountResult(ctx context.Context, account accountFetcher
 		result.account.AccountEmail = snapshot.AccountEmail
 		result.account.AccountID = snapshot.AccountID
 		result.account.UserID = snapshot.UserID
-		result.account.PrimaryWindow = snapshot.PrimaryWindow
-		result.account.SecondaryWindow = snapshot.SecondaryWindow
+		result.account.WeeklyWindow = snapshot.WeeklyWindow
 		result.account.RateLimitWindows = cloneRateLimitWindows(snapshot.RateLimitWindows)
 		result.account.AdditionalLimitCount = snapshot.AdditionalLimitCount
 		result.account.Warnings = append(result.account.Warnings, snapshot.Warnings...)
@@ -711,9 +695,7 @@ func (f *Fetcher) fetchAccountResult(ctx context.Context, account accountFetcher
 			result.account.ObservedTokensNote = estimate.Note
 			result.account.ObservedTokensWarming = estimate.Warming
 			result.account.Warnings = append(result.account.Warnings, estimate.Warnings...)
-			result.account.ObservedWindow5h = &estimate.Window5h
 			result.account.ObservedWindowWeekly = &estimate.WindowWeekly
-			result.account.ObservedTokens5h = int64Ptr(estimate.Window5h.Total)
 			result.account.ObservedTokensWeekly = int64Ptr(estimate.WindowWeekly.Total)
 
 			if estimate.Status == observedTokensStatusUnavailable {

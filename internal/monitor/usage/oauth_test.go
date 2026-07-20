@@ -15,7 +15,7 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
 }
 
-func TestOAuthSourceFetchAllowsPrimaryOnlyMainWindow(t *testing.T) {
+func TestOAuthSourceFetchLeavesNonWeeklyPrimaryOnlyWindowUnknown(t *testing.T) {
 	codexHome := t.TempDir()
 	authJSON := `{"tokens":{"access_token":"test-token"}}`
 	if err := os.WriteFile(codexHome+"/auth.json", []byte(authJSON), 0o600); err != nil {
@@ -49,18 +49,15 @@ func TestOAuthSourceFetchAllowsPrimaryOnlyMainWindow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
-	if summary.PrimaryWindow.UsedPercent != 12 {
-		t.Fatalf("expected primary usage 12, got %d", summary.PrimaryWindow.UsedPercent)
-	}
-	if summary.SecondaryWindow.UsedPercent != unavailableUsedPercent {
-		t.Fatalf("expected missing secondary to be unavailable, got %d", summary.SecondaryWindow.UsedPercent)
+	if summary.WeeklyWindow.UsedPercent != unavailableUsedPercent {
+		t.Fatalf("expected missing weekly window to be unavailable, got %d", summary.WeeklyWindow.UsedPercent)
 	}
 	codexWindow, ok := summary.RateLimitWindows["codex"]
 	if !ok {
 		t.Fatalf("expected codex rate limit window")
 	}
-	if codexWindow.SecondaryWindow.UsedPercent != unavailableUsedPercent {
-		t.Fatalf("expected codex secondary to be unavailable, got %d", codexWindow.SecondaryWindow.UsedPercent)
+	if codexWindow.WeeklyWindow.UsedPercent != unavailableUsedPercent {
+		t.Fatalf("expected codex weekly window to be unavailable, got %d", codexWindow.WeeklyWindow.UsedPercent)
 	}
 }
 
