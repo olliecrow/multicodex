@@ -238,9 +238,18 @@ func (m Model) renderHeader() string {
 		stateStyle = m.styles.ok
 	}
 
+	if m.width < 60 {
+		left := m.styles.accent.Render("multicodex") + " " + stateStyle.Render(stateText)
+		if !m.nextFetchAt.IsZero() {
+			left += " " + m.styles.dim.Render(humanDuration(m.nextFetchAt.Sub(m.now)))
+		}
+		right := m.styles.dim.Render(m.now.In(m.displayLocation).Format("15:04"))
+		return joinWithPaddingKeepRight(left, right, m.width)
+	}
+
 	left := title + "  " + m.styles.label.Render("state: ") + stateStyle.Render(stateText)
 	if !m.nextFetchAt.IsZero() {
-		refreshText := "[next refresh in " + humanDuration(m.nextFetchAt.Sub(m.now)) + "]"
+		refreshText := "[refresh " + humanDuration(m.nextFetchAt.Sub(m.now)) + "]"
 		left += " " + m.styles.dim.Render(refreshText)
 	}
 	right := m.styles.dim.Render("local " + m.formatDisplayTimestamp(m.now))
@@ -313,7 +322,7 @@ func (m Model) renderWeeklyUsageLine(label string, win usage.WindowSummary, avai
 		parts = append(parts, m.styles.dim.Render(renderProgressBar(win.UsedPercent, 12)))
 	}
 	parts = append(parts, m.styles.dim.Render("resets in ")+m.styles.value.Render(renderWindowResetRemaining(win)))
-	if width >= 88 {
+	if width >= 72 {
 		if exact := m.renderExactResetTime(win); exact != "" {
 			parts = append(parts, m.styles.dim.Render(exact))
 		}
