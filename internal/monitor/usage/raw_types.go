@@ -43,7 +43,9 @@ type identityInfo struct {
 }
 
 func normalizeSummary(source string, snapshot rateLimitSnapshotRaw, rateLimitsByLimitID map[string]rateLimitSnapshotRaw, additionalLimitCount int, identity *identityInfo, warnings []string) (*Summary, error) {
-	if snapshot.Primary == nil && snapshot.Secondary == nil {
+	weeklyWindow := normalizeWeeklyWindow(snapshot.Primary, snapshot.Secondary)
+	rateLimitWindows := normalizeRateLimitWindows(snapshot, rateLimitsByLimitID)
+	if snapshot.Primary == nil && snapshot.Secondary == nil && !rateLimitWindowsHaveWeeklyData(rateLimitWindows) {
 		return nil, errors.New("missing usage windows")
 	}
 
@@ -51,20 +53,35 @@ func normalizeSummary(source string, snapshot rateLimitSnapshotRaw, rateLimitsBy
 	out := &Summary{
 		Source:               source,
 		PlanType:             snapshot.PlanType,
-		WindowDataAvailable:  true,
-		WeeklyWindow:         unavailableWindowSummary(),
-		RateLimitWindows:     normalizeRateLimitWindows(snapshot, rateLimitsByLimitID),
+		WeeklyWindow:         weeklyWindow,
+		RateLimitWindows:     rateLimitWindows,
 		AdditionalLimitCount: additionalLimitCount,
 		Warnings:             warnings,
 		FetchedAt:            now,
 	}
-	out.WeeklyWindow = normalizeWeeklyWindow(snapshot.Primary, snapshot.Secondary)
+	out.WindowDataAvailable = summaryHasWeeklyData(out)
 	if identity != nil {
 		out.AccountEmail = identity.Email
 		out.AccountID = identity.AccountID
 		out.UserID = identity.UserID
 	}
 	return out, nil
+}
+
+func summaryHasWeeklyData(summary *Summary) bool {
+	if summary == nil {
+		return false
+	}
+	return summary.WeeklyWindow.UsedPercent >= 0 || rateLimitWindowsHaveWeeklyData(summary.RateLimitWindows)
+}
+
+func rateLimitWindowsHaveWeeklyData(windows map[string]RateLimitWindow) bool {
+	for _, window := range windows {
+		if window.WeeklyWindow.UsedPercent >= 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeRateLimitWindows(primary rateLimitSnapshotRaw, byLimitID map[string]rateLimitSnapshotRaw) map[string]RateLimitWindow {

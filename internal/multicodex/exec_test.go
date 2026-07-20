@@ -749,6 +749,33 @@ func TestSelectExecProfilePersistsUsageSelectionMetadata(t *testing.T) {
 	}
 }
 
+func TestSelectExecProfileOmitsUnavailableWeeklyUsageMetadataForReserve(t *testing.T) {
+	app := newTestAppForCLI(t)
+	createExecProfiles(t, app, "alpha")
+
+	cfg, err := app.loadConfigIfExists()
+	if err != nil {
+		t.Fatalf("loadConfigIfExists: %v", err)
+	}
+	selected, err := app.selectExecProfile(cfg, func(_ context.Context, accounts []usage.MonitorAccount, _ string) (usage.SelectedAccount, error) {
+		for _, account := range accounts {
+			if account.Label == defaultExecAccountLabel {
+				return usage.SelectedAccount{Account: account, WeeklyUsedPercent: -1}, nil
+			}
+		}
+		return usage.SelectedAccount{}, errors.New("default reserve account missing")
+	}, "")
+	if err != nil {
+		t.Fatalf("selectExecProfile: %v", err)
+	}
+	if selected.Metadata.SelectionSource != "usage_selector_default_reserve" {
+		t.Fatalf("unexpected selection source %q", selected.Metadata.SelectionSource)
+	}
+	if selected.Metadata.WeeklyUsedPercent != nil {
+		t.Fatalf("expected unavailable weekly usage to be omitted, got %d", *selected.Metadata.WeeklyUsedPercent)
+	}
+}
+
 func TestWriteSelectedProfileMetadataNoPathIsNoOp(t *testing.T) {
 	if err := writeSelectedProfileMetadata(Paths{MulticodexHome: t.TempDir()}, "", execSelectionMetadata{Profile: "alpha"}); err != nil {
 		t.Fatalf("writeSelectedProfileMetadata without path failed: %v", err)

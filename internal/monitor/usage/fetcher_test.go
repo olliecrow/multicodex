@@ -1033,6 +1033,29 @@ func TestFetcherMarksWindowUnavailableWhenActiveFetchFails(t *testing.T) {
 	}
 }
 
+func TestFetcherDoesNotMarkSuccessfulActiveFetchWithoutWeeklyDataAvailable(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("CODEX_HOME", "/a")
+
+	f := &Fetcher{
+		accounts: []accountFetcher{{
+			account: MonitorAccount{Label: "a", CodexHome: "/a"},
+			primary: &fakeSource{name: "primary-a", out: &Summary{
+				WeeklyWindow: unavailableWindowSummary(),
+				FetchedAt:    time.Now().UTC(),
+			}},
+		}},
+	}
+	out, err := f.Fetch(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.WindowDataAvailable {
+		t.Fatal("expected a successful fetch without normalized weekly data to remain unavailable")
+	}
+}
+
 func TestFetcherSummarizesExpiredAuthWarning(t *testing.T) {
 	t.Setenv("CODEX_HOME", "")
 
