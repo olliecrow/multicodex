@@ -245,7 +245,7 @@ func (s *Store) resolveSkillResources(settings *SkillResources) (*resolvedSkillR
 		}
 		for _, entry := range entries {
 			name := strings.TrimSpace(entry.Name())
-			if name == "" || name == "." || name == ".." {
+			if !isInheritableSkillName(name) {
 				continue
 			}
 			if _, exists := resolved.desired[name]; !exists {
@@ -254,6 +254,10 @@ func (s *Store) resolveSkillResources(settings *SkillResources) (*resolvedSkillR
 		}
 	}
 	return resolved, nil
+}
+
+func isInheritableSkillName(name string) bool {
+	return name != "" && name != "." && name != ".." && name != ".system"
 }
 
 // validateProfileResourceDestinations checks profile-owned positions before any
