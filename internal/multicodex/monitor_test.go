@@ -28,6 +28,9 @@ func TestMonitorHelpIncludesDoctorAndTerminalUserInterfaceText(t *testing.T) {
 			t.Fatalf("expected %q in monitor help, got:\n%s", want, out)
 		}
 	}
+	if !strings.Contains(out, "--include-default Include the global Codex home (default true)") {
+		t.Fatalf("expected global Codex home default in monitor help, got:\n%s", out)
+	}
 }
 
 func TestHelpMonitorTopic(t *testing.T) {

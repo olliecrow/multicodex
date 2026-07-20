@@ -98,7 +98,7 @@ var commandHelpByName = map[string]commandHelp{
 	},
 	"monitor": {
 		Usage:       "multicodex monitor [--interval 60s] [--timeout 60s] [--no-color] [--no-alt-screen] [--include-default] [--include-active] [--discover]",
-		Description: "Run the live subscription-usage terminal UI. By default, the monitor reads explicit monitor account overrides and configured multicodex profiles. Default Codex home, active CODEX_HOME, and filesystem discovery are opt-in. If one refresh loses official window data for every account, the last good official window cards stay visible and are marked stale.",
+		Description: "Run the live subscription-usage terminal UI. By default, the monitor reads the global Codex home, explicit monitor account overrides, and configured multicodex profiles. Active CODEX_HOME and filesystem discovery are opt-in. If one refresh loses official window data for every account, the last good official window cards stay visible and are marked stale.",
 		Examples: []string{
 			"multicodex monitor",
 			"multicodex monitor --interval 30s",
@@ -107,7 +107,7 @@ var commandHelpByName = map[string]commandHelp{
 	},
 	"monitor doctor": {
 		Usage:       "multicodex monitor doctor [--json] [--timeout 60s] [--include-default] [--include-active] [--discover] [--app-server]",
-		Description: "Run read-only monitor checks against explicit monitor account overrides and configured multicodex profiles. Validated profile homes use app-server first with direct OAuth fallback; other homes use direct OAuth unless they dedupe with a validated profile. Default Codex home, active CODEX_HOME, filesystem discovery, and extra raw app-server checks are opt-in. The command succeeds when at least one usage source works and reports degraded status when another fetch or setup check fails.",
+		Description: "Run read-only monitor checks against the global Codex home, explicit monitor account overrides, and configured multicodex profiles. Validated profile homes use app-server first with direct OAuth fallback; other homes use direct OAuth unless they dedupe with a validated profile. Active CODEX_HOME, filesystem discovery, and extra raw app-server checks are opt-in. The command succeeds when at least one usage source works and reports degraded status when another fetch or setup check fails.",
 		Examples: []string{
 			"multicodex monitor doctor",
 			"multicodex monitor doctor --json",

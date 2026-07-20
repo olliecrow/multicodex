@@ -1240,7 +1240,7 @@ func TestFetcherMarksWindowUnavailableWhenActiveHomeMissing(t *testing.T) {
 	}
 }
 
-func TestFetcherExplainsHowToIncludeDefaultHome(t *testing.T) {
+func TestFetcherExplainsHowToIncludeGlobalHome(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("CODEX_HOME", "")
@@ -1255,8 +1255,8 @@ func TestFetcherExplainsHowToIncludeDefaultHome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if warning := strings.Join(out.Warnings, " | "); !strings.Contains(warning, "--include-default") {
-		t.Fatalf("expected actionable default-home warning, got %q", warning)
+	if warning := strings.Join(out.Warnings, " | "); !strings.Contains(warning, "global Codex home") || !strings.Contains(warning, "--include-default") {
+		t.Fatalf("expected actionable global-home warning, got %q", warning)
 	}
 }
 

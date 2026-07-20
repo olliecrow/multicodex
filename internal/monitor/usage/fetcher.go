@@ -50,7 +50,7 @@ type tokenEstimator interface {
 }
 
 func NewDefaultFetcher() *Fetcher {
-	return NewDefaultFetcherWithAccountOptions(MonitorAccountOptions{})
+	return newConfiguredFetcher(true)
 }
 
 func NewDefaultFetcherWithAccountOptions(options MonitorAccountOptions) *Fetcher {
@@ -255,7 +255,7 @@ func activeHomeNotMonitoredWarning() string {
 	if strings.TrimSpace(os.Getenv("CODEX_HOME")) != "" {
 		return "active CODEX_HOME is not in monitored accounts; rerun with --include-active to show its window cards"
 	}
-	return "default Codex home is not in monitored accounts; rerun with --include-default to show its window cards"
+	return "global Codex home is not in monitored accounts; rerun with --include-default to show its window cards"
 }
 
 func fetchWithFallback(ctx context.Context, primary Source, fallback Source) (*Summary, error) {
