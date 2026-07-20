@@ -792,7 +792,7 @@ func TestEnsureProfileDirLinksMissingDefaultSkillsEntries(t *testing.T) {
 		t.Fatalf("EnsureProfileDir: %v", err)
 	}
 
-	for _, name := range []string{"battletest", "codex-primary-runtime", ".system"} {
+	for _, name := range []string{"battletest", "codex-primary-runtime"} {
 		profilePath := filepath.Join(profile.CodexHome, "skills", name)
 		info, err := os.Lstat(profilePath)
 		if err != nil {
@@ -809,6 +809,9 @@ func TestEnsureProfileDirLinksMissingDefaultSkillsEntries(t *testing.T) {
 		if target != want {
 			t.Fatalf("unexpected symlink target for %s. got=%q want=%q", name, target, want)
 		}
+	}
+	if _, err := os.Lstat(filepath.Join(profile.CodexHome, "skills", ".system")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("runtime-managed .system must not be inherited, stat err=%v", err)
 	}
 }
 

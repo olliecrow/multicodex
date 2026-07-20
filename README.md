@@ -82,7 +82,7 @@ multicodex dry-run
 - Profile sessions, threads, and `/goal` state stay under that profile's `codex-home`.
 - Multicodex state directories, profile directories, profile `codex-home`, profile skills directories, `auth.json`, selected-profile metadata under `MULTICODEX_HOME/run`, heartbeat lock files, and config lock files must be profile-local regular filesystem entries with local-user-only directory permissions. Symlinks and hard links are rejected where they could cross account boundaries.
 - Profile `config.toml` defaults to a symlink from `~/multicodex/profiles/<name>/codex-home/config.toml` to the default Codex config at `~/.codex/config.toml`.
-- Unless configured otherwise, profile skills fill in missing top-level entries from `~/.codex/skills` using symlinks. Manual top-level profile skill overrides are left in place.
+- Unless configured otherwise, profile skills fill in missing portable top-level entries from `~/.codex/skills` using symlinks. Runtime-managed `.system` content is excluded, and manual top-level profile skill overrides are left in place.
 - To use a per-profile Codex config, replace the profile `config.toml` symlink with a regular profile-local `config.toml` file that still enables file-backed auth.
 
 ## Configurable Profile Resources
@@ -107,7 +107,7 @@ The optional `profile_resources` block in `~/multicodex/config.json` controls sh
 ```
 
 - `guidance.inherit: true` links the source directory's `AGENTS.md` and `AGENTS.override.md`. An omitted or empty `source` uses the default Codex home.
-- `skills.inherit: true` merges top-level entries from ordered `sources`; the first source wins name conflicts. An omitted `sources` key uses the default Codex skills directory. An explicit empty list is invalid.
+- `skills.inherit: true` merges portable top-level entries from ordered `sources`; the first source wins name conflicts. Runtime-managed `.system` content is excluded. An omitted `sources` key uses the default Codex skills directory. An explicit empty list is invalid.
 - `inherit: false` removes symlinks managed at that resource's profile locations. It never removes regular files or directories.
 - Either regular profile guidance file makes both guidance names a local override. Regular top-level profile skill entries override inherited entries with the same name.
 - `~` expands to the user home. Relative paths resolve from the directory containing `config.json`, normally `~/multicodex`, not from the current working directory.

@@ -716,7 +716,7 @@ func (s *Store) ensureProfileSkills(codexHome string) error {
 
 	for _, entry := range entries {
 		name := strings.TrimSpace(entry.Name())
-		if name == "" || name == "." || name == ".." {
+		if !isInheritableSkillName(name) {
 			continue
 		}
 
@@ -814,6 +814,11 @@ func (s *Store) removeStaleManagedSkillLinks(defaultSkillsPath, profileSkillsPat
 		}
 		if !pathIsInsideRoot(defaultSkillsPath, target) {
 			return fmt.Errorf("profile skill symlink must point under default skills directory: %s", profileEntryPath)
+		}
+		if !isInheritableSkillName(strings.TrimSpace(entry.Name())) {
+			if err := os.Remove(profileEntryPath); err != nil {
+				return fmt.Errorf("remove non-inheritable profile skill symlink %s: %w", profileEntryPath, err)
+			}
 		}
 	}
 	return nil
