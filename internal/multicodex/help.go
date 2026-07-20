@@ -23,6 +23,7 @@ var commandSummaries = []struct {
 	{Name: "cli <name> [codex args...]", Summary: "run the interactive Codex CLI with one profile"},
 	{Name: "exec [codex exec args]", Summary: "run codex exec on the best available account"},
 	{Name: "status", Summary: "show all profile auth states"},
+	{Name: "reconcile", Summary: "reconcile resources for all profiles"},
 	{Name: "heartbeat", Summary: "send a minimal keepalive hello for logged-in profiles"},
 	{Name: "monitor [flags]", Summary: "show live subscription usage across accounts"},
 	{Name: "monitor tui [flags]", Summary: "run the monitor terminal UI explicitly"},
@@ -87,6 +88,13 @@ var commandHelpByName = map[string]commandHelp{
 		Description: "Show profile-local login status and account hints.",
 		Examples: []string{
 			"multicodex status",
+		},
+	},
+	"reconcile": {
+		Usage:       "multicodex reconcile",
+		Description: "Reconcile configured guidance and skill resources for every profile. This does not inspect auth, launch Codex, or change the default Codex home.",
+		Examples: []string{
+			"multicodex reconcile",
 		},
 	},
 	"heartbeat": {
@@ -191,6 +199,7 @@ func printHelp() {
 	fmt.Println("  multicodex cli personal")
 	fmt.Println("  multicodex monitor")
 	fmt.Println("  multicodex heartbeat")
+	fmt.Println("  multicodex reconcile")
 	fmt.Println(`  eval "$(multicodex completion zsh)"`)
 	fmt.Println()
 	fmt.Println("Help:")
