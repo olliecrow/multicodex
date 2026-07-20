@@ -264,16 +264,18 @@ func (s *Store) resolveResourcePath(value string) (string, error) {
 	if value == "" {
 		return "", errors.New("path is blank")
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("resolve home directory: %w", err)
-	}
-	if value == "~" {
-		value = home
-	} else if strings.HasPrefix(value, "~/") {
-		value = filepath.Join(home, value[2:])
-	} else if strings.HasPrefix(value, "~") {
-		return "", fmt.Errorf("unsupported home path %q; use ~ or ~/path", value)
+	if strings.HasPrefix(value, "~") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("resolve home directory: %w", err)
+		}
+		if value == "~" {
+			value = home
+		} else if strings.HasPrefix(value, "~/") {
+			value = filepath.Join(home, value[2:])
+		} else {
+			return "", fmt.Errorf("unsupported home path %q; use ~ or ~/path", value)
+		}
 	}
 	if !filepath.IsAbs(value) {
 		value = filepath.Join(filepath.Dir(s.paths.ConfigPath), value)
@@ -370,10 +372,11 @@ func reconcileExplicitSkills(codexHome string, resolved *resolvedSkillResources)
 		}
 	}
 	sort.Strings(names)
+	desired := resolved.desired
 	if !resolved.inherit {
-		resolved = &resolvedSkillResources{desired: map[string]string{}}
+		desired = map[string]string{}
 	}
-	return reconcileOwnedLinks(profileSkillsPath, names, resolved.desired, "profile skill")
+	return reconcileOwnedLinks(profileSkillsPath, names, desired, "profile skill")
 }
 
 func reconcileOwnedLinks(root string, names []string, desired map[string]string, label string) ([]ResourceChange, error) {
