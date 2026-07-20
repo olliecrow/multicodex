@@ -29,6 +29,9 @@ func TestHelpCommandGlobal(t *testing.T) {
 	if !strings.Contains(out, "cli <name>") {
 		t.Fatalf("expected cli command in help output")
 	}
+	if !strings.Contains(out, "reconcile") {
+		t.Fatalf("expected reconcile command in help output")
+	}
 	if !strings.Contains(out, "multicodex help <command>") {
 		t.Fatalf("expected help topic usage in help output")
 	}
@@ -86,6 +89,9 @@ func TestCompletionCommandBash(t *testing.T) {
 	}
 	if !strings.Contains(out, "cli") {
 		t.Fatalf("expected cli command in completion output")
+	}
+	if !strings.Contains(out, "reconcile") {
+		t.Fatalf("expected reconcile command in completion output")
 	}
 	if !strings.Contains(out, "__complete-profiles") {
 		t.Fatalf("expected dynamic profile completion helper")

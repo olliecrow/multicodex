@@ -49,6 +49,7 @@ multicodex add work
 multicodex login personal
 multicodex login work
 multicodex status
+multicodex reconcile
 ```
 
 Run interactive Codex with one profile.
@@ -114,7 +115,9 @@ The optional `profile_resources` block in `~/multicodex/config.json` controls sh
 - When explicit management is enabled, symlinks at the two guidance names and directly under the profile `skills/` directory are multicodex-owned. Retargeting or removal reports the old target.
 - Codex's existing user-wide `$HOME/.agents/skills` and repository `.agents/skills` discovery stays separate and continues to work normally.
 
-Use `multicodex doctor` to validate configured sources and `multicodex dry-run` to see the effective policy and planned reconciliation without changing files. To recover from a bad link policy, set the affected `inherit` value to `false` and remove its `source` or `sources` field, run a normal profile command once, then remove the optional block to return to the original unmanaged-guidance and default-skill behavior.
+Use `multicodex doctor` to validate configured sources and `multicodex dry-run` to see the effective policy and planned reconciliation without changing files. To recover from a bad link policy, set the affected `inherit` value to `false` and remove its `source` or `sources` field, run `multicodex reconcile`, then remove the optional block to return to the original unmanaged-guidance and default-skill behavior.
+
+Run `multicodex reconcile` to apply the configured guidance and skill policy to every registered profile without inspecting auth or launching Codex. It uses the same no-clobber rules as `add`, `login`, `cli`, `exec`, and `heartbeat`: regular profile guidance and skill entries remain local overrides, while multicodex-owned links are created, retargeted, or removed as needed.
 
 ## Commands
 
@@ -126,6 +129,7 @@ multicodex login-all
 multicodex cli <name> [codex args...]
 multicodex exec [codex exec args]
 multicodex status
+multicodex reconcile
 multicodex heartbeat
 multicodex monitor [flags]
 multicodex monitor tui [flags]

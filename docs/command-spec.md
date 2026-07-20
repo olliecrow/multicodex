@@ -9,6 +9,7 @@
 - `multicodex cli <name> [codex args...]`
 - `multicodex exec [codex exec args]`
 - `multicodex status`
+- `multicodex reconcile`
 - `multicodex heartbeat`
 - `multicodex monitor [flags]`
 - `multicodex monitor tui [flags]`
@@ -81,6 +82,14 @@ Multicodex intentionally has no command for changing the shared default Codex ac
 - Does not manage or inspect the default Codex account as a multicodex profile.
 - Remains auth-only: it does not validate, reconcile, or claim readiness for configured profile resources.
 
+`multicodex reconcile`
+- Reconciles managed setup, guidance, and skill resources for every registered profile in sorted order.
+- Uses the same profile path, permission, config, and no-clobber rules as profile-scoped commands.
+- May create missing profile directories, repair multicodex-generated `config.toml` state, and create, retarget, or remove multicodex-owned resource links.
+- Preserves regular profile guidance, config, auth, and skill overrides.
+- Does not inspect auth, launch Codex, create Codex sessions, or change the default Codex home.
+- Continues through independent profile failures, reports every failure, and exits non-zero if any profile fails.
+
 `multicodex heartbeat`
 - Runs `codex exec --skip-git-repo-check --ephemeral --sandbox read-only --color never hello` for each logged-in profile.
 - Does not persist Codex session files.
@@ -152,7 +161,7 @@ Multicodex intentionally has no command for changing the shared default Codex ac
 - Explicit resource management owns symlinks at its managed profile positions, including pre-existing symlinks. It may retarget or remove them and reports old targets. Regular files and directories are preserved.
 - `inherit: false` removes managed symlinks. Populated source fields are invalid in this mode.
 - `~` expands to the user home. Relative paths resolve from the config file directory. Custom source directories must exist and have the expected type before reconciliation starts.
-- `add`, `login`, `login-all`, `cli`, `exec`, and `heartbeat` reconcile resources before a profile-scoped Codex launch. `doctor`, `dry-run`, `status`, and `monitor` do not mutate profile resources.
+- `add`, `login`, `login-all`, `cli`, `exec`, and `heartbeat` reconcile resources before a profile-scoped Codex launch. `reconcile` applies the same managed profile state to all profiles without launching Codex. `doctor`, `dry-run`, `status`, and `monitor` do not mutate profile resources.
 - Resource changes use normal command output, except `exec` writes them to standard error so Codex's standard output remains safe for scripts.
 
 `multicodex completion <shell>`

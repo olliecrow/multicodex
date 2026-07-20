@@ -91,7 +91,7 @@ func commandReadOnlyStartup(command string) (bool, bool) {
 	switch command {
 	case "status", "doctor", "dry-run", "monitor", "completion", "__complete-profiles":
 		return true, true
-	case "init", "add", "login", "login-all", "cli", "exec", "heartbeat":
+	case "init", "add", "login", "login-all", "cli", "exec", "heartbeat", "reconcile":
 		return false, true
 	default:
 		return false, false
@@ -124,6 +124,8 @@ func (a *App) Run(args []string) error {
 		return a.cmdExec(args[1:])
 	case "status":
 		return a.cmdStatus()
+	case "reconcile":
+		return a.cmdReconcile(args[1:])
 	case "heartbeat":
 		return a.cmdHeartbeat(args[1:])
 	case "monitor":

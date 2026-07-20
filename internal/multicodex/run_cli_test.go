@@ -51,6 +51,22 @@ func TestRunCLIUnknownCommandDoesNotMoveHiddenState(t *testing.T) {
 	}
 }
 
+func TestRunCLIReconcileInvalidArgsDoesNotCreateState(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("MULTICODEX_HOME", "")
+	t.Setenv("MULTICODEX_DEFAULT_CODEX_HOME", "")
+
+	err := RunCLI([]string{"reconcile", "unexpected"})
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) || exitErr.Code != 2 {
+		t.Fatalf("expected usage error, got %T (%v)", err, err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "multicodex")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected invalid reconcile not to create state, stat err=%v", err)
+	}
+}
+
 func TestRunCLIStatusDoesNotCreateConfig(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

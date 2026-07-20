@@ -19,6 +19,7 @@
 - User can run dry-run previews for key operations.
 - User can install shell tab-completion for command names and profile names.
 - User can optionally inherit profile guidance from one directory and skills from ordered source directories without changing omitted-setting behavior.
+- User can explicitly reconcile managed profile setup and resources across all registered profiles without auth checks or Codex execution.
 
 ## UX requirements
 - Simple command names.

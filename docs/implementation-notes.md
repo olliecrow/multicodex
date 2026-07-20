@@ -12,6 +12,7 @@
 - Provider primary/secondary fields are decoded only at the source boundary. The normalized model stores one weekly window for the default bucket and each model-specific bucket.
 - Exec selection metadata stores only `weekly_used_percent` for usage telemetry.
 - Non-mutating preflight and preview helpers in `internal/multicodex/doctor.go` and `internal/multicodex/dry_run.go`.
+- Explicit all-profile managed-state reconciliation in `internal/multicodex/reconcile.go`.
 
 ## Data layout
 - `~/multicodex/config.json` for profile metadata and the optional shared profile-resource policy.
@@ -27,7 +28,7 @@
 ## Verification strategy
 - Unit tests for config parsing and profile validation.
 - Resource tests cover omitted behavior, strict nested decoding, path forms, missing and wrong-type sources, guidance pair overrides, ordered skill merging, explicit isolation, source changes, foreign and broken symlinks, destination failures before mutation, and old-target reporting.
-- Command tests cover policy application in add, login, login-all, CLI, exec, and heartbeat. Exec tests also keep resource notices off Codex's standard output.
+- Command tests cover policy application in add, login, login-all, CLI, exec, heartbeat, and explicit all-profile reconciliation. Exec tests also keep resource notices off Codex's standard output.
 - Unit tests for environment and command wrapper behavior.
 - Unit tests for interactive CLI handoff into direct `codex` execution.
 - Unit tests for command help, status, and unknown commands that must not move local state or rewrite default auth.

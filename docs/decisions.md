@@ -217,6 +217,13 @@ Trade-offs: Mutating setup happens only in commands that explicitly create or up
 Enforcement: `RunCLI` handles top-level help, direct command help such as `cli --help`, version, and `exec --help` before path resolution, validates unknown commands before path resolution, and uses read-only path resolution for read-only commands. `status` loads existing config without creating a fresh home, and monitor commands no longer create the monitor data dir just to inspect usage. Tests cover help, unknown commands, status, command help, and `exec --help` leaving local state untouched.
 References: `cmd/multicodex/main.go`, `internal/multicodex/app.go`, `internal/multicodex/monitor.go`, `internal/multicodex/run_cli_test.go`, `internal/multicodex/paths.go`, `internal/multicodex/paths_test.go`
 
+Decision: Provide explicit all-profile reconciliation without auth or Codex execution.
+Context: Resource policies must be applied by unattended setup and refresh workflows, while status and diagnostic commands need to remain safe read-only probes.
+Rationale: One narrow `multicodex reconcile` command reuses the established profile setup and no-clobber rules instead of making `status` mutate state or forcing each deployment to duplicate profile ownership logic.
+Trade-offs: Reconciliation is an explicit mutating command and may repair multicodex-managed profile directories and config links in addition to guidance and skill links. It does not inspect auth, launch Codex, or change the default Codex home.
+Enforcement: The command processes registered profiles in sorted order under the config lock, continues after independent profile failures, and returns non-zero when any profile fails. Tests cover resource changes, idempotence, partial failure, auth preservation, empty state, and invalid arguments.
+References: `internal/multicodex/reconcile.go`, `internal/multicodex/reconcile_test.go`, `docs/command-spec.md`
+
 Decision: Clear stale profile and account environment for Codex subprocesses.
 Context: Commands can be launched from a shell that still has profile-scoped `CODEX_HOME`, multicodex metadata, or account-token environment variables.
 Rationale: A profile-scoped command should use only the intended profile home, and neutral help paths should behave like direct Codex help. Inherited account overrides could silently bypass profile auth isolation.

@@ -9,6 +9,7 @@ Core idea:
 - Do not manage the system default Codex auth account.
 - Show live subscription usage across compatible local accounts from the same product.
 - Provide non-mutating `doctor` and `dry-run` helpers for safe setup and operation preview.
+- Provide explicit all-profile reconciliation of managed profile state without auth checks or Codex execution.
 - Provide an optional `heartbeat` command for simple periodic keepalive checks across logged-in profiles.
 - Provide built-in help topics and shell completion scripts for user-friendly day-to-day usage.
 
