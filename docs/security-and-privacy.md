@@ -28,13 +28,6 @@
 - `multicodex doctor` should be used before release to verify leak-guard checks.
 - Committed tests, examples, logs, and review artifacts must use temporary or dummy resource paths and must not include private resource contents or machine-specific paths.
 
-## Public project standards inherited from broader workspace
-- Default repositories to private unless explicit consent says otherwise.
-- Never publish sensitive data in code, docs, issues, comments, PRs, or commit messages.
-- Avoid machine-specific local paths in committed docs. Use repo-relative or dummy paths.
-- Rewrite history only in rare, explicit cases.
-- If going public without history, archive prior repo privately and create a fresh public repo.
-
 ## Global auth boundary
 - Multicodex must not change, restore, back up, symlink, lock, or otherwise manage the shared default Codex auth account.
 - The system default Codex account is managed by normal Codex tooling outside multicodex.

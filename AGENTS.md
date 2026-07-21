@@ -1,64 +1,23 @@
-# Repository Guidelines
+# multicodex repository guidance
 
-## Repository Ownership
-- This repository belongs under the personal GitHub account `olliecrow`.
-- Do not move it to a GitHub organization or a different personal account unless Ollie explicitly asks for that change.
-- When docs, remotes, automation, releases, or publishing steps need the owning GitHub account, use `olliecrow`.
+## Purpose and layout
 
-## Docs, Plans, and Decisions (agent usage)
-- `docs/` is long-lived and committed (and may use nested directories + cross-links to stay organized).
-- `plan/` is short-lived scratch space and is not committed.
-- Decision capture policy lives in `docs/decisions.md`.
-- Operating workflow conventions live in `docs/workflows.md`.
+- `multicodex` is a local-first Go CLI for isolated Codex subscription profiles, automatic `codex exec` routing, heartbeat checks, and usage monitoring.
+- `cmd/multicodex/` contains the entry point. Product code and tests live under `internal/`.
+- `README.md` is the user guide. `docs/command-spec.md` is the command contract, `docs/security-and-privacy.md` is the security contract, and `docs/decisions.md` records durable cross-cutting rationale.
 
-## Plan Directory Structure (agent usage)
-- `plan/current/`
-- `plan/backlog/`
-- `plan/complete/`
-- `plan/experiments/`
-- `plan/artifacts/`
-- `plan/scratch/`
-- `plan/handoffs/`
+## Product invariants
 
-## Note routing
-- Active notes go in `plan/current/notes.md`.
-- Multi-workstream index goes in `plan/current/notes-index.md`.
-- Orchestrator packet status goes in `plan/current/orchestrator-status.md`.
-- Workflow conventions are documented in `docs/workflows.md`.
+- Keep each profile's auth, sessions, threads, `/goal`, and other Codex state inside its profile-local `CODEX_HOME`.
+- Never change, copy, restore, back up, symlink, or otherwise manage the shared default Codex auth account. It is only a protected final routing reserve and a read-only monitor source.
+- Never print raw credentials or raw subprocess failure output that could contain credentials. Tests and examples must use synthetic state and dummy paths.
+- Preserve resource reconciliation's no-clobber behavior: regular profile guidance, config, and skill entries are user overrides; only documented multicodex-owned symlinks may be changed. Runtime-managed `.system` skills remain profile-local.
+- Keep usage and routing weekly-only. Prefer declared 10,080-minute windows and retain only the existing narrow compatibility fallback for older provider responses.
+- Keep the CLI surface and error behavior aligned with `docs/command-spec.md`.
 
-## Operating defaults
-- Keep changes minimal, explicit, and security first.
-- Follow the high-confidence change discipline in `docs/workflows.md`.
-- Never commit credentials, tokens, local auth files, or machine-specific private paths.
-- This repository is public. Treat new repositories as private by default until Ollie explicitly approves making them public.
+## Development
 
-## Dictation-Aware Input Handling
-- The user often dictates prompts, so minor transcription errors and homophone substitutions are expected.
-- Infer intent from local context and repository state; ask a concise clarification only when ambiguity changes execution risk.
-- Keep explicit typo dictionaries at workspace level (do not duplicate repo-local typo maps).
-
-## Third-Party Dependency Trust Policy
-- Prefer official packages, libraries, SDKs, frameworks, and services from authoritative sources.
-- Prefer options that are reputable, well-maintained, popular, and well-supported.
-- Before adopting or upgrading third-party dependencies, verify ownership/publisher authenticity, maintenance activity, security history, license fit, and ecosystem adoption.
-- Avoid low-trust, obscure, or weakly maintained dependencies when a stronger alternative exists.
-- Pin versions and keep lockfiles current for reproducibility and supply-chain safety.
-- If trust signals are unclear, do not adopt the dependency until explicitly approved.
-
-<!-- third-party-policy:start -->
-## Third-Party Repository Handling
-- External repositories may be cloned for static analysis only.
-- Clone them only into ephemeral `plan/` locations such as `plan/scratch/upstream/` or `plan/artifacts/external/`.
-- Immediately sanitize clone metadata: prefer `rm -rf .git`; if `.git` is temporarily needed, remove all remotes first and then remove `.git`.
-- Never execute third-party code (no scripts, tests, builds, package installs, binaries, or containers).
-- Persistent remotes in this repo must reference only `github.com/olliecrow/*`.
-<!-- third-party-policy:end -->
-
-## Plain English Default
-- Use plain English in chat, session replies, docs, notes, comments, reports, commit messages, issue text, and review text.
-- Prefer short words, short sentences, and direct statements.
-- If a technical term is needed for correctness, explain it in simple words the first time.
-- In code, prefer clear descriptive names for files, folders, flags, config keys, functions, classes, types, variables, tests, and examples.
-- Avoid vague names, short cryptic names, and cute internal code names unless an old established name is already clearer than changing it.
-- When touching old code, rename confusing names if the change is low risk and clearly improves readability.
-- Keep the durable why for this rule in `docs/decisions.md`.
+- Format Go changes with `gofmt`.
+- Run focused tests while iterating, then `go test ./...`, `go test -race ./...`, and `go vet ./...` for material changes.
+- Update `README.md` and `docs/command-spec.md` together when user-visible commands, flags, output, or routing behavior changes.
+- Keep temporary plans and artifacts in ignored `plan/`; do not commit them.
