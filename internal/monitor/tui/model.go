@@ -480,8 +480,10 @@ func (m Model) accountWindowRows() []accountWindowRow {
 		if out[i].weeklyResetSeconds != out[j].weeklyResetSeconds {
 			return out[i].weeklyResetSeconds < out[j].weeklyResetSeconds
 		}
-		if strings.ToLower(out[i].name) != strings.ToLower(out[j].name) {
-			return strings.ToLower(out[i].name) < strings.ToLower(out[j].name)
+		leftName := strings.ToLower(out[i].name)
+		rightName := strings.ToLower(out[j].name)
+		if leftName != rightName {
+			return leftName < rightName
 		}
 		return false
 	})
