@@ -171,7 +171,7 @@ func rejectTopLevelArguments(args []string) error {
 }
 
 func printVersion() {
-	fmt.Printf("%s %s\n", appName, appVersion)
+	fmt.Printf("%s %s\n", appName, version())
 }
 
 func (a *App) loadOrInitConfig() (*Config, error) {

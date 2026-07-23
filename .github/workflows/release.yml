@@ -1,0 +1,83 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version: '1.26.5'
+          cache: true
+
+      - name: Validate release tag
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ ! "${RELEASE_TAG}" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "release tag must use semantic version syntax such as v1.2.3" >&2
+            exit 1
+          fi
+          git fetch origin main
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" origin/main; then
+            echo "release tag must point to a commit on main" >&2
+            exit 1
+          fi
+
+      - name: Verify source
+        run: |
+          go test ./...
+          go test -race ./...
+          go vet ./...
+
+      - name: Build release archives
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          mkdir -p dist
+          for target in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64; do
+            os="${target%/*}"
+            arch="${target#*/}"
+            name="multicodex_${version}_${os}_${arch}"
+            mkdir -p "dist/${name}"
+            CGO_ENABLED=0 GOOS="${os}" GOARCH="${arch}" go build \
+              -trimpath \
+              -ldflags="-s -w -X github.com/olliecrow/multicodex/internal/buildinfo.Version=${RELEASE_TAG}" \
+              -o "dist/${name}/multicodex" \
+              ./cmd/multicodex
+            cp LICENSE README.md "dist/${name}/"
+            tar -C "dist/${name}" -czf "dist/${name}.tar.gz" multicodex LICENSE README.md
+            if [[ "${target}" == "linux/amd64" ]]; then
+              test "$("dist/${name}/multicodex" version)" = "multicodex ${RELEASE_TAG}"
+            fi
+          done
+          cd dist
+          sha256sum ./*.tar.gz > SHA256SUMS
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            dist/*.tar.gz \
+            dist/SHA256SUMS \
+            --generate-notes \
+            --title "${GITHUB_REF_NAME}" \
+            --verify-tag

@@ -15,13 +15,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/olliecrow/multicodex/internal/buildinfo"
 	"github.com/olliecrow/multicodex/internal/codexstate"
 )
 
-const (
-	clientName    = "multicodex-monitor"
-	clientVersion = "0.1.0"
-)
+const clientName = "multicodex-monitor"
 
 type rpcRequest struct {
 	JSONRPC string `json:"jsonrpc"`
@@ -287,7 +285,7 @@ func (s *appServerSession) ensureInitialized(ctx context.Context) error {
 	if err := s.request(ctx, "initialize", initializeParams{
 		ClientInfo: clientInfo{
 			Name:    clientName,
-			Version: clientVersion,
+			Version: buildinfo.Version,
 		},
 		Capabilities: map[string]interface{}{},
 	}, &initResult); err != nil {

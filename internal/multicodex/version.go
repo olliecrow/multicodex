@@ -1,6 +1,9 @@
 package multicodex
 
-const (
-	appName    = "multicodex"
-	appVersion = "0.1.0-dev"
-)
+import "github.com/olliecrow/multicodex/internal/buildinfo"
+
+const appName = "multicodex"
+
+func version() string {
+	return buildinfo.Version
+}
