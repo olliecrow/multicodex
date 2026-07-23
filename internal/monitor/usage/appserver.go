@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/olliecrow/multicodex/internal/codexstate"
 )
 
 const (
@@ -501,43 +503,5 @@ func upsertEnvVar(env []string, key, value string) []string {
 }
 
 func withoutCodexProfileEnv(env []string) []string {
-	clean := make([]string, 0, len(env))
-	for _, kv := range env {
-		key, _, ok := strings.Cut(kv, "=")
-		if !ok {
-			continue
-		}
-		if monitorAppServerEnvShouldBeStripped(key) {
-			continue
-		}
-		clean = append(clean, kv)
-	}
-	return clean
-}
-
-func monitorAppServerEnvShouldBeStripped(key string) bool {
-	switch key {
-	case "CODEX_HOME",
-		"MULTICODEX_ACTIVE_PROFILE",
-		"MULTICODEX_SELECTED_PROFILE_PATH",
-		"MULTICODEX_HEARTBEAT_LOCK_PATH",
-		"MULTICODEX_HEARTBEAT_PROMPT",
-		"OPENAI_API_KEY",
-		"OPENAI_ORG_ID",
-		"OPENAI_ORGANIZATION",
-		"OPENAI_PROJECT",
-		"OPENAI_BASE_URL",
-		"OPENAI_API_BASE",
-		"OPENAI_HOST",
-		"CODEX_API_KEY",
-		"CODEX_AUTH_TOKEN",
-		"CODEX_ACCESS_TOKEN",
-		"CODEX_REFRESH_TOKEN",
-		"CODEX_TOKEN",
-		"CODEX_BASE_URL",
-		"CODEX_API_BASE":
-		return true
-	default:
-		return false
-	}
+	return codexstate.SanitizedEnv(env, "")
 }

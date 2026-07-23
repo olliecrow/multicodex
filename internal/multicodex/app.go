@@ -46,6 +46,9 @@ func RunCLI(args []string) error {
 		printHelp()
 		return nil
 	}
+	if err := rejectTopLevelArguments(args); err != nil {
+		return err
+	}
 	switch args[0] {
 	case "help", "-h", "--help":
 		if len(args) == 1 {
@@ -103,6 +106,9 @@ func (a *App) Run(args []string) error {
 		printHelp()
 		return nil
 	}
+	if err := rejectTopLevelArguments(args); err != nil {
+		return err
+	}
 
 	switch args[0] {
 	case "help", "-h", "--help":
@@ -140,6 +146,27 @@ func (a *App) Run(args []string) error {
 		return a.cmdDryRun(args[1:])
 	default:
 		return &ExitError{Code: 2, Message: fmt.Sprintf("unknown command: %s\nrun \"multicodex help\" for available commands", args[0])}
+	}
+}
+
+func rejectArguments(args []string, usage string) error {
+	if len(args) == 0 {
+		return nil
+	}
+	return &ExitError{Code: 2, Message: usage}
+}
+
+func rejectTopLevelArguments(args []string) error {
+	if len(args) < 2 {
+		return nil
+	}
+	switch args[0] {
+	case "init", "login-all", "status", "__complete-profiles":
+		return rejectArguments(args[1:], "usage: multicodex "+args[0])
+	case "version", "-v", "--version":
+		return rejectArguments(args[1:], "usage: multicodex version")
+	default:
+		return nil
 	}
 }
 
@@ -368,6 +395,9 @@ func (a *App) cmdDoctor(args []string) error {
 	jsonOutput := fs.Bool("json", false, "output doctor report as JSON")
 	timeout := fs.Duration("timeout", 8*time.Second, "timeout for command checks")
 	if err := fs.Parse(args); err != nil {
+		return &ExitError{Code: 2, Message: "usage: multicodex doctor [--json] [--timeout 8s]"}
+	}
+	if fs.NArg() != 0 {
 		return &ExitError{Code: 2, Message: "usage: multicodex doctor [--json] [--timeout 8s]"}
 	}
 	if *timeout <= 0 {

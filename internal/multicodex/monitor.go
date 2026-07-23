@@ -29,6 +29,9 @@ func (a *App) cmdMonitor(args []string) error {
 	case "completion":
 		return a.runMonitorCompletion(args[1:])
 	case "help", "-h", "--help":
+		if err := rejectArguments(args[1:], "usage: multicodex monitor help"); err != nil {
+			return err
+		}
 		printMonitorUsage()
 		return nil
 	default:
@@ -52,6 +55,9 @@ func (a *App) runMonitorDoctor(args []string) error {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}
+		return &ExitError{Code: 2, Message: "usage: multicodex monitor doctor [--json] [--timeout 60s] [--include-default] [--include-active] [--discover] [--app-server]"}
+	}
+	if fs.NArg() != 0 {
 		return &ExitError{Code: 2, Message: "usage: multicodex monitor doctor [--json] [--timeout 60s] [--include-default] [--include-active] [--discover] [--app-server]"}
 	}
 	if *timeout <= 0 {
@@ -113,6 +119,9 @@ func (a *App) runMonitorTUI(args []string) error {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}
+		return &ExitError{Code: 2, Message: "usage: multicodex monitor [--interval 60s] [--timeout 60s] [--no-color] [--no-alt-screen] [--include-default] [--include-active] [--discover]"}
+	}
+	if fs.NArg() != 0 {
 		return &ExitError{Code: 2, Message: "usage: multicodex monitor [--interval 60s] [--timeout 60s] [--no-color] [--no-alt-screen] [--include-default] [--include-active] [--discover]"}
 	}
 	if *interval <= 0 {

@@ -67,6 +67,39 @@ func TestRunCLIReconcileInvalidArgsDoesNotCreateState(t *testing.T) {
 	}
 }
 
+func TestRunCLIRejectsUndocumentedArgumentsBeforeCreatingState(t *testing.T) {
+	commands := [][]string{
+		{"init", "unexpected"},
+		{"login-all", "unexpected"},
+		{"status", "unexpected"},
+		{"version", "unexpected"},
+		{"__complete-profiles", "unexpected"},
+		{"doctor", "unexpected"},
+		{"monitor", "doctor", "unexpected"},
+		{"monitor", "tui", "unexpected"},
+		{"monitor", "help", "unexpected"},
+	}
+
+	for _, args := range commands {
+		args := args
+		t.Run(strings.Join(args, "_"), func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("MULTICODEX_HOME", "")
+			t.Setenv("MULTICODEX_DEFAULT_CODEX_HOME", "")
+
+			err := RunCLI(args)
+			var exitErr *ExitError
+			if !errors.As(err, &exitErr) || exitErr.Code != 2 {
+				t.Fatalf("RunCLI(%q) = %T (%v), want exit code 2", args, err, err)
+			}
+			if _, err := os.Stat(filepath.Join(home, "multicodex")); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("invalid command created state, stat err=%v", err)
+			}
+		})
+	}
+}
+
 func TestRunCLIStatusDoesNotCreateConfig(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
