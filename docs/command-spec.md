@@ -173,6 +173,9 @@ Multicodex intentionally has no command for changing the shared default Codex ac
 - Prints global help when no topic is provided.
 - Prints command-specific usage, description, and examples for one topic, including nested monitor topics.
 
+`multicodex version`
+- Prints the build version on one line. Tagged release binaries report their tag; untagged source builds report a development version.
+
 ## Error Handling
 
 - Fail fast with actionable messages.

@@ -40,6 +40,10 @@ Optional local install path.
 mv ./multicodex ~/.local/bin/multicodex
 ```
 
+Tagged releases publish checksummed macOS and Linux archives for AMD64 and ARM64. Release binaries report their tag through `multicodex version`; untagged source builds report a development version. Verify an archive against `SHA256SUMS` before installing it.
+
+Contributor setup, required checks, and the release process are documented in [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Quick Start
 
 ```bash

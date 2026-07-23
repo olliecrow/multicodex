@@ -9,6 +9,13 @@ Trade-offs: Slightly more verbose than shell scripts, but safer and easier to te
 Enforcement: Build and test pipeline will run Go tooling only.
 References: `go.mod`, `docs/security-and-privacy.md`
 
+Decision: Produce release binaries only from version tags and inject one shared version.
+Context: Public binaries need reproducible provenance, consistent CLI/app-server identification, and checksums without hand-edited version constants.
+Rationale: A tag-triggered workflow makes release publication explicit and gives every built target the same version derived from the tag.
+Trade-offs: Untagged source builds report a development version, and supported release targets remain limited to macOS and Linux on AMD64 and ARM64.
+Enforcement: `internal/buildinfo` is the single version source; release builds replace it with the tag through Go linker flags, run the full local gates, and publish checksummed archives.
+References: `internal/buildinfo/version.go`, `.github/workflows/release.yml`, `CONTRIBUTING.md`
+
 Decision: Keep account use profile-local and never switch the shared default Codex account.
 Context: The default Codex account is normal system Codex state and must stay outside multicodex ownership.
 Rationale: Binding non-default accounts to profile-local `CODEX_HOME` values reduces the chance that one account workflow changes another account's auth, sessions, threads, `/goal`, or remote-control state.
@@ -72,19 +79,12 @@ Trade-offs: More concurrent subprocesses and slightly more code complexity.
 Enforcement: Timeout handling in status logic, worker-limited parallel collection, and timeout regression tests.
 References: `internal/multicodex/status.go`, `internal/multicodex/status_timeout_test.go`, `internal/multicodex/doctor.go`
 
-Decision: Add a profile-scoped `heartbeat` keepalive command using minimal Codex calls.
-Context: Users want a simple fire-and-forget way to keep subscription windows active and verify each logged-in profile still works.
-Rationale: Running `codex exec --skip-git-repo-check --ephemeral --sandbox read-only --color never hello` inside each profile context is simple, independent, compatible with official auth flows, and avoids polluting session history.
-Trade-offs: Heartbeat sends a tiny real request for each logged-in profile, so there is a small per-run usage cost.
-Enforcement: `multicodex heartbeat` first checks login state per profile, skips logged-out profiles, and exits non-zero for failures or no logged-in profiles.
-References: `internal/multicodex/heartbeat.go`, `internal/multicodex/heartbeat_test.go`, `README.md`, `docs/command-spec.md`
-
-Decision: Redact heartbeat failure details from raw CLI output.
-Context: Raw `codex exec` failure text may include sensitive strings and should not be reflected in multicodex output.
-Rationale: Returning deterministic, non-sensitive status text lowers leakage risk while preserving actionable diagnostics.
-Trade-offs: Less verbose error context in the CLI output.
-Enforcement: Heartbeat failure details use generic messages with timeout or exit code metadata only; known safe diagnostics (for example missing `codex` binary) are explicit; table output truncates long profile names to keep terminal output readable; tests assert secret-like output is not surfaced.
-References: `internal/multicodex/heartbeat.go`, `internal/multicodex/heartbeat_test.go`, `docs/security-and-privacy.md`
+Decision: Keep heartbeat profile-scoped, minimal, cron-safe, and safe to report.
+Context: Users want a fire-and-forget keepalive that verifies logged-in profiles, tolerates transient failures, and is safe to schedule.
+Rationale: A fixed `hello` through ephemeral, read-only `codex exec` preserves official auth flows without persistent sessions or workspace mutation. Local locking and one bounded retry avoid overlapping or needlessly failed runs, while safe status text prevents raw subprocess output from leaking credentials.
+Trade-offs: Each logged-in profile sends a tiny real request; retries can delay final failure; redacted diagnostics contain less provider detail.
+Enforcement: Heartbeat uses each profile's `CODEX_HOME`, skips logged-out profiles, acquires a non-blocking lock under multicodex home, and runs `codex exec --skip-git-repo-check --ephemeral --sandbox read-only --color never hello` with bounded retry. Failures expose only safe timeout, exit-code, or startup guidance, and the command exits non-zero for failures or no logged-in profiles.
+References: `internal/multicodex/heartbeat.go`, `internal/multicodex/heartbeat_test.go`, `README.md`, `docs/command-spec.md`, `docs/security-and-privacy.md`
 
 Decision: Add built-in command help topics and shell completion generation.
 Context: Users need fast command discovery and low-friction tab completion for daily usage.
@@ -121,26 +121,12 @@ Trade-offs: A profile-specific live request is now done through `multicodex cli 
 Enforcement: Manual verification uses `multicodex status`, an optional `multicodex cli <name>` read-only prompt, and a follow-up `multicodex status` check. Automated exec routing is covered through `multicodex exec` tests.
 References: `README.md`, `docs/command-spec.md`
 
-Decision: Make heartbeat cron-safe with local locking, bounded retries, and read-only execution.
-Context: Scheduled keepalive runs should not overlap, should tolerate transient failures, and should never need to mutate the current workspace or the default Codex account.
-Rationale: A local OS lock avoids duplicate overlapping work, one retry with linear backoff handles short-lived provider hiccups, and forcing `codex exec` into ephemeral read-only mode avoids session-history pollution and reduces accidental side effects during automated refresh runs.
-Trade-offs: Slightly more heartbeat code and a small delay before final failure when retries are used.
-Enforcement: `multicodex heartbeat` acquires a non-blocking lock under multicodex home, retries failed profile heartbeats, runs `codex exec` with `--ephemeral --sandbox read-only`, and keeps all auth routing profile-scoped via `CODEX_HOME`. Exact-argv tests prevent persistent execution from returning accidentally.
-References: `internal/multicodex/heartbeat.go`, `internal/multicodex/heartbeat_test.go`, `README.md`, `docs/command-spec.md`
-
 Decision: Fold subscription usage monitoring into multicodex under a namespaced `monitor` command.
 Context: Users choose between multiple Codex accounts based on both account isolation and remaining subscription headroom, so keeping switching and monitoring in separate products created an avoidable split workflow.
 Rationale: One product with a dedicated `monitor` namespace matches the real user workflow while keeping usage visibility clearly separated from mutating account-management commands.
 Trade-offs: The repo and CLI gain more code and dependencies, so the monitor must stay modular and avoid bloating the root command surface.
-Enforcement: The integrated monitor lives under `internal/monitor/`; the primary user entrypoint is `multicodex monitor`; default monitor account candidates include the global Codex home, labeled `global`, plus monitor-owned account overrides and configured multicodex profiles. The global home can be omitted with `--include-default=false`; active `CODEX_HOME`, filesystem discovery, and extra raw app-server diagnostics remain explicit opt-ins. When the same Codex home appears more than once, labels and source details prefer monitor-owned overrides, then multicodex profiles, then the global home and other optional sources by their configured priority.
-References: `internal/multicodex/monitor.go`, `internal/monitor/usage/accounts.go`, `internal/monitor/tui/model.go`, `README.md`, `docs/command-spec.md`
-
-Decision: Keep monitor helper subcommands under the `monitor` namespace.
-Context: Users need monitor-specific help, terminal UI launch, setup checks, and shell completion from the same namespaced command group.
-Rationale: Keeping these helpers under `multicodex monitor` makes the monitor workflow discoverable without adding more top-level commands.
-Trade-offs: Slightly more command-surface and completion/help maintenance.
-Enforcement: `multicodex monitor completion [shell]` remains available with bash default; explicit UI command `multicodex monitor tui` remains help-addressable; help topics and shell completion include nested monitor topics such as `monitor doctor`, `monitor completion`, and `monitor tui`.
-References: `internal/multicodex/monitor.go`, `internal/multicodex/help.go`, `internal/multicodex/completion.go`, `internal/multicodex/monitor_test.go`, `README.md`, `docs/command-spec.md`
+Enforcement: The integrated monitor lives under `internal/monitor/`; its UI, doctor, completion, and help entrypoints remain under `multicodex monitor`. Default account candidates include the global Codex home, monitor-owned overrides, and configured profiles. The global home can be omitted with `--include-default=false`; active `CODEX_HOME`, filesystem discovery, and extra raw app-server diagnostics remain opt-ins. Duplicate homes prefer monitor-owned labels, then multicodex profiles, then the global home and other optional sources.
+References: `internal/multicodex/monitor.go`, `internal/multicodex/help.go`, `internal/multicodex/completion.go`, `internal/multicodex/monitor_test.go`, `internal/monitor/usage/accounts.go`, `internal/monitor/tui/model.go`, `README.md`, `docs/command-spec.md`
 
 Decision: Default profile config to the shared global Codex config, while preserving explicit per-profile overrides.
 Context: Users expect Codex feature settings such as search or model defaults to stay consistent across regular Codex usage and multicodex profile usage without copying config files into each profile.
