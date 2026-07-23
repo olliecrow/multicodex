@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/olliecrow/multicodex/internal/buildinfo"
 )
 
 const (
@@ -55,7 +57,7 @@ func (s *OAuthSource) Fetch(ctx context.Context) (*Summary, error) {
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "multicodex-monitor/0.1")
+	req.Header.Set("User-Agent", clientName+"/"+buildinfo.Version)
 
 	res, err := s.httpClient.Do(req)
 	if err != nil {

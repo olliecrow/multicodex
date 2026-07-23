@@ -10,7 +10,7 @@ Enforcement: Build and test pipeline will run Go tooling only.
 References: `go.mod`, `docs/security-and-privacy.md`
 
 Decision: Produce release binaries only from version tags and inject one shared version.
-Context: Public binaries need reproducible provenance, consistent CLI/app-server identification, and checksums without hand-edited version constants.
+Context: Public binaries need reproducible provenance, consistent CLI and provider client identification, and checksums without hand-edited version constants.
 Rationale: A tag-triggered workflow makes release publication explicit and gives every built target the same version derived from the tag.
 Trade-offs: Untagged source builds report a development version, and supported release targets remain limited to macOS and Linux on AMD64 and ARM64.
 Enforcement: `internal/buildinfo` is the single version source; release builds replace it with the tag through Go linker flags, run the full local gates, and publish checksummed archives.
