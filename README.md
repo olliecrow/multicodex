@@ -289,6 +289,7 @@ go build -o multicodex ./cmd/multicodex
 - Does not store raw secrets in multicodex config.
 - Does not change, restore, back up, symlink, or otherwise manage the shared default Codex auth account.
 - Scrubs inherited account-routing and account-token environment variables before launching profile-scoped Codex commands.
+- Reports external failures with safe status codes and recovery guidance without echoing raw provider bodies, app-server messages, or subprocess failure output.
 - `monitor` is read-only and does not mutate Codex account data.
 - `doctor` and `dry-run` are non-mutating helpers.
 - `doctor` includes repo leak guards for tracked sensitive files and ignore-pattern coverage.

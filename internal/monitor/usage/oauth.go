@@ -69,7 +69,7 @@ func (s *OAuthSource) Fetch(ctx context.Context) (*Summary, error) {
 	}
 
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("oauth endpoint returned HTTP %d: %s", res.StatusCode, summarizeBody(body))
+		return nil, safeProviderHTTPError("oauth endpoint", res.StatusCode, body)
 	}
 
 	var payload oauthUsagePayload
@@ -226,14 +226,6 @@ func usableAuthFile(path string) (bool, error) {
 		return false, fmt.Errorf("auth.json permissions are %o, expected 600: %s", info.Mode().Perm(), path)
 	}
 	return true, nil
-}
-
-func summarizeBody(b []byte) string {
-	s := strings.TrimSpace(string(b))
-	if len(s) > 180 {
-		return s[:180] + "..."
-	}
-	return s
 }
 
 func toMins(seconds int) *int {

@@ -177,6 +177,7 @@ Multicodex intentionally has no command for changing the shared default Codex ac
 
 - Fail fast with actionable messages.
 - Never dump secret content in errors.
+- External failures report safe status or exit codes and allowlisted recovery guidance, not raw provider bodies, app-server messages, or subprocess failure output.
 - Use deterministic exit codes where practical.
 
 ## Profile Naming

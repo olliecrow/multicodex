@@ -235,9 +235,9 @@ References: `internal/monitor/usage/fetcher.go`, `internal/monitor/usage/fetcher
 
 Decision: Prefer a plain-English re-login warning when monitor fetches fail because a profile token expired.
 Context: The monitor can detect expired profile auth from both the app-server path and the oauth fallback, but the raw provider error is long and easy to miss in the TUI diagnostics line.
-Rationale: A short warning such as `account "work" auth expired; sign in again` tells the operator what to do next without hiding the underlying failure from deeper debug output.
-Trade-offs: The top-level warning is less literal than the raw provider response, so the account row still keeps the original error text for debugging and tests.
-Enforcement: Multi-account monitor summaries collapse token-expired fetch errors into plain-English account warnings, and the TUI diagnostics priority prefers those re-login warnings ahead of generic account fetch failures when no active-window warning is present.
+Rationale: A short warning such as `account "work" auth expired; sign in again` tells the operator what to do next without exposing arbitrary external text.
+Trade-offs: Diagnostics retain safe HTTP, RPC, and process status codes but omit raw provider and subprocess failure details.
+Enforcement: Usage sources classify known auth failures at their trust boundary, expose only allowlisted recovery guidance, and never copy raw provider response bodies or app-server messages into monitor output.
 References: `internal/monitor/usage/fetcher.go`, `internal/monitor/usage/fetcher_test.go`, `internal/monitor/tui/model.go`, `internal/monitor/tui/model_test.go`, `README.md`, `docs/command-spec.md`
 
 Decision: Declared weekly-only provider responses stay visible and usable.

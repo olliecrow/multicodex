@@ -154,6 +154,34 @@ func TestStoreLoadKeepsUnrelatedTopLevelFieldsPermissive(t *testing.T) {
 	}
 }
 
+func TestStoreLoadRejectsUnsupportedVersionWithoutRewritingConfig(t *testing.T) {
+	root := t.TempDir()
+	paths := Paths{
+		MulticodexHome: filepath.Join(root, "multi"),
+		ConfigPath:     filepath.Join(root, "multi", "config.json"),
+		ProfilesDir:    filepath.Join(root, "multi", "profiles"),
+	}
+	store := NewStore(paths)
+	if err := store.EnsureBaseDirs(); err != nil {
+		t.Fatal(err)
+	}
+	raw := `{"version":2,"future_field":{"keep":true},"profiles":{}}`
+	if err := os.WriteFile(paths.ConfigPath, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := store.Load(); err == nil || !strings.Contains(err.Error(), "unsupported config version 2") {
+		t.Fatalf("expected unsupported-version error, got %v", err)
+	}
+	after, err := os.ReadFile(paths.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != raw {
+		t.Fatalf("unsupported config was rewritten: %q", after)
+	}
+}
+
 func TestStoreSaveDoesNotWriteThroughPredictableTempSymlink(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("MULTICODEX_HOME", filepath.Join(root, "multicodex"))

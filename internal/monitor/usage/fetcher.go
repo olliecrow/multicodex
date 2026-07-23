@@ -304,10 +304,12 @@ func simplifiedAuthWarning(label string, err error) string {
 	case msg == "":
 		return ""
 	case strings.Contains(msg, "token_expired"),
+		strings.Contains(msg, "authentication expired"),
 		strings.Contains(msg, "provided authentication token is expired"),
 		strings.Contains(msg, "auth token is expired"):
 		return fmt.Sprintf("account %q auth expired; sign in again", label)
-	case strings.Contains(msg, "401 unauthorized") && strings.Contains(msg, "sign in again"):
+	case strings.Contains(msg, "authentication rejected"),
+		strings.Contains(msg, "401 unauthorized") && strings.Contains(msg, "sign in again"):
 		return fmt.Sprintf("account %q auth rejected; sign in again", label)
 	default:
 		return ""

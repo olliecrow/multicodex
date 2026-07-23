@@ -13,7 +13,7 @@
 - Keep profile `auth.json` files readable only by the local user.
 - Use atomic writes to prevent partial secret files.
 - Zero secret data from logs and diagnostics by default.
-- Heartbeat output must never echo raw `codex exec` stdout or stderr on failures.
+- User-visible diagnostics must never echo raw provider response bodies, app-server error messages, or Codex subprocess failure output. Preserve only safe status codes and allowlisted recovery guidance.
 - Profile-scoped Codex subprocesses must scrub inherited Codex/OpenAI account override environment variables before setting the selected profile `CODEX_HOME`.
 - Profile resource settings may name local directories outside the default Codex home. The user owns the trust decision for those sources; multicodex only creates symlinks and does not execute or copy source contents.
 - Explicit resource reconciliation validates all configured sources before profile mutation. It removes or retargets only symlinks at documented managed positions and preserves regular profile guidance and skill entries.
