@@ -176,6 +176,7 @@ Multicodex intentionally has no command for changing the shared default Codex ac
 ## Error Handling
 
 - Fail fast with actionable messages.
+- Reject undocumented positional arguments with exit code `2` instead of silently ignoring them.
 - Never dump secret content in errors.
 - External failures report safe status or exit codes and allowlisted recovery guidance, not raw provider bodies, app-server messages, or subprocess failure output.
 - Use deterministic exit codes where practical.

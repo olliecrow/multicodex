@@ -143,6 +143,8 @@ multicodex help [command [subcommand]]
 multicodex --version
 ```
 
+Commands reject undocumented positional arguments instead of silently ignoring them.
+
 ## Interactive CLI
 
 `multicodex cli <name> [codex args...]` launches the official `codex` CLI with that profile's `CODEX_HOME`.

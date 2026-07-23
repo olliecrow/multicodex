@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
+
+	"github.com/olliecrow/multicodex/internal/codexstate"
 )
 
 const configVersion = 1
@@ -421,65 +422,11 @@ func profileConfigCredentialStore(configPath string) (string, bool, error) {
 		}
 		return "", false, fmt.Errorf("read profile config: %w", err)
 	}
-	store, found, err := parseCredentialStoreFromTOML(string(b))
+	store, found, err := codexstate.CredentialStoreFromTOML(string(b))
 	if err != nil {
 		return "", false, fmt.Errorf("parse profile config: %w", err)
 	}
 	return store, found, nil
-}
-
-func parseCredentialStoreFromTOML(content string) (string, bool, error) {
-	inRootTable := true
-	multilineDelimiter := ""
-	for _, rawLine := range strings.Split(content, "\n") {
-		line := strings.TrimSpace(stripTOMLComment(rawLine))
-		if line == "" {
-			continue
-		}
-		if multilineDelimiter != "" {
-			if strings.Contains(line, multilineDelimiter) {
-				multilineDelimiter = ""
-			}
-			continue
-		}
-		if strings.HasPrefix(line, "[[") && strings.HasSuffix(line, "]]") {
-			inRootTable = false
-			continue
-		}
-		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
-			inRootTable = false
-			continue
-		}
-		if !inRootTable {
-			continue
-		}
-
-		assignIdx := indexTOMLUnquotedByte(line, '=')
-		if assignIdx == -1 {
-			continue
-		}
-
-		key, err := parseTOMLKey(line[:assignIdx])
-		if err != nil {
-			return "", false, err
-		}
-		if key != "cli_auth_credentials_store" {
-			value := strings.TrimSpace(line[assignIdx+1:])
-			if strings.HasPrefix(value, `"""`) && strings.Count(value, `"""`)%2 == 1 {
-				multilineDelimiter = `"""`
-			} else if strings.HasPrefix(value, `'''`) && strings.Count(value, `'''`)%2 == 1 {
-				multilineDelimiter = `'''`
-			}
-			continue
-		}
-
-		value, err := parseTOMLStringOrBareValue(line[assignIdx+1:])
-		if err != nil {
-			return "", false, err
-		}
-		return value, true, nil
-	}
-	return "", false, nil
 }
 
 func ensureRegularFileOrSymlinkTarget(path, label string) error {
@@ -528,108 +475,6 @@ func ensureRegularSingleFileForWrite(path, label string) error {
 		return err
 	}
 	return nil
-}
-
-func parseTOMLKey(raw string) (string, error) {
-	key := strings.TrimSpace(raw)
-	if key == "" {
-		return "", errors.New("empty config key")
-	}
-	if len(key) >= 2 && key[0] == '"' && key[len(key)-1] == '"' {
-		unquoted, err := strconv.Unquote(key)
-		if err != nil {
-			return "", fmt.Errorf("invalid quoted config key %q: %w", key, err)
-		}
-		return unquoted, nil
-	}
-	if len(key) >= 2 && key[0] == '\'' && key[len(key)-1] == '\'' {
-		return key[1 : len(key)-1], nil
-	}
-	return key, nil
-}
-
-func parseTOMLStringOrBareValue(raw string) (string, error) {
-	value := strings.TrimSpace(raw)
-	if value == "" {
-		return "", errors.New("cli_auth_credentials_store has empty value")
-	}
-	if len(value) >= 2 && value[0] == '"' && value[len(value)-1] == '"' {
-		unquoted, err := strconv.Unquote(value)
-		if err != nil {
-			return "", fmt.Errorf("invalid quoted cli_auth_credentials_store value %q: %w", value, err)
-		}
-		return unquoted, nil
-	}
-	if len(value) >= 2 && value[0] == '\'' && value[len(value)-1] == '\'' {
-		return value[1 : len(value)-1], nil
-	}
-	return "", fmt.Errorf("invalid cli_auth_credentials_store value %q", value)
-}
-
-func stripTOMLComment(line string) string {
-	inDouble := false
-	inSingle := false
-	escaped := false
-	for i := 0; i < len(line); i++ {
-		ch := line[i]
-		switch {
-		case escaped:
-			escaped = false
-		case inDouble:
-			if ch == '\\' {
-				escaped = true
-			} else if ch == '"' {
-				inDouble = false
-			}
-		case inSingle:
-			if ch == '\'' {
-				inSingle = false
-			}
-		default:
-			switch ch {
-			case '"':
-				inDouble = true
-			case '\'':
-				inSingle = true
-			case '#':
-				return line[:i]
-			}
-		}
-	}
-	return line
-}
-
-func indexTOMLUnquotedByte(s string, needle byte) int {
-	inDouble := false
-	inSingle := false
-	escaped := false
-	for i := 0; i < len(s); i++ {
-		ch := s[i]
-		switch {
-		case escaped:
-			escaped = false
-		case inDouble:
-			if ch == '\\' {
-				escaped = true
-			} else if ch == '"' {
-				inDouble = false
-			}
-		case inSingle:
-			if ch == '\'' {
-				inSingle = false
-			}
-		default:
-			switch ch {
-			case '"':
-				inDouble = true
-			case '\'':
-				inSingle = true
-			case needle:
-				return i
-			}
-		}
-	}
-	return -1
 }
 
 func (s *Store) ensureProfileConfig(codexHome string) error {

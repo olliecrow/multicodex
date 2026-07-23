@@ -8,9 +8,10 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"syscall"
+
+	"github.com/olliecrow/multicodex/internal/codexstate"
 )
 
 const (
@@ -326,103 +327,11 @@ func monitorConfigFileUsesFileStore(path string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("read profile config: %w", err)
 	}
-	multilineDelimiter := ""
-	for _, rawLine := range strings.Split(string(data), "\n") {
-		line := strings.TrimSpace(monitorStripTOMLComment(rawLine))
-		if line == "" {
-			continue
-		}
-		if multilineDelimiter != "" {
-			if strings.Contains(line, multilineDelimiter) {
-				multilineDelimiter = ""
-			}
-			continue
-		}
-		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
-			return false, nil
-		}
-		assignIdx := monitorIndexTOMLUnquotedByte(line, '=')
-		if assignIdx == -1 || monitorTOMLKey(strings.TrimSpace(line[:assignIdx])) != "cli_auth_credentials_store" {
-			if assignIdx != -1 {
-				value := strings.TrimSpace(line[assignIdx+1:])
-				if strings.HasPrefix(value, `"""`) && strings.Count(value, `"""`)%2 == 1 {
-					multilineDelimiter = `"""`
-				} else if strings.HasPrefix(value, `'''`) && strings.Count(value, `'''`)%2 == 1 {
-					multilineDelimiter = `'''`
-				}
-			}
-			continue
-		}
-		value, ok := monitorTOMLStringValue(strings.TrimSpace(line[assignIdx+1:]))
-		if !ok {
-			return false, nil
-		}
-		return value == "file", nil
+	store, found, err := codexstate.CredentialStoreFromTOML(string(data))
+	if err != nil {
+		return false, fmt.Errorf("parse profile config: %w", err)
 	}
-	return false, nil
-}
-
-func monitorTOMLKey(raw string) string {
-	if len(raw) >= 2 && raw[0] == '"' && raw[len(raw)-1] == '"' {
-		unquoted, err := strconv.Unquote(raw)
-		if err == nil {
-			return unquoted
-		}
-	}
-	if len(raw) >= 2 && raw[0] == '\'' && raw[len(raw)-1] == '\'' {
-		return raw[1 : len(raw)-1]
-	}
-	return raw
-}
-
-func monitorTOMLStringValue(raw string) (string, bool) {
-	if len(raw) < 2 {
-		return "", false
-	}
-	if raw[0] == '"' && raw[len(raw)-1] == '"' {
-		unquoted, err := strconv.Unquote(raw)
-		if err != nil {
-			return "", false
-		}
-		return unquoted, true
-	}
-	if raw[0] == '\'' && raw[len(raw)-1] == '\'' {
-		return raw[1 : len(raw)-1], true
-	}
-	return "", false
-}
-
-func monitorIndexTOMLUnquotedByte(s string, needle byte) int {
-	inDouble := false
-	inSingle := false
-	escaped := false
-	for i := 0; i < len(s); i++ {
-		ch := s[i]
-		switch {
-		case escaped:
-			escaped = false
-		case inDouble:
-			if ch == '\\' {
-				escaped = true
-			} else if ch == '"' {
-				inDouble = false
-			}
-		case inSingle:
-			if ch == '\'' {
-				inSingle = false
-			}
-		default:
-			switch ch {
-			case '"':
-				inDouble = true
-			case '\'':
-				inSingle = true
-			case needle:
-				return i
-			}
-		}
-	}
-	return -1
+	return found && store == "file", nil
 }
 
 func monitorResolveExistingPath(path string) (string, error) {
@@ -444,39 +353,6 @@ func isMulticodexProfileHome(home string) bool {
 		return false
 	}
 	return strings.HasSuffix(rel, string(os.PathSeparator)+"codex-home")
-}
-
-func monitorStripTOMLComment(line string) string {
-	inDouble := false
-	inSingle := false
-	escaped := false
-	for i := 0; i < len(line); i++ {
-		ch := line[i]
-		switch {
-		case escaped:
-			escaped = false
-		case inDouble:
-			if ch == '\\' {
-				escaped = true
-			} else if ch == '"' {
-				inDouble = false
-			}
-		case inSingle:
-			if ch == '\'' {
-				inSingle = false
-			}
-		default:
-			switch ch {
-			case '"':
-				inDouble = true
-			case '\'':
-				inSingle = true
-			case '#':
-				return line[:i]
-			}
-		}
-	}
-	return line
 }
 
 func loadAccountsFromFile() ([]MonitorAccount, string, error) {

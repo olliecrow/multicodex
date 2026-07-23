@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"strings"
 	"syscall"
+
+	"github.com/olliecrow/multicodex/internal/codexstate"
 )
 
 var execLookPath = exec.LookPath
@@ -75,48 +77,7 @@ func neutralCodexEnv(base []string) []string {
 }
 
 func sanitizedCodexEnv(base []string, codexHome string) []string {
-	env := make([]string, 0, len(base)+2)
-	for _, kv := range base {
-		key, _, ok := strings.Cut(kv, "=")
-		if !ok {
-			continue
-		}
-		if codexEnvVarShouldBeStripped(key) {
-			continue
-		}
-		env = append(env, kv)
-	}
-	if codexHome != "" {
-		env = append(env, "CODEX_HOME="+codexHome)
-	}
-	return env
-}
-
-func codexEnvVarShouldBeStripped(key string) bool {
-	switch key {
-	case "CODEX_HOME",
-		"MULTICODEX_ACTIVE_PROFILE",
-		"MULTICODEX_SELECTED_PROFILE_PATH",
-		"MULTICODEX_HEARTBEAT_LOCK_PATH",
-		"MULTICODEX_HEARTBEAT_PROMPT",
-		"OPENAI_API_KEY",
-		"OPENAI_ORG_ID",
-		"OPENAI_ORGANIZATION",
-		"OPENAI_PROJECT",
-		"OPENAI_BASE_URL",
-		"OPENAI_API_BASE",
-		"OPENAI_HOST",
-		"CODEX_API_KEY",
-		"CODEX_AUTH_TOKEN",
-		"CODEX_ACCESS_TOKEN",
-		"CODEX_REFRESH_TOKEN",
-		"CODEX_TOKEN",
-		"CODEX_BASE_URL",
-		"CODEX_API_BASE":
-		return true
-	default:
-		return false
-	}
+	return codexstate.SanitizedEnv(base, codexHome)
 }
 
 func shellQuoteValue(value string) string {
