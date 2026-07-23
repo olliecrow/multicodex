@@ -17,4 +17,6 @@ Report security concerns privately through GitHub private vulnerability reportin
 - impact assessment
 - any suggested fix or mitigation
 
+If private vulnerability reporting is unavailable, open a minimal public issue asking the maintainers to establish a private reporting channel. Do not include vulnerability details in that issue.
+
 Security reports are handled on a best-effort basis. If a report is clearly not security-sensitive, it may be redirected to the normal public issue tracker.
