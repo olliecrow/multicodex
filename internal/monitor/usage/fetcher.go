@@ -12,9 +12,6 @@ import (
 )
 
 type Fetcher struct {
-	primary  Source
-	fallback Source
-
 	accounts                []accountFetcher
 	observed                tokenEstimator
 	initializationNote      string
@@ -49,25 +46,13 @@ type tokenEstimator interface {
 	Estimate(codexHome string, now time.Time) (ObservedTokenEstimate, error)
 }
 
-func NewDefaultFetcher() *Fetcher {
-	return newConfiguredFetcher(true)
-}
-
 func NewDefaultFetcherWithAccountOptions(options MonitorAccountOptions) *Fetcher {
-	return newConfiguredFetcherWithLoader(true, func() ([]MonitorAccount, string, error) {
+	return newFetcherWithAccountLoader(true, func() ([]MonitorAccount, string, error) {
 		return loadMonitorAccountsWithOptions(options)
 	})
 }
 
-func NewSnapshotFetcher() *Fetcher {
-	return newConfiguredFetcherWithLoader(false, loadMonitorAccounts)
-}
-
-func newConfiguredFetcher(asyncObserved bool) *Fetcher {
-	return newConfiguredFetcherWithLoader(asyncObserved, loadMonitorAccounts)
-}
-
-func newConfiguredFetcherWithLoader(asyncObserved bool, loader func() ([]MonitorAccount, string, error)) *Fetcher {
+func newFetcherWithAccountLoader(asyncObserved bool, loader func() ([]MonitorAccount, string, error)) *Fetcher {
 	f := &Fetcher{
 		observed:               newObservedTokenEstimator(60*time.Second, asyncObserved),
 		accountLoader:          loader,
@@ -84,26 +69,11 @@ func (f *Fetcher) Fetch(ctx context.Context) (*Summary, error) {
 	if len(f.accounts) > 0 {
 		return f.fetchMultiAccount(ctx)
 	}
-	if f.accountLoader != nil {
-		msg := "no monitor accounts configured"
-		if f.initializationNote != "" {
-			msg += ": " + f.initializationNote
-		}
-		return nil, fmt.Errorf("%s", msg)
+	msg := "no monitor accounts configured"
+	if f.initializationNote != "" {
+		msg += ": " + f.initializationNote
 	}
-	return f.fetchSingle(ctx)
-}
-
-func (f *Fetcher) fetchSingle(ctx context.Context) (*Summary, error) {
-	if f.primary == nil {
-		return nil, fmt.Errorf("missing primary source")
-	}
-
-	primarySummary, primaryErr := fetchWithFallback(ctx, f.primary, f.fallback)
-	if primaryErr != nil {
-		return nil, primaryErr
-	}
-	return primarySummary, nil
+	return nil, fmt.Errorf("%s", msg)
 }
 
 func (f *Fetcher) fetchMultiAccount(ctx context.Context) (*Summary, error) {
@@ -353,25 +323,7 @@ func (f *Fetcher) Close() error {
 			}
 		}
 	}
-	if f.primary != nil {
-		if err := f.primary.Close(); err != nil && firstErr == nil {
-			firstErr = err
-		}
-	}
-	if f.fallback != nil {
-		if err := f.fallback.Close(); err != nil && firstErr == nil {
-			firstErr = err
-		}
-	}
 	return firstErr
-}
-
-func (f *Fetcher) Primary() Source {
-	return f.primary
-}
-
-func (f *Fetcher) Fallback() Source {
-	return f.fallback
 }
 
 func int64Ptr(v int64) *int64 {

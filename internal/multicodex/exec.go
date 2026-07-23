@@ -59,11 +59,6 @@ func (a *App) cmdExec(args []string) error {
 		return err
 	}
 	if selected.IsProfile {
-		changes, err := a.store.EnsureProfileDir(selected.Profile, cfg.ProfileResources)
-		if err != nil {
-			return err
-		}
-		printResourceChangesToStderr(changes)
 		if err := ensureProfileCodexExecutionReady(a.store.paths, selected.Profile); err != nil {
 			return err
 		}

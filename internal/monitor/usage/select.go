@@ -37,14 +37,14 @@ var chooseRandomResultIndex = func(candidates []int) int {
 	return candidates[int(n.Int64())]
 }
 
-func NewSnapshotFetcherForAccounts(accounts []MonitorAccount) *Fetcher {
+func newSnapshotFetcherForAccounts(accounts []MonitorAccount) *Fetcher {
 	f := &Fetcher{}
 	f.replaceAccountFetchers(accounts)
 	return f
 }
 
 func SelectBestAccountForModel(ctx context.Context, accounts []MonitorAccount, model string) (SelectedAccount, error) {
-	f := NewSnapshotFetcherForAccounts(accounts)
+	f := newSnapshotFetcherForAccounts(accounts)
 	defer f.Close()
 	return f.SelectAccountForModel(ctx, model)
 }

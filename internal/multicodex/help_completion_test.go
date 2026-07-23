@@ -115,6 +115,27 @@ func TestCompletionCommandUnsupportedShell(t *testing.T) {
 	}
 }
 
+func TestCompletionDoesNotSuggestExistingProfilesForAdd(t *testing.T) {
+	tests := []struct {
+		name string
+		out  string
+		bad  string
+		good string
+	}{
+		{name: "bash", out: renderBashCompletion(), bad: "add|login|cli)", good: "login|cli)"},
+		{name: "zsh", out: renderZshCompletion(), bad: "add|login|cli)", good: "login|cli)"},
+		{name: "fish", out: renderFishCompletion(), bad: "__fish_seen_subcommand_from add login cli", good: "__fish_seen_subcommand_from login cli"},
+	}
+	for _, test := range tests {
+		if strings.Contains(test.out, test.bad) {
+			t.Errorf("%s completion still suggests existing profiles for add", test.name)
+		}
+		if !strings.Contains(test.out, test.good) {
+			t.Errorf("%s completion no longer suggests profiles for login and cli", test.name)
+		}
+	}
+}
+
 func TestCompleteProfilesSorted(t *testing.T) {
 	app := newTestAppForCLI(t)
 	if err := app.store.EnsureBaseDirs(); err != nil {

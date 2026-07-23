@@ -59,7 +59,7 @@ _multicodex_complete() {
   fi
 
   case "$cmd" in
-    add|login|cli)
+    login|cli)
       if (( COMP_CWORD == 2 )); then
         COMPREPLY=( $(compgen -W "$(_multicodex_profiles)" -- "$cur") )
         return 0
@@ -154,7 +154,7 @@ _multicodex_complete() {
   fi
 
   case "$cmd" in
-    add|login|cli)
+    login|cli)
       if (( CURRENT == 3 )); then
         compadd -- ${=($(_multicodex_profiles))}
         return
@@ -227,7 +227,7 @@ function __multicodex_profiles
 end
 
 complete -c multicodex -f -n '__fish_use_subcommand' -a 'init add login login-all cli exec status reconcile heartbeat monitor doctor dry-run completion version help'
-complete -c multicodex -f -n '__fish_seen_subcommand_from add login cli' -a '(__multicodex_profiles)'
+complete -c multicodex -f -n '__fish_seen_subcommand_from login cli' -a '(__multicodex_profiles)'
 complete -c multicodex -f -n '__fish_seen_subcommand_from monitor' -a 'doctor completion help tui'
 complete -c multicodex -f -n '__fish_seen_subcommand_from monitor' -l interval
 complete -c multicodex -f -n '__fish_seen_subcommand_from monitor' -l timeout
