@@ -110,6 +110,9 @@ func (s *Store) Load() (*Config, error) {
 	if err := json.Unmarshal(b, cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
+	if cfg.Version != 0 && cfg.Version != configVersion {
+		return nil, fmt.Errorf("unsupported config version %d; expected %d", cfg.Version, configVersion)
+	}
 	if cfg.Profiles == nil {
 		cfg.Profiles = map[string]Profile{}
 	}

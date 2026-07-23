@@ -259,6 +259,26 @@ func TestLoadMonitorAccountsWarnsOnEmptyAccounts(t *testing.T) {
 	}
 }
 
+func TestLoadMonitorAccountsRejectsUnsupportedAccountsVersion(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv(multicodexHomeEnvVar, filepath.Join(tmp, defaultMulticodexHomeDirName))
+	accountsPath := filepath.Join(tmp, "accounts.json")
+	t.Setenv(accountsFileEnvVar, accountsPath)
+	if err := os.WriteFile(accountsPath, []byte(`{"version":2,"accounts":[]}`), 0o600); err != nil {
+		t.Fatalf("write accounts file: %v", err)
+	}
+
+	_, warning, err := loadMonitorAccounts()
+	if err != nil {
+		t.Fatalf("unexpected aggregate load error: %v", err)
+	}
+	if !strings.Contains(warning, "unsupported accounts file version 2") {
+		t.Fatalf("expected unsupported-version warning, got %q", warning)
+	}
+}
+
 func TestLoadMonitorAccountsAutoDiscoversSystemCodexHomes(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
@@ -509,6 +529,29 @@ func TestLoadMonitorAccountsPrefersMulticodexProfiles(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected multicodex profile account to be included, got %#v", accounts)
+	}
+}
+
+func TestLoadMonitorAccountsRejectsUnsupportedMulticodexVersion(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("CODEX_HOME", "")
+	configDir := filepath.Join(tmp, defaultMulticodexHomeDirName)
+	t.Setenv(multicodexHomeEnvVar, configDir)
+	t.Setenv(accountsFileEnvVar, filepath.Join(tmp, "missing.json"))
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatalf("mkdir multicodex dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte(`{"version":2,"profiles":{}}`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, warning, err := loadMonitorAccounts()
+	if err != nil {
+		t.Fatalf("unexpected aggregate load error: %v", err)
+	}
+	if !strings.Contains(warning, "unsupported multicodex config version 2") {
+		t.Fatalf("expected unsupported-version warning, got %q", warning)
 	}
 }
 

@@ -132,6 +132,30 @@ func TestCodexLoginStatusTreatsZeroExitNegativeOutputAsLoggedOut(t *testing.T) {
 	}
 }
 
+func TestCodexLoginStatusRedactsFailureOutput(t *testing.T) {
+	root := t.TempDir()
+	fakeBin := filepath.Join(root, "bin")
+	if err := os.MkdirAll(fakeBin, 0o700); err != nil {
+		t.Fatalf("mkdir fake bin: %v", err)
+	}
+	script := "#!/bin/sh\nprintf 'opaque-provider-diagnostic\\n' >&2\nexit 7\n"
+	if err := os.WriteFile(filepath.Join(fakeBin, "codex"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake codex: %v", err)
+	}
+	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	state, _, detail := codexLoginStatus(filepath.Join(root, "codex-home"))
+	if state != "error" {
+		t.Fatalf("expected error state, got %q", state)
+	}
+	if strings.Contains(detail, "opaque-provider-diagnostic") {
+		t.Fatalf("failure output leaked into detail: %q", detail)
+	}
+	if !strings.Contains(detail, "exit code 7") {
+		t.Fatalf("expected safe exit-code detail, got %q", detail)
+	}
+}
+
 func newStatusTestApp(t *testing.T) (*App, string) {
 	t.Helper()
 

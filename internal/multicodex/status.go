@@ -177,12 +177,12 @@ func codexLoginStatus(codexHome string) (state, account, detail string) {
 			return "error", account, fmt.Sprintf("codex login status timed out after %s", codexLoginStatusTimeout)
 		}
 		if loginStatusTextIndicatesLoggedOut(lower) {
-			return "logged-out", account, firstLineOrDash(all)
+			return "logged-out", account, "not logged in"
 		}
-		return "error", account, firstLineOrDash(all)
+		return "error", account, fmt.Sprintf("codex login status failed with exit code %d", ee.ExitCode())
 	}
 
-	return "error", account, err.Error()
+	return "error", account, "codex login status could not be started"
 }
 
 func loginStatusTextIndicatesLoggedOut(lower string) bool {

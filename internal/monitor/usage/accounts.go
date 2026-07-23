@@ -46,6 +46,7 @@ type MonitorAccountOptions struct {
 }
 
 type multicodexConfigFile struct {
+	Version  int `json:"version"`
 	Profiles map[string]struct {
 		Name      string `json:"name"`
 		CodexHome string `json:"codex_home"`
@@ -160,6 +161,9 @@ func loadAccountsFromMulticodexConfig() ([]MonitorAccount, string, error) {
 	var raw multicodexConfigFile
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, "", fmt.Errorf("decode multicodex config %s: %w", configPath, err)
+	}
+	if raw.Version != 0 && raw.Version != 1 {
+		return nil, "", fmt.Errorf("unsupported multicodex config version %d; expected 1", raw.Version)
 	}
 	if len(raw.Profiles) == 0 {
 		return nil, "", nil
@@ -498,6 +502,9 @@ func loadAccountsFromFile() ([]MonitorAccount, string, error) {
 	var raw accountFile
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, "", fmt.Errorf("decode accounts file %s: %w", accountsPath, err)
+	}
+	if raw.Version != 0 && raw.Version != 1 {
+		return nil, "", fmt.Errorf("unsupported accounts file version %d; expected 1", raw.Version)
 	}
 	if len(raw.Accounts) == 0 {
 		return nil, fmt.Sprintf("accounts file %s is empty", accountsPath), nil

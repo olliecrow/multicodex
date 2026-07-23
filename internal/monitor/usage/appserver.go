@@ -358,7 +358,7 @@ func (s *appServerSession) request(ctx context.Context, method string, params an
 			return fmt.Errorf("request %s aborted: %w", method, s.doneErrSnapshot())
 		}
 		if msg.Error != nil {
-			return fmt.Errorf("%s failed: %s", method, msg.Error.Message)
+			return safeProviderRPCError(method, msg.Error)
 		}
 		if out != nil {
 			if err := json.Unmarshal(msg.Result, out); err != nil {
