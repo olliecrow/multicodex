@@ -64,6 +64,41 @@ func TestDoctorReportStatus(t *testing.T) {
 	}
 }
 
+func TestCheckSourceFetchFormatsWeeklyUsage(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		weekly WindowSummary
+		want   string
+	}{
+		{name: "unused", weekly: WindowSummary{UsedPercent: 0}, want: "plan=pro weekly=0% source=app-server"},
+		{name: "partly used", weekly: WindowSummary{UsedPercent: 24}, want: "plan=pro weekly=24% source=app-server"},
+		{name: "exhausted", weekly: WindowSummary{UsedPercent: 100}, want: "plan=pro weekly=100% source=app-server"},
+		{name: "unavailable", weekly: unavailableWindowSummary(), want: "plan=pro weekly=unavailable source=app-server"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			check := checkSourceFetch(context.Background(), MonitorAccount{Label: "personal"}, &fakeSource{
+				name: "app-server",
+				out: &Summary{
+					PlanType:     "pro",
+					Source:       "app-server",
+					WeeklyWindow: tc.weekly,
+				},
+			})
+
+			if !check.OK {
+				t.Fatalf("expected successful check, got %q", check.Details)
+			}
+			if check.Details != tc.want {
+				t.Fatalf("Details = %q, want %q", check.Details, tc.want)
+			}
+		})
+	}
+}
+
 func TestCheckCodexBinaryScrubsCodexEnvironment(t *testing.T) {
 	root := t.TempDir()
 	fakeBin := filepath.Join(root, "bin")

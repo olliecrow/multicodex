@@ -123,6 +123,13 @@ func checkSourceFetch(ctx context.Context, account MonitorAccount, source Source
 	return DoctorCheck{
 		Name:    name,
 		OK:      true,
-		Details: fmt.Sprintf("plan=%s weekly=%d%% source=%s", summary.PlanType, summary.WeeklyWindow.UsedPercent, summary.Source),
+		Details: fmt.Sprintf("plan=%s weekly=%s source=%s", summary.PlanType, formatDoctorWeeklyUsage(summary.WeeklyWindow), summary.Source),
 	}
+}
+
+func formatDoctorWeeklyUsage(window WindowSummary) string {
+	if window.UsedPercent == unavailableUsedPercent {
+		return "unavailable"
+	}
+	return fmt.Sprintf("%d%%", window.UsedPercent)
 }
