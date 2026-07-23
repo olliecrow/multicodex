@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/olliecrow/multicodex/internal/buildinfo"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -26,6 +28,9 @@ func TestOAuthSourceFetchLeavesNonWeeklyPrimaryOnlyWindowUnknown(t *testing.T) {
 	source.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		if got := req.Header.Get("Authorization"); got != "Bearer test-token" {
 			t.Fatalf("expected bearer token header, got %q", got)
+		}
+		if got := req.Header.Get("User-Agent"); got != clientName+"/"+buildinfo.Version {
+			t.Fatalf("expected versioned user agent, got %q", got)
 		}
 		body := `{
 			"email": "user@example.com",

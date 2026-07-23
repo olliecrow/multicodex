@@ -25,4 +25,4 @@ Explain the user-visible outcome and the checks you ran. CI tests Linux and macO
 
 ## Releases
 
-Maintainers create a version tag only after the main branch is green. Tags matching `v*` run the release workflow, which verifies the source and publishes checksummed macOS and Linux archives for AMD64 and ARM64. The tag is injected into both CLI and app-server version reporting.
+Maintainers create a version tag only after the main branch is green. Tags matching `v*` run the release workflow, which verifies the source and publishes checksummed macOS and Linux archives for AMD64 and ARM64. The tag is injected into CLI output and provider client identification.
