@@ -666,11 +666,7 @@ func resolveAccountsFilePath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defaultPath := filepath.Join(dir, defaultAccountsFileName)
-	if fileExists(defaultPath) {
-		return defaultPath, nil
-	}
-	return defaultPath, nil
+	return filepath.Join(dir, defaultAccountsFileName), nil
 }
 
 func monitorDataDir() (string, error) {
@@ -679,14 +675,6 @@ func monitorDataDir() (string, error) {
 		return "", err
 	}
 	return filepath.Join(multicodexHome, defaultMonitorSubdirName), nil
-}
-
-func EnsureMonitorDataDir() error {
-	dir, err := monitorDataDir()
-	if err != nil {
-		return err
-	}
-	return os.MkdirAll(dir, 0o700)
 }
 
 func defaultCodexHome() (string, error) {

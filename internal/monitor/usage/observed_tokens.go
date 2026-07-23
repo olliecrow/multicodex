@@ -491,16 +491,7 @@ func (a *tokenAccumulator) addTokenUsage(usage tokenUsageTotal) {
 }
 
 func (a tokenAccumulator) toBreakdown() ObservedTokenBreakdown {
-	return ObservedTokenBreakdown{
-		Total:           a.Total,
-		Input:           a.Input,
-		CachedInput:     a.CachedInput,
-		Output:          a.Output,
-		ReasoningOutput: a.ReasoningOutput,
-		CachedOutput:    a.CachedOutput,
-		HasSplit:        a.HasSplit,
-		HasCachedOutput: a.HasCachedOutput,
-	}
+	return ObservedTokenBreakdown(a)
 }
 
 func (t tokenUsageTotal) hasUsage() bool {

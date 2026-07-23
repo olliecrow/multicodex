@@ -160,14 +160,6 @@ type authFilePayload struct {
 	} `json:"tokens"`
 }
 
-func findAuthJSONPath() (string, error) {
-	home, err := defaultCodexHome()
-	if err != nil {
-		return "", err
-	}
-	return findAuthJSONPathForHome(home)
-}
-
 func findAuthJSONPathForHome(codexHome string) (string, error) {
 	if strings.TrimSpace(codexHome) != "" {
 		p := filepath.Join(codexHome, "auth.json")
