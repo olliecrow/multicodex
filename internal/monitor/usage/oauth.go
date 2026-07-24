@@ -25,11 +25,6 @@ type OAuthSource struct {
 	codexHome  string
 }
 
-func NewOAuthSource() *OAuthSource {
-	home, _ := defaultCodexHome()
-	return NewOAuthSourceForHome(home)
-}
-
 func NewOAuthSourceForHome(codexHome string) *OAuthSource {
 	return &OAuthSource{
 		httpClient: &http.Client{Timeout: 8 * time.Second},

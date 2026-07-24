@@ -19,10 +19,6 @@ func ResolvePaths() (Paths, error) {
 	return resolvePaths()
 }
 
-func ResolvePathsReadOnly() (Paths, error) {
-	return resolvePaths()
-}
-
 func resolvePaths() (Paths, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
