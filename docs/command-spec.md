@@ -62,7 +62,7 @@ Multicodex intentionally has no command for changing the shared default Codex ac
 - Delegates exact help requests (`--help`, `-h`, or `help`) directly to `codex exec` without requiring profiles.
 - Automatically selects among configured multicodex profiles first.
 - Includes the default Codex home as a built-in reserve account after configured profiles.
-- Can run with no configured profiles by using the default Codex home as the only available account.
+- Can run with no configured profiles when the official Codex CLI confirms that the default account is logged in.
 - Re-checks file-backed auth isolation before launching configured profiles.
 - Parses model selection arguments (`--model`, `--model=`, and `-m`) for routing.
 - If the model contains `spark` case-insensitively, selects Spark weekly usage when available.
@@ -71,8 +71,9 @@ Multicodex intentionally has no command for changing the shared default Codex ac
 - Orders candidates by configured selection priority, then known weekly reset soonest, then unknown weekly reset.
 - Randomizes only exact reset ties or equally unknown reset times.
 - Uses the default Codex home only when no configured profile has usable weekly usage.
-- If the default Codex home is the only remaining destination, uses it as the final fallback even when its usage data is unavailable or exhausted.
-- Returns a usage-selection error only when no configured profile is usable and the default Codex home is not available as a reserve candidate.
+- Before launching the default reserve, runs a bounded `codex login status` in the default Codex home so file and OS keyring credential stores are both supported.
+- If the default Codex home is the only remaining destination, uses it as the final fallback even when its usage data is unavailable or exhausted, provided its login is confirmed.
+- If the default is logged out or its login status cannot be confirmed, returns a safe error without launching `codex exec`.
 - Writes selected-profile metadata only under `MULTICODEX_HOME/run` when `MULTICODEX_SELECTED_PROFILE_PATH` is set.
 - Selected-profile metadata exposes the optional usage field `weekly_used_percent`; the older generic percent fields are not emitted.
 - Returns the child exit code.

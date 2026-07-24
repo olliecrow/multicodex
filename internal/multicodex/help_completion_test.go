@@ -53,6 +53,19 @@ func TestHelpCommandTopic(t *testing.T) {
 	}
 }
 
+func TestHelpExecDescribesDefaultLoginCheck(t *testing.T) {
+	app := newTestAppForCLI(t)
+	out, err := captureStdout(t, func() error {
+		return app.Run([]string{"help", "exec"})
+	})
+	if err != nil {
+		t.Fatalf("help exec failed: %v", err)
+	}
+	if !strings.Contains(out, "official Codex CLI confirms its login") {
+		t.Fatalf("expected default login check in exec help: %s", out)
+	}
+}
+
 func TestHelpUnknownTopic(t *testing.T) {
 	app := newTestAppForCLI(t)
 	_, err := captureStdout(t, func() error {

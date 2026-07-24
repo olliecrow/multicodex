@@ -58,9 +58,9 @@ References: `internal/monitor/usage/raw_types.go`, `internal/monitor/usage/selec
 
 Decision: Keep the default Codex home as the final `exec` reserve.
 Context: A prompt should still have a destination when configured profiles are exhausted or unavailable.
-Rationale: Configured profiles get normal weekly-aware selection, while the unmanaged default home is used only after they cannot accept the request.
-Trade-offs: The final reserve can still fail in Codex when its usage data is unavailable or exhausted.
-References: `internal/multicodex/exec.go`, `internal/monitor/usage/select.go`, `docs/command-spec.md`
+Rationale: Configured profiles get normal weekly-aware selection, while the unmanaged default home is used only after they cannot accept the request and the official Codex CLI confirms its login. Checking at selection time supports both file and OS keyring credential stores without treating `auth.json` presence as account state.
+Trade-offs: Selecting the default adds one bounded login-status subprocess. If its status is logged out or unavailable, exec fails before launching the prompt even when the underlying credentials might recover later.
+References: `internal/multicodex/exec.go`, `internal/multicodex/status.go`, `internal/monitor/usage/select.go`, `docs/command-spec.md`
 
 Decision: Share normal Codex configuration defaults while preserving profile-local overrides.
 Context: Model, reasoning, permission, and other Codex preferences should stay consistent across default and profile sessions without copied configuration.

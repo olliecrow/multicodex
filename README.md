@@ -162,13 +162,15 @@ Two terminals can run `multicodex cli` with different profiles at the same time.
 `multicodex exec [codex exec args]` runs `codex exec` after selecting among configured multicodex profiles, with the default Codex home as a built-in reserve account.
 
 - Help requests such as `multicodex exec --help` delegate directly to `codex exec` and do not require profiles.
-- Exec can run with no configured profiles by using the default Codex home as the only available account.
+- Exec can run with no configured profiles when Codex confirms that the default account is logged in.
 - Configured profiles at 100% weekly usage are not selected.
 - Exec uses configured selection priority first, then prefers the profile whose known weekly reset is soonest.
 - Profiles with an unknown weekly reset follow profiles with a known reset. Exact ties are randomized.
 - The default Codex home is a protected reserve. It is used only when no configured profile has usable weekly usage.
-- If the default Codex home is the only remaining destination, exec uses it as the final fallback even when its usage data is unavailable or exhausted.
-- For explicit Spark model names, configured profiles need Spark usage windows to win normal routing; the default Codex home still remains the final fallback.
+- Before launching the default reserve, exec asks the official Codex CLI to confirm its login. File and OS keyring credential stores are both supported; an absent `auth.json` does not imply that the default is logged out.
+- If the default Codex home is the only remaining destination, exec uses it as the final fallback even when its usage data is unavailable or exhausted, provided its login is confirmed.
+- For explicit Spark model names, configured profiles need Spark usage windows to win normal routing; the logged-in default Codex home still remains the final fallback.
+- If the default is logged out or its login status cannot be confirmed, exec fails without launching the prompt.
 
 ## Heartbeat
 
