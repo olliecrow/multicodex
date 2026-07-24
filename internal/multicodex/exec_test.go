@@ -83,6 +83,7 @@ func TestCmdExecPreservesCustomResourcePolicyThroughSelection(t *testing.T) {
 func TestCmdExecRunsCodexExecWithDefaultReserveAccount(t *testing.T) {
 	app, logPath := newExecTestApp(t)
 	createExecProfiles(t, app, "alpha")
+	writeDefaultExecAuth(t, app)
 
 	originalSelector := defaultExecAccountSelector
 	defaultExecAccountSelector = func(_ context.Context, accounts []usage.MonitorAccount, _ string) (usage.SelectedAccount, error) {
@@ -564,6 +565,7 @@ func TestCmdExecSparkModelUsesDefaultReserveWhenSparkWindowMissing(t *testing.T)
 	app, logPath, root := newExecSelectionTestApp(t)
 	createExecProfiles(t, app, "alpha")
 	writeExecSelectionProfileData(t, root, "alpha", 10, 20, 1*time.Hour)
+	writeDefaultExecAuth(t, app)
 
 	if err := app.Run([]string{"exec", "-m=gpt-5-codex-spark", "--skip-git-repo-check", "hello"}); err != nil {
 		t.Fatalf("exec failed: %v", err)
@@ -682,6 +684,44 @@ func TestCmdExecReturnsErrorWhenUsageSelectionFails(t *testing.T) {
 	}
 }
 
+func TestCmdExecFailsClosedWhenProfileUsageUnavailableAndDefaultUnauthenticated(t *testing.T) {
+	app, logPath, _ := newExecSelectionTestApp(t)
+	createExecProfiles(t, app, "alpha", "beta")
+
+	err := app.Run([]string{"exec", "--skip-git-repo-check", "hello"})
+	if err == nil {
+		t.Fatal("expected exec to fail when profile usage is unavailable and the default home is unauthenticated")
+	}
+	if _, statErr := os.Stat(logPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("expected codex not to be invoked against the unauthenticated default home, stat err=%v", statErr)
+	}
+}
+
+func TestSelectExecProfileOmitsUnauthenticatedDefaultFromCandidates(t *testing.T) {
+	app := newTestAppForCLI(t)
+	createExecProfiles(t, app, "alpha")
+
+	cfg, err := app.loadConfigIfExists()
+	if err != nil {
+		t.Fatalf("loadConfigIfExists: %v", err)
+	}
+
+	selected, err := app.selectExecProfile(cfg, func(_ context.Context, accounts []usage.MonitorAccount, _ string) (usage.SelectedAccount, error) {
+		for _, account := range accounts {
+			if account.Label == defaultExecAccountLabel || normalizeExecCodexHome(account.CodexHome) == normalizeExecCodexHome(app.store.paths.DefaultCodexHome) {
+				t.Fatalf("unauthenticated default home appeared in selector candidates: %#v", accounts)
+			}
+		}
+		return usage.SelectedAccount{Account: usage.MonitorAccount{Label: "alpha"}}, nil
+	}, "")
+	if err != nil {
+		t.Fatalf("selectExecProfile: %v", err)
+	}
+	if selected.Name != "alpha" {
+		t.Fatalf("expected selected profile alpha, got %q", selected.Name)
+	}
+}
+
 func TestCmdExecRejectsAnyInvalidConfiguredProfileBeforeSelection(t *testing.T) {
 	app, logPath := newExecTestApp(t)
 	createExecProfiles(t, app, "alpha", "beta")
@@ -786,6 +826,7 @@ func TestSelectExecProfilePersistsUsageSelectionMetadata(t *testing.T) {
 func TestSelectExecProfileOmitsUnavailableWeeklyUsageMetadataForReserve(t *testing.T) {
 	app := newTestAppForCLI(t)
 	createExecProfiles(t, app, "alpha")
+	writeDefaultExecAuth(t, app)
 
 	cfg, err := app.loadConfigIfExists()
 	if err != nil {
@@ -1181,13 +1222,8 @@ func writeExecSelectionProfileData(t *testing.T, root, name string, _ int, weekl
 func writeExecSelectionDefaultData(t *testing.T, app *App, _ int, weeklyUsed int, weeklyResetIn time.Duration) {
 	t.Helper()
 
+	writeDefaultExecAuth(t, app)
 	home := app.store.paths.DefaultCodexHome
-	if err := os.MkdirAll(home, 0o700); err != nil {
-		t.Fatalf("mkdir default Codex home: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(home, "auth.json"), []byte(`{"tokens":{"access_token":"token-default"}}`), 0o600); err != nil {
-		t.Fatalf("write default auth: %v", err)
-	}
 	now := time.Now().UTC()
 	usageJSON := fmt.Sprintf(
 		`{"weekly_used_percent": %d, "email": "default@example.com", "primary_resets_at": %d, "secondary_resets_at": %d}`,
@@ -1197,5 +1233,17 @@ func writeExecSelectionDefaultData(t *testing.T, app *App, _ int, weeklyUsed int
 	)
 	if err := os.WriteFile(filepath.Join(home, "usage.json"), []byte(usageJSON), 0o600); err != nil {
 		t.Fatalf("write default usage: %v", err)
+	}
+}
+
+func writeDefaultExecAuth(t *testing.T, app *App) {
+	t.Helper()
+
+	home := app.store.paths.DefaultCodexHome
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		t.Fatalf("mkdir default Codex home: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "auth.json"), []byte(`{"tokens":{"access_token":"token-default"}}`), 0o600); err != nil {
+		t.Fatalf("write default auth: %v", err)
 	}
 }

@@ -166,7 +166,7 @@ Two terminals can run `multicodex cli` with different profiles at the same time.
 - Configured profiles at 100% weekly usage are not selected.
 - Exec uses configured selection priority first, then prefers the profile whose known weekly reset is soonest.
 - Profiles with an unknown weekly reset follow profiles with a known reset. Exact ties are randomized.
-- The default Codex home is a protected reserve. It is used only when no configured profile has usable weekly usage.
+- The default Codex home is a protected reserve and requires a signed-in default (`auth.json` present). It is used only when no configured profile has usable weekly usage.
 - If the default Codex home is the only remaining destination, exec uses it as the final fallback even when its usage data is unavailable or exhausted.
 - For explicit Spark model names, configured profiles need Spark usage windows to win normal routing; the default Codex home still remains the final fallback.
 

@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	execSelectionTimeout       = 10 * time.Second
+	execSelectionTimeout       = 60 * time.Second
 	envSelectedProfilePath     = "MULTICODEX_SELECTED_PROFILE_PATH"
 	defaultExecAccountLabel    = "default"
 	defaultExecAccountPriority = 100
@@ -208,11 +208,14 @@ func (a *App) selectExecProfile(cfg *Config, selector execAccountSelector, model
 	}
 	defaultHome := normalizeExecCodexHome(a.store.paths.DefaultCodexHome)
 	if defaultHome != "" && !execAccountsContainHome(accounts, defaultHome) {
-		accounts = append(accounts, usage.MonitorAccount{
-			Label:             defaultExecAccountLabel,
-			CodexHome:         defaultHome,
-			SelectionPriority: defaultExecAccountPriority,
-		})
+		hasAuth, err := HasAuthFile(defaultHome)
+		if err == nil && hasAuth {
+			accounts = append(accounts, usage.MonitorAccount{
+				Label:             defaultExecAccountLabel,
+				CodexHome:         defaultHome,
+				SelectionPriority: defaultExecAccountPriority,
+			})
+		}
 	}
 
 	if selector == nil {

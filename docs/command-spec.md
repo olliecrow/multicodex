@@ -61,7 +61,7 @@ Multicodex intentionally has no command for changing the shared default Codex ac
 - Runs `codex exec` with all remaining arguments passed through unchanged.
 - Delegates exact help requests (`--help`, `-h`, or `help`) directly to `codex exec` without requiring profiles.
 - Automatically selects among configured multicodex profiles first.
-- Includes the default Codex home as a built-in reserve account after configured profiles.
+- Includes the default Codex home as a built-in reserve account after configured profiles only when the default is signed in (`auth.json` is present).
 - Can run with no configured profiles by using the default Codex home as the only available account.
 - Re-checks file-backed auth isolation before launching configured profiles.
 - Parses model selection arguments (`--model`, `--model=`, and `-m`) for routing.
