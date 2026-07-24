@@ -235,6 +235,9 @@ func (a *App) selectExecProfile(cfg *Config, selector execAccountSelector, model
 		return execSelection{Name: name, CodexHome: profile.CodexHome, IsProfile: true, Profile: profile, Metadata: metadata}, nil
 	}
 	if home, ok := lookupDefaultExecAccount(a.store.paths, selected); ok {
+		if err := ensureDefaultExecAccountReady(home); err != nil {
+			return execSelection{}, err
+		}
 		metadata := execSelectionMetadata{
 			Profile:           defaultExecAccountLabel,
 			SelectionSource:   "usage_selector_default_reserve",
@@ -243,6 +246,18 @@ func (a *App) selectExecProfile(cfg *Config, selector execAccountSelector, model
 		return execSelection{Name: defaultExecAccountLabel, CodexHome: home, Metadata: metadata}, nil
 	}
 	return execSelection{}, fmt.Errorf("selected account %q is not an exec candidate", selected.Account.Label)
+}
+
+func ensureDefaultExecAccountReady(codexHome string) error {
+	state, _, detail := codexLoginStatus(codexHome)
+	switch state {
+	case "logged-in", "ok":
+		return nil
+	case "logged-out":
+		return &ExitError{Code: 2, Message: "default Codex account is not logged in. run: codex login"}
+	default:
+		return fmt.Errorf("default Codex login status unavailable: %s", detail)
+	}
 }
 
 func execAccountsContainHome(accounts []usage.MonitorAccount, home string) bool {
