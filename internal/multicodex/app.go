@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/olliecrow/multicodex/internal/codexstate"
 )
 
 // App wires command handlers with persistent config.
@@ -18,23 +20,11 @@ type App struct {
 }
 
 func NewApp() (*App, error) {
-	return newApp(false)
+	return newApp()
 }
 
-func NewReadOnlyApp() (*App, error) {
-	return newApp(true)
-}
-
-func newApp(readOnly bool) (*App, error) {
-	var (
-		paths Paths
-		err   error
-	)
-	if readOnly {
-		paths, err = ResolvePathsReadOnly()
-	} else {
-		paths, err = ResolvePaths()
-	}
+func newApp() (*App, error) {
+	paths, err := ResolvePaths()
 	if err != nil {
 		return nil, err
 	}
@@ -55,7 +45,7 @@ func RunCLI(args []string) error {
 			printHelp()
 			return nil
 		}
-		app, err := newApp(true)
+		app, err := newApp()
 		if err != nil {
 			return err
 		}
@@ -65,39 +55,38 @@ func RunCLI(args []string) error {
 		return nil
 	}
 	if args[0] == "exec" && execArgsAreHelpRequest(args[1:]) {
-		app, err := newApp(true)
+		app, err := newApp()
 		if err != nil {
 			return err
 		}
 		return app.Run(args)
 	}
 	if len(args) == 2 && (args[1] == "-h" || args[1] == "--help") {
-		app, err := newApp(true)
+		app, err := newApp()
 		if err != nil {
 			return err
 		}
 		return app.cmdHelp([]string{args[0]})
 	}
 
-	readOnlyStartup, known := commandReadOnlyStartup(args[0])
-	if !known {
+	if !commandKnown(args[0]) {
 		return &ExitError{Code: 2, Message: fmt.Sprintf("unknown command: %s\nrun \"multicodex help\" for available commands", args[0])}
 	}
-	app, err := newApp(readOnlyStartup)
+	app, err := newApp()
 	if err != nil {
 		return err
 	}
 	return app.Run(args)
 }
 
-func commandReadOnlyStartup(command string) (bool, bool) {
+func commandKnown(command string) bool {
 	switch command {
 	case "status", "doctor", "dry-run", "monitor", "completion", "__complete-profiles":
-		return true, true
+		return true
 	case "init", "add", "login", "login-all", "cli", "exec", "heartbeat", "reconcile":
-		return false, true
+		return true
 	default:
-		return false, false
+		return false
 	}
 }
 
@@ -241,7 +230,7 @@ func (a *App) cmdAdd(args []string) error {
 		return &ExitError{Code: 2, Message: "usage: multicodex add <name>"}
 	}
 	name := strings.TrimSpace(args[0])
-	if err := ValidateProfileName(name); err != nil {
+	if err := codexstate.ValidateProfileName(name); err != nil {
 		return &ExitError{Code: 2, Message: err.Error()}
 	}
 
