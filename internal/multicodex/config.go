@@ -118,7 +118,7 @@ func (s *Store) Load() (*Config, error) {
 		cfg.Profiles = map[string]Profile{}
 	}
 	for name := range cfg.Profiles {
-		if err := ValidateProfileName(name); err != nil {
+		if err := codexstate.ValidateProfileName(name); err != nil {
 			return nil, fmt.Errorf("invalid stored profile name %q: %w", name, err)
 		}
 		profile := cfg.Profiles[name]
@@ -172,7 +172,7 @@ func (s *Store) Save(cfg *Config) error {
 }
 
 func (s *Store) CreateProfile(name string, resources *ProfileResources) (Profile, []ResourceChange, error) {
-	if err := ValidateProfileName(name); err != nil {
+	if err := codexstate.ValidateProfileName(name); err != nil {
 		return Profile{}, nil, err
 	}
 	resolved, err := s.ResolveProfileResources(resources)
@@ -230,7 +230,7 @@ func (s *Store) EnsureProfileDir(profile Profile, resources *ProfileResources) (
 }
 
 func (s *Store) ensureProfileStoragePathSafe(profile Profile) error {
-	if err := ValidateProfileName(profile.Name); err != nil {
+	if err := codexstate.ValidateProfileName(profile.Name); err != nil {
 		return fmt.Errorf("invalid profile name %q: %w", profile.Name, err)
 	}
 	profileDir := filepath.Join(s.paths.ProfilesDir, profile.Name)

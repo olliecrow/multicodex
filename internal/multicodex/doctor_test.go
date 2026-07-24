@@ -444,12 +444,12 @@ func TestIsSensitiveTrackedPath(t *testing.T) {
 		path      string
 		sensitive bool
 	}{
-		{path: "github.com/olliecrow/multicodex/config.json", sensitive: true},
-		{path: "github.com/olliecrow/multicodex/profiles/work/codex-home/config.toml", sensitive: true},
+		{path: "example.com/team/multicodex/config.json", sensitive: true},
+		{path: "example.com/team/multicodex/profiles/work/codex-home/config.toml", sensitive: true},
 		{path: ".multicodex/config.json", sensitive: true},
 		{path: ".multicodex/profiles/work/codex-home/config.toml", sensitive: true},
-		{path: "github.com/olliecrow/.multicodex/config.json", sensitive: true},
-		{path: "github.com/olliecrow/multicodex/docs/readme.md", sensitive: false},
+		{path: "example.com/team/.multicodex/config.json", sensitive: true},
+		{path: "example.com/team/multicodex/docs/readme.md", sensitive: false},
 		{path: "foo/.codex/auth.json", sensitive: true},
 		{path: "auth.json", sensitive: true},
 		{path: ".env", sensitive: true},

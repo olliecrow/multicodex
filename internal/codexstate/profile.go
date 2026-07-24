@@ -1,4 +1,4 @@
-package multicodex
+package codexstate
 
 import (
 	"fmt"
@@ -6,8 +6,10 @@ import (
 	"strings"
 )
 
-var profileNameRe = regexp.MustCompile(`^[a-z0-9@._-]+$`)
+var profileNamePattern = regexp.MustCompile(`^[a-z0-9@._-]+$`)
 
+// ValidateProfileName enforces the profile-name contract shared by core
+// commands and monitor discovery.
 func ValidateProfileName(name string) error {
 	if name == "" {
 		return fmt.Errorf("profile name cannot be empty")
@@ -21,7 +23,7 @@ func ValidateProfileName(name string) error {
 	if name != strings.ToLower(name) {
 		return fmt.Errorf("profile name %q must be lowercase", name)
 	}
-	if !profileNameRe.MatchString(name) {
+	if !profileNamePattern.MatchString(name) {
 		return fmt.Errorf("invalid profile name %q. allowed characters: lowercase letters, numbers, at sign, dot, underscore, hyphen", name)
 	}
 	return nil

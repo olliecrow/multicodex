@@ -33,7 +33,7 @@ func RunInteractiveCodexWithProfile(codexHome, profile string, args []string) er
 		}
 		return syscallExec(path, append([]string{"codex"}, args...), env)
 	}
-	return runCommandWithEnv("codex", args, env, fmt.Sprintf("codex command failed: %s", strings.Join(append([]string{"codex"}, args...), " ")))
+	return runCommandWithEnv("codex", args, env, "codex command failed")
 }
 
 func runCommandWithEnv(bin string, args []string, env []string, exitMessage string) error {

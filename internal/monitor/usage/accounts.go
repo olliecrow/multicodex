@@ -181,7 +181,7 @@ func loadAccountsFromMulticodexConfig() ([]MonitorAccount, string, error) {
 	profilesDir := filepath.Join(multicodexHome, "profiles")
 	for _, name := range names {
 		profile := raw.Profiles[name]
-		if !monitorProfileNameValid(name) {
+		if err := codexstate.ValidateProfileName(name); err != nil {
 			warnings = append(warnings, fmt.Sprintf("skipping multicodex profile %q: invalid profile name", name))
 			continue
 		}
@@ -255,14 +255,6 @@ func monitorProfileHomeSafe(profilesDir, name, home string) error {
 		return fmt.Errorf("config does not enable file-backed auth")
 	}
 	return nil
-}
-
-func monitorProfileNameValid(name string) bool {
-	name = strings.TrimSpace(name)
-	if name == "" || name == "." || name == ".." {
-		return false
-	}
-	return !strings.ContainsAny(name, `/\`)
 }
 
 func monitorFileHasMultipleLinks(info os.FileInfo) bool {

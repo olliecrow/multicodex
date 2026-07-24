@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/olliecrow/multicodex/internal/codexstate"
 )
 
 type DoctorReport struct {
@@ -128,7 +130,7 @@ func profileDoctorChecks(paths Paths, name string, profile Profile, codexFound b
 	prefix := "profile " + name
 	out := make([]DoctorCheck, 0, 4)
 
-	if err := ValidateProfileName(name); err != nil {
+	if err := codexstate.ValidateProfileName(name); err != nil {
 		out = append(out, DoctorCheck{Name: prefix + " name", Status: "fail", Details: err.Error()})
 	} else {
 		out = append(out, DoctorCheck{Name: prefix + " name", Status: "ok", Details: "valid"})
@@ -370,20 +372,16 @@ func checkTrackedSensitiveFiles(root string) DoctorCheck {
 func isSensitiveTrackedPath(p string) bool {
 	clean := path.Clean(strings.ToLower(strings.ReplaceAll(strings.TrimSpace(p), "\\", "/")))
 	base := path.Base(clean)
-	if trackedPathMatchesAny(clean, []string{
-		"multicodex/config.json",
-		".multicodex/config.json",
-		"github.com/olliecrow/multicodex/config.json",
-		"github.com/olliecrow/.multicodex/config.json",
-	}) || strings.Contains(clean, "/multicodex/config.json") || strings.Contains(clean, "/.multicodex/config.json") {
+	if clean == "multicodex/config.json" ||
+		clean == ".multicodex/config.json" ||
+		strings.Contains(clean, "/multicodex/config.json") ||
+		strings.Contains(clean, "/.multicodex/config.json") {
 		return true
 	}
-	if trackedPathHasAnyPrefix(clean, []string{
-		"multicodex/profiles/",
-		".multicodex/profiles/",
-		"github.com/olliecrow/multicodex/profiles/",
-		"github.com/olliecrow/.multicodex/profiles/",
-	}) || strings.Contains(clean, "/multicodex/profiles/") || strings.Contains(clean, "/.multicodex/profiles/") {
+	if strings.HasPrefix(clean, "multicodex/profiles/") ||
+		strings.HasPrefix(clean, ".multicodex/profiles/") ||
+		strings.Contains(clean, "/multicodex/profiles/") ||
+		strings.Contains(clean, "/.multicodex/profiles/") {
 		return true
 	}
 	if strings.Contains(clean, "/.codex/") || strings.HasPrefix(clean, ".codex/") {
@@ -400,24 +398,6 @@ func isSensitiveTrackedPath(p string) bool {
 	}
 	if strings.HasSuffix(base, ".pem") || strings.HasSuffix(base, ".p12") || strings.HasSuffix(base, ".pfx") || strings.HasSuffix(base, ".key") {
 		return true
-	}
-	return false
-}
-
-func trackedPathMatchesAny(clean string, matches []string) bool {
-	for _, match := range matches {
-		if clean == match {
-			return true
-		}
-	}
-	return false
-}
-
-func trackedPathHasAnyPrefix(clean string, prefixes []string) bool {
-	for _, prefix := range prefixes {
-		if strings.HasPrefix(clean, prefix) {
-			return true
-		}
 	}
 	return false
 }
