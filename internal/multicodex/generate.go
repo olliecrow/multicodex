@@ -36,8 +36,10 @@ func (a *App) cmdGenerate(args []string) error {
 	if err != nil {
 		return err
 	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
-	selected, err := a.selectGenerateAccount(options)
+	selected, err := a.selectGenerateAccount(ctx, options)
 	if err != nil {
 		return err
 	}
@@ -49,8 +51,6 @@ func (a *App) cmdGenerate(args []string) error {
 	if !selected.IsProfile {
 		activeProfile = ""
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	return generateWithSubscription(ctx, codexappserver.GenerateOptions{
 		CodexHome:     selected.CodexHome,
 		ActiveProfile: activeProfile,
@@ -60,13 +60,13 @@ func (a *App) cmdGenerate(args []string) error {
 	})
 }
 
-func (a *App) selectGenerateAccount(options generateCommandOptions) (execSelection, error) {
+func (a *App) selectGenerateAccount(ctx context.Context, options generateCommandOptions) (execSelection, error) {
 	if !options.accountSet {
 		selectorArgs := []string(nil)
 		if options.model != "" {
 			selectorArgs = []string{"--model", options.model}
 		}
-		selected, err := a.selectAccountForCodexArgs(selectorArgs)
+		selected, err := a.selectAccountForCodexArgs(ctx, selectorArgs)
 		if err != nil {
 			return execSelection{}, err
 		}

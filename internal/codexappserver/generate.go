@@ -10,11 +10,16 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/olliecrow/multicodex/internal/buildinfo"
 )
 
-const subscriptionProvider = "openai"
+const (
+	subscriptionProvider       = "openai"
+	chatGPTBaseURL             = "https://chatgpt.com/backend-api/"
+	generationHandshakeTimeout = 30 * time.Second
+)
 
 type GenerateOptions struct {
 	Command       []string
@@ -56,6 +61,10 @@ type itemParams struct {
 	} `json:"item"`
 }
 
+type configReadResult struct {
+	Config map[string]json.RawMessage `json:"config"`
+}
+
 func Generate(ctx context.Context, options GenerateOptions) error {
 	if strings.TrimSpace(options.Prompt) == "" {
 		return errors.New("prompt is empty")
@@ -66,7 +75,7 @@ func Generate(ctx context.Context, options GenerateOptions) error {
 	if strings.TrimSpace(options.CodexHome) == "" {
 		return errors.New("generation Codex home is not configured")
 	}
-	mcpServers, err := configuredMCPServerNames(options.CodexHome)
+	mcpServers, err := inspectGenerationConfig(options.CodexHome)
 	if err != nil {
 		return err
 	}
@@ -74,10 +83,6 @@ func Generate(ctx context.Context, options GenerateOptions) error {
 	tempDir, err := os.MkdirTemp(options.TempRoot, "multicodex-generate-")
 	if err != nil {
 		return fmt.Errorf("create generation workspace: %w", err)
-	}
-	if err := os.Chmod(tempDir, 0o700); err != nil {
-		_ = os.RemoveAll(tempDir)
-		return fmt.Errorf("secure generation workspace: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(tempDir) }()
 
@@ -113,12 +118,24 @@ func Generate(ctx context.Context, options GenerateOptions) error {
 		return err
 	}
 	defer func() { _ = client.Close() }()
-	if err := client.Initialize(ctx); err != nil {
+	handshakeCtx, cancelHandshake := context.WithTimeout(ctx, generationHandshakeTimeout)
+	defer cancelHandshake()
+	if err := client.Initialize(handshakeCtx); err != nil {
 		return fmt.Errorf("initialize generation runtime: %w", err)
+	}
+	var runtimeConfig configReadResult
+	if err := client.Request(handshakeCtx, "config/read", map[string]any{
+		"includeLayers": false,
+		"cwd":           workDir,
+	}, &runtimeConfig); err != nil {
+		return fmt.Errorf("check generation configuration: %w", err)
+	}
+	if !generationConfigIsSafe(runtimeConfig.Config, catalogPath) {
+		return errors.New("Codex did not apply the required safe generation configuration")
 	}
 
 	var account accountReadResult
-	if err := client.Request(ctx, "account/read", map[string]any{"refreshToken": false}, &account); err != nil {
+	if err := client.Request(handshakeCtx, "account/read", map[string]any{"refreshToken": false}, &account); err != nil {
 		return fmt.Errorf("check subscription account: %w", err)
 	}
 	if account.Account == nil {
@@ -132,7 +149,7 @@ func Generate(ctx context.Context, options GenerateOptions) error {
 	}
 
 	var thread threadStartResult
-	if err := client.Request(ctx, "thread/start", map[string]any{
+	if err := client.Request(handshakeCtx, "thread/start", map[string]any{
 		"model":                 model,
 		"modelProvider":         subscriptionProvider,
 		"cwd":                   workDir,
@@ -148,22 +165,54 @@ func Generate(ctx context.Context, options GenerateOptions) error {
 	if strings.TrimSpace(thread.Thread.ID) == "" {
 		return errors.New("start generation thread: app-server returned no thread id")
 	}
-	var turn map[string]any
-	if err := client.Request(ctx, "turn/start", map[string]any{
-		"threadId": thread.Thread.ID,
-		"input": []map[string]any{{
-			"type": "text",
-			"text": options.Prompt,
-		}},
-	}, &turn); err != nil {
-		return fmt.Errorf("start generation turn: %w", err)
+	cancelHandshake()
+	streamCtx, cancelStream := context.WithCancel(ctx)
+	defer cancelStream()
+	streamResult := make(chan error, 1)
+	go func() {
+		streamResult <- streamGeneration(streamCtx, client, options.Output)
+	}()
+	turnResult := make(chan error, 1)
+	go func() {
+		var turn map[string]any
+		turnResult <- client.Request(ctx, "turn/start", map[string]any{
+			"threadId": thread.Thread.ID,
+			"input": []map[string]any{{
+				"type": "text",
+				"text": options.Prompt,
+			}},
+		}, &turn)
+	}()
+
+	turnDone := false
+	streamDone := false
+	for !turnDone || !streamDone {
+		select {
+		case err := <-turnResult:
+			turnDone = true
+			if err != nil {
+				cancelStream()
+				if !streamDone {
+					<-streamResult
+				}
+				return fmt.Errorf("start generation turn: %w", err)
+			}
+		case err := <-streamResult:
+			streamDone = true
+			if err != nil {
+				return err
+			}
+		}
 	}
-	return streamGeneration(ctx, client, options.Output)
+	return nil
 }
 
 func streamGeneration(ctx context.Context, client *Client, output io.Writer) error {
 	failure := errors.New("generation failed")
 	for {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("generation canceled: %w", err)
+		}
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("generation canceled: %w", ctx.Err())
@@ -216,7 +265,9 @@ func generationArgs(catalogPath string, mcpServers []string) []string {
 	overrides := []string{
 		"model_catalog_json=" + strconv.Quote(catalogPath),
 		`model_provider="` + subscriptionProvider + `"`,
+		"chatgpt_base_url=" + strconv.Quote(chatGPTBaseURL),
 		disabledMCPServersOverride(mcpServers),
+		"notify=[]",
 		"include_permissions_instructions=false",
 		"include_apps_instructions=false",
 		"include_collaboration_mode_instructions=false",
@@ -255,6 +306,59 @@ func generationArgs(catalogPath string, mcpServers []string) []string {
 	return args
 }
 
+func generationConfigIsSafe(config map[string]json.RawMessage, catalogPath string) bool {
+	if !configStringEquals(config, "model_provider", subscriptionProvider) ||
+		!configStringEquals(config, "model_catalog_json", catalogPath) ||
+		!configStringUnset(config, "openai_base_url") ||
+		!configStringEquals(config, "chatgpt_base_url", chatGPTBaseURL) ||
+		!configLockUnset(config) {
+		return false
+	}
+	var notify *[]string
+	if raw, ok := config["notify"]; !ok || json.Unmarshal(raw, &notify) != nil || notify == nil || len(*notify) != 0 {
+		return false
+	}
+	var servers map[string]struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if raw, ok := config["mcp_servers"]; ok {
+		if json.Unmarshal(raw, &servers) != nil {
+			return false
+		}
+		for _, server := range servers {
+			if server.Enabled == nil || *server.Enabled {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func configStringEquals(config map[string]json.RawMessage, name, expected string) bool {
+	var value string
+	raw, ok := config[name]
+	return ok && json.Unmarshal(raw, &value) == nil && value == expected
+}
+
+func configStringUnset(config map[string]json.RawMessage, name string) bool {
+	raw, ok := config[name]
+	return !ok || string(raw) == "null"
+}
+
+func configLockUnset(config map[string]json.RawMessage) bool {
+	raw, ok := config["debug"]
+	if !ok || string(raw) == "null" {
+		return true
+	}
+	var debug struct {
+		ConfigLockfile *struct {
+			LoadPath *string `json:"load_path"`
+		} `json:"config_lockfile"`
+	}
+	return json.Unmarshal(raw, &debug) == nil &&
+		(debug.ConfigLockfile == nil || debug.ConfigLockfile.LoadPath == nil)
+}
+
 func disabledMCPServersOverride(names []string) string {
 	servers := make([]string, 0, len(names))
 	for _, name := range names {
@@ -289,7 +393,7 @@ func toolEventCategory(event Event) string {
 
 func generationItemAllowed(itemType string) bool {
 	switch itemType {
-	case "agentMessage", "reasoning", "userMessage":
+	case "agentMessage", "contextCompaction", "reasoning", "userMessage":
 		return true
 	default:
 		return false

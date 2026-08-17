@@ -48,7 +48,7 @@ func PrepareToolFreeCatalog(ctx context.Context, options CatalogOptions) (string
 		return "", fmt.Errorf("unsupported Codex version; generate requires %s", SupportedCodexVersion)
 	}
 
-	catalogOutput, err := runBounded(ctx, command, []string{"debug", "models"}, env, maxCatalogBytes)
+	catalogOutput, err := runBounded(ctx, command, []string{"debug", "models", "--bundled"}, env, maxCatalogBytes)
 	if err != nil {
 		return "", fmt.Errorf("read Codex model catalog: %w", err)
 	}
@@ -167,7 +167,6 @@ func runBounded(ctx context.Context, command, args, env []string, limit int64) (
 	if err != nil {
 		return nil, fmt.Errorf("open command output: %w", err)
 	}
-	cmd.Stderr = io.Discard
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start Codex command: %w", err)
 	}

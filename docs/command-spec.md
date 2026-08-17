@@ -91,14 +91,15 @@ Multicodex intentionally has no command for changing the shared default Codex ac
 - Sends one text prompt through Codex App Server using ChatGPT subscription authentication and Codex's built-in OpenAI provider and endpoint.
 - Reads the prompt from standard input when no prompt argument is present and rejects input larger than 4 MiB.
 - Uses normal weekly-aware routing, including the protected default reserve, unless `--account <name>` selects one configured profile directly.
-- Passes an explicit model to the existing model-aware selector. Otherwise, uses the highest-priority visible model in the installed Codex catalog.
+- Passes an explicit model to the existing model-aware selector. Otherwise, uses the highest-priority visible model in the installed Codex bundled catalog.
 - Requires exactly `codex-cli 0.147.0` and fails before generation for any other version.
 - Requires App Server `account/read` to report managed ChatGPT authentication. It rejects API-key billing and does not start login or token-refresh flows.
 - Runs an ephemeral thread in a private empty temporary directory with read-only sandboxing and approval policy `never`.
-- Sends empty base and developer instructions, disables client context sources and tools, ignores configured MCP servers and unrelated custom model providers, and uses a private `0600` one-model catalog with tool metadata removed.
-- Fails closed if Codex config replaces the built-in OpenAI provider or overrides its endpoint.
+- Sends empty base and developer instructions, disables client context sources, tools, MCP servers, and notification hooks, ignores unrelated custom model providers, and uses a private `0600` one-model catalog with tool metadata removed.
+- Fails closed if Codex config replaces the built-in OpenAI provider, overrides its endpoint, or loads a configuration lockfile.
 - Rejects server requests, command, file, web, image, and unexpected item events.
 - Streams only assistant text to standard output. Resource notices and safe errors use standard error. A failure can occur after partial text was written.
+- Writes selected-profile metadata under `MULTICODEX_HOME/run` when `MULTICODEX_SELECTED_PROFILE_PATH` is set. The selection source is `explicit_account`, `usage_selector`, or `usage_selector_default_reserve`.
 - Deletes the temporary workspace and model catalog when the command ends.
 - Does not expose sessions, custom tools, images, output schemas, raw events, or a persistent App Server.
 - Re-checks profile filesystem and file-backed auth isolation before a configured-profile run. It never changes or manages default account authentication.
