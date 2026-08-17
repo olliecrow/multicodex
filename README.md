@@ -10,7 +10,7 @@ Profile login requires file-backed auth. If the effective Codex config does not 
 
 ## Status
 
-- Usable for local multi-account Codex CLI, `codex exec`, heartbeat, and usage-monitor workflows.
+- Usable for local multi-account Codex CLI, `codex exec`, tool-free text generation, heartbeat, and usage-monitor workflows.
 - The command surface is intentionally narrow. Multicodex does not implement global account switching.
 
 ## Prerequisites
@@ -67,6 +67,13 @@ Run `codex exec` on the best available account.
 
 ```bash
 multicodex exec -s read-only "Summarize the README in 3 bullets."
+```
+
+Generate text through a subscription account without the client-side coding-agent instructions or tools.
+
+```bash
+multicodex generate "Write a short product description."
+printf '%s' "Summarize this text." | multicodex generate
 ```
 
 Open the monitor and run checks.
@@ -132,6 +139,7 @@ multicodex login <name> [codex login args]
 multicodex login-all
 multicodex cli [--account <name>] [--] [codex args...]
 multicodex exec [codex exec args]
+multicodex generate [--account <name>] [-m|--model <model>] [prompt]
 multicodex status
 multicodex reconcile
 multicodex heartbeat
@@ -159,7 +167,7 @@ Two terminals can run `multicodex cli --account <name>` with different profiles 
 
 ## Automatic Routing
 
-`multicodex cli [codex args...]` and `multicodex exec [codex exec args]` select among configured multicodex profiles, with the default Codex home as a built-in reserve account. Manual `cli --account <name>` launches do not use these rules.
+`multicodex cli`, `multicodex exec`, and `multicodex generate` select among configured multicodex profiles, with the default Codex home as a built-in reserve account. Manual `cli --account <name>` and `generate --account <name>` launches do not use these rules.
 
 - Help requests such as `multicodex exec --help` delegate directly to `codex exec` and do not require profiles.
 - Automatic routing can run with no configured profiles when Codex confirms that the default account is logged in.
@@ -171,6 +179,22 @@ Two terminals can run `multicodex cli --account <name>` with different profiles 
 - If the default Codex home is the only remaining destination, automatic routing uses it as the final fallback even when its usage data is unavailable or exhausted, provided its login is confirmed.
 - For explicit Spark model names, configured profiles need Spark usage windows to win normal routing; the logged-in default Codex home still remains the final fallback.
 - If the default is logged out or its login status cannot be confirmed, automatic routing fails without launching the prompt.
+
+## Tool-Free Text Generation
+
+`multicodex generate` sends one text prompt through Codex App Server and the selected ChatGPT subscription. It streams assistant text to standard output. If the prompt argument is omitted, it reads up to 4 MiB from standard input.
+
+```bash
+multicodex generate "Draft a concise release note."
+multicodex generate --account work "Translate this paragraph to French."
+multicodex generate -m gpt-5.5 < prompt.txt
+```
+
+The request uses an ephemeral thread in a private empty directory. Multicodex supplies empty base and developer instructions, disables project context and client tools, and limits the temporary model catalog to one tool-free model. It rejects API-key authentication, server action requests, and unexpected tool items. This removes the client-side Codex coding-agent harness; it cannot control provider-side instructions.
+
+The command requires `codex-cli 0.147.0`. App Server and its model catalog are experimental Codex interfaces, so multicodex fails closed on another version until compatibility is tested. The default model is the highest-priority visible model in that Codex catalog. Use `--model` to select another catalog model.
+
+Version 1 is intentionally one-shot and text-only. It does not expose sessions, custom tools, images, output schemas, raw events, or a daemon. Existing `cli` and `exec` commands remain unchanged for agent workflows.
 
 ## Heartbeat
 

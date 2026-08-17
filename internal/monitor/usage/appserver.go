@@ -1,52 +1,25 @@
 package usage
 
 import (
-	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
-	"os/exec"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/olliecrow/multicodex/internal/buildinfo"
+	"github.com/olliecrow/multicodex/internal/codexappserver"
 	"github.com/olliecrow/multicodex/internal/codexstate"
 )
 
 const clientName = "multicodex-monitor"
 
-type rpcRequest struct {
-	JSONRPC string `json:"jsonrpc"`
-	ID      *int   `json:"id,omitempty"`
-	Method  string `json:"method"`
-	Params  any    `json:"params,omitempty"`
-}
-
-type rpcMessage struct {
-	ID     *int            `json:"id,omitempty"`
-	Result json.RawMessage `json:"result,omitempty"`
-	Error  *rpcError       `json:"error,omitempty"`
-}
-
 type rpcError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
-}
-
-type initializeParams struct {
-	ClientInfo   clientInfo             `json:"clientInfo"`
-	Capabilities map[string]interface{} `json:"capabilities"`
-}
-
-type clientInfo struct {
-	Name    string `json:"name"`
-	Version string `json:"version"`
 }
 
 type AppServerSource struct {
@@ -186,21 +159,10 @@ func currentAuthFingerprintForHome(codexHome string) (string, error) {
 }
 
 type appServerSession struct {
-	mu sync.Mutex
-
-	cmd     *exec.Cmd
-	stdin   io.WriteCloser
-	encoder *json.Encoder
-
-	pending map[int]chan rpcMessage
-	nextID  int
-
+	mu          sync.Mutex
+	client      *codexappserver.Client
 	initialized bool
-
-	done    chan struct{}
-	doneErr error
-
-	codexHome string
+	codexHome   string
 }
 
 type accountReadResultRaw struct {
@@ -213,58 +175,38 @@ type accountReadAccountRaw struct {
 }
 
 func newAppServerSession(codexHome string) *appServerSession {
-	return &appServerSession{
-		pending:   make(map[int]chan rpcMessage),
-		codexHome: strings.TrimSpace(codexHome),
-	}
+	return &appServerSession{codexHome: strings.TrimSpace(codexHome)}
 }
 
 func (s *appServerSession) ensureStarted() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.cmd != nil {
+	if s.client != nil {
 		select {
-		case <-s.done:
-			return fmt.Errorf("app-server process is not running: %w", s.doneErrOrDefault())
+		case <-s.client.Done():
+			s.client = nil
+			s.initialized = false
 		default:
 			return nil
 		}
 	}
 
-	cmd := exec.Command("codex", "-s", "read-only", "-a", "untrusted", "app-server")
-	env := withoutCodexProfileEnv(os.Environ())
-	if s.codexHome != "" {
-		env = upsertEnvVar(env, "CODEX_HOME", s.codexHome)
+	client := codexappserver.New(codexappserver.Config{
+		GlobalArgs:    []string{"-s", "read-only", "-a", "untrusted"},
+		BaseEnv:       os.Environ(),
+		CodexHome:     s.codexHome,
+		ClientName:    clientName,
+		ClientVersion: buildinfo.Version,
+		ErrorSanitizer: func(method string, code int, message string) error {
+			return safeProviderRPCError(method, &rpcError{Code: code, Message: message})
+		},
+	})
+	if err := client.Start(); err != nil {
+		return err
 	}
-	cmd.Env = env
-
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return fmt.Errorf("open stdin pipe: %w", err)
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return fmt.Errorf("open stdout pipe: %w", err)
-	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return fmt.Errorf("open stderr pipe: %w", err)
-	}
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("start codex app-server: %w", err)
-	}
-
-	s.cmd = cmd
-	s.stdin = stdin
-	s.encoder = json.NewEncoder(stdin)
+	s.client = client
 	s.initialized = false
-	s.done = make(chan struct{})
-	s.doneErr = nil
-
-	go drain(stderr)
-	go s.readLoop(stdout)
-
 	return nil
 }
 
@@ -276,18 +218,13 @@ func (s *appServerSession) ensureInitialized(ctx context.Context) error {
 	}
 	s.mu.Unlock()
 
-	var initResult map[string]interface{}
-	if err := s.request(ctx, "initialize", initializeParams{
-		ClientInfo: clientInfo{
-			Name:    clientName,
-			Version: buildinfo.Version,
-		},
-		Capabilities: map[string]interface{}{},
-	}, &initResult); err != nil {
-		return err
+	s.mu.Lock()
+	client := s.client
+	s.mu.Unlock()
+	if client == nil {
+		return errors.New("app-server process not started")
 	}
-
-	if err := s.notify("initialized", map[string]interface{}{}); err != nil {
+	if err := client.Initialize(ctx); err != nil {
 		return err
 	}
 
@@ -323,176 +260,34 @@ func (s *appServerSession) fetchAccount(ctx context.Context) (*identityInfo, err
 
 func (s *appServerSession) request(ctx context.Context, method string, params any, out any) error {
 	s.mu.Lock()
-	if s.cmd == nil || s.encoder == nil {
-		s.mu.Unlock()
+	client := s.client
+	s.mu.Unlock()
+	if client == nil {
 		return errors.New("app-server process not started")
 	}
-	reqID := s.nextID + 1
-	s.nextID = reqID
-
-	respCh := make(chan rpcMessage, 1)
-	s.pending[reqID] = respCh
-
-	encodeErr := s.encoder.Encode(rpcRequest{
-		JSONRPC: "2.0",
-		ID:      &reqID,
-		Method:  method,
-		Params:  params,
-	})
-	done := s.done
-	if encodeErr != nil {
-		delete(s.pending, reqID)
-		s.mu.Unlock()
-		return fmt.Errorf("send request %s: %w", method, encodeErr)
-	}
-	s.mu.Unlock()
-
-	select {
-	case msg, ok := <-respCh:
-		if !ok {
-			return fmt.Errorf("request %s aborted: %w", method, s.doneErrSnapshot())
-		}
-		if msg.Error != nil {
-			return safeProviderRPCError(method, msg.Error)
-		}
-		if out != nil {
-			if err := json.Unmarshal(msg.Result, out); err != nil {
-				return fmt.Errorf("decode %s response: %w", method, err)
-			}
-		}
-		return nil
-	case <-ctx.Done():
-		s.mu.Lock()
-		delete(s.pending, reqID)
-		s.mu.Unlock()
-		return fmt.Errorf("%s timeout: %w", method, ctx.Err())
-	case <-done:
-		s.mu.Lock()
-		delete(s.pending, reqID)
-		s.mu.Unlock()
-		return fmt.Errorf("%s failed: %w", method, s.doneErrSnapshot())
-	}
+	return client.Request(ctx, method, params, out)
 }
 
 func (s *appServerSession) notify(method string, params any) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.cmd == nil || s.encoder == nil {
+	client := s.client
+	s.mu.Unlock()
+	if client == nil {
 		return errors.New("app-server process not started")
 	}
-	if err := s.encoder.Encode(rpcRequest{
-		JSONRPC: "2.0",
-		Method:  method,
-		Params:  params,
-	}); err != nil {
-		return fmt.Errorf("send notification %s: %w", method, err)
-	}
-	return nil
-}
-
-func (s *appServerSession) readLoop(stdout io.Reader) {
-	scanner := bufio.NewScanner(stdout)
-	scanner.Buffer(make([]byte, 0, 64*1024), 2*1024*1024)
-
-	for scanner.Scan() {
-		line := scanner.Bytes()
-
-		var msg rpcMessage
-		if err := json.Unmarshal(line, &msg); err != nil {
-			continue
-		}
-		if msg.ID == nil {
-			continue
-		}
-
-		s.mu.Lock()
-		respCh := s.pending[*msg.ID]
-		if respCh != nil {
-			delete(s.pending, *msg.ID)
-		}
-		s.mu.Unlock()
-
-		if respCh != nil {
-			respCh <- msg
-			close(respCh)
-		}
-	}
-
-	streamErr := scanner.Err()
-	if streamErr == nil {
-		streamErr = errors.New("app-server stream closed")
-	}
-
-	s.mu.Lock()
-	s.doneErr = streamErr
-	for id, ch := range s.pending {
-		delete(s.pending, id)
-		close(ch)
-	}
-	cmd := s.cmd
-	done := s.done
-	s.cmd = nil
-	s.stdin = nil
-	s.encoder = nil
-	s.initialized = false
-	s.mu.Unlock()
-
-	if cmd != nil {
-		_ = cmd.Wait()
-	}
-	if done != nil {
-		close(done)
-	}
+	return client.Notify(method, params)
 }
 
 func (s *appServerSession) close() error {
 	s.mu.Lock()
-	cmd := s.cmd
-	done := s.done
+	client := s.client
+	s.client = nil
+	s.initialized = false
 	s.mu.Unlock()
-
-	if cmd == nil {
+	if client == nil {
 		return nil
 	}
-	_ = cmd.Process.Kill()
-
-	if done != nil {
-		select {
-		case <-done:
-		case <-time.After(2 * time.Second):
-			return errors.New("timeout waiting for app-server shutdown")
-		}
-	}
-	return nil
-}
-
-func (s *appServerSession) doneErrSnapshot() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.doneErrOrDefault()
-}
-
-func (s *appServerSession) doneErrOrDefault() error {
-	if s.doneErr != nil {
-		return s.doneErr
-	}
-	return errors.New("app-server exited")
-}
-
-func drain(r io.Reader) {
-	_, _ = io.Copy(io.Discard, r)
-}
-
-func upsertEnvVar(env []string, key, value string) []string {
-	prefix := key + "="
-	for i := range env {
-		if strings.HasPrefix(env[i], prefix) {
-			env[i] = prefix + value
-			return env
-		}
-	}
-	return append(env, prefix+value)
+	return client.Close()
 }
 
 func withoutCodexProfileEnv(env []string) []string {

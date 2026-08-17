@@ -22,6 +22,7 @@ var commandSummaries = []struct {
 	{Name: "login-all", Summary: "run login for every known profile"},
 	{Name: "cli [--account <name>] [--] [codex args...]", Summary: "run interactive Codex on the best available account"},
 	{Name: "exec [codex exec args]", Summary: "run codex exec on the best available account"},
+	{Name: "generate [flags] [prompt]", Summary: "generate text without the coding-agent harness"},
 	{Name: "status", Summary: "show all profile auth states"},
 	{Name: "reconcile", Summary: "reconcile resources for all profiles"},
 	{Name: "heartbeat", Summary: "send a minimal keepalive hello for logged-in profiles"},
@@ -83,6 +84,15 @@ var commandHelpByName = map[string]commandHelp{
 		Examples: []string{
 			`multicodex exec -s read-only "Summarize the README in 3 bullets."`,
 			"multicodex exec --skip-git-repo-check -C /path/to/repo \"Review the latest diff.\"",
+		},
+	},
+	"generate": {
+		Usage:       "multicodex generate [--account <name>] [-m|--model <model>] [prompt]",
+		Description: "Generate one text response through Codex App Server and a routed ChatGPT subscription account. The request has empty client instructions, no project context, no coding tools, and no persistent thread. If prompt is omitted, read it from standard input. API-key billing is rejected.",
+		Examples: []string{
+			`multicodex generate "Write a short product description."`,
+			`printf '%s' "Summarize this text." | multicodex generate`,
+			`multicodex generate --account personal -m gpt-5.5 "Explain this concept."`,
 		},
 	},
 	"status": {
@@ -200,6 +210,7 @@ func printHelp() {
 	fmt.Println("  multicodex add personal")
 	fmt.Println("  multicodex cli")
 	fmt.Println("  multicodex cli --account personal")
+	fmt.Println(`  multicodex generate "Draft a short email."`)
 	fmt.Println("  multicodex monitor")
 	fmt.Println("  multicodex heartbeat")
 	fmt.Println("  multicodex reconcile")
