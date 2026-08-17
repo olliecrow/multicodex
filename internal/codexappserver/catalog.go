@@ -130,9 +130,9 @@ func selectCatalogModel(models []map[string]any, requested string) (map[string]a
 
 func removeAgentTools(model map[string]any) error {
 	patchType, patchPresent := model["apply_patch_tool_type"]
-	toolMode, modePresent := model["tool_mode"]
+	toolMode := model["tool_mode"]
 	lite, litePresent := model["use_responses_lite"]
-	if !patchPresent || !modePresent || !litePresent {
+	if !patchPresent || !litePresent {
 		return errors.New("required model metadata is missing")
 	}
 	if patchType != "freeform" {

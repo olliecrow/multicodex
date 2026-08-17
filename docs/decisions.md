@@ -76,6 +76,6 @@ References: `internal/multicodex/resources.go`, `docs/command-spec.md`, `docs/se
 
 Decision: Add one-shot tool-free generation through Codex App Server.
 Context: Subscription authentication is useful for general text generation, but `codex exec` always includes the client-side coding-agent harness. The official Codex SDK exposes the same agent behavior and is not a Go dependency.
-Rationale: A small App Server client reuses existing profile routing and managed ChatGPT authentication. An exact Codex version gate, empty instructions, disabled context, a one-model tool-free catalog, and fail-closed event handling make the wire request contain only the user message and no tools. Normal tolerant config loading preserves user-owned Codex settings that strict parsing can reject.
+Rationale: A small App Server client reuses existing profile routing and managed ChatGPT authentication. An exact Codex version gate, the built-in OpenAI provider and endpoint, empty instructions, disabled context and MCP servers, a one-model tool-free catalog, and fail-closed event handling make the wire request contain only the user message and no tools. Normal tolerant config loading preserves unrelated user-owned Codex settings that strict parsing can reject.
 Trade-offs: The command is one-shot and text-only, requires a tested Codex version, and must be updated when the experimental protocol changes. Provider-side instructions remain outside client control.
 References: `internal/codexappserver/`, `internal/multicodex/generate.go`, `docs/command-spec.md`

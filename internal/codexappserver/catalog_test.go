@@ -37,19 +37,32 @@ func TestSelectCatalogModel(t *testing.T) {
 }
 
 func TestRemoveAgentTools(t *testing.T) {
-	model := compatibleTestModel("test-model", 1)
-	if err := removeAgentTools(model); err != nil {
-		t.Fatal(err)
-	}
-	if model["apply_patch_tool_type"] != nil || model["tool_mode"] != nil || model["use_responses_lite"] != false {
-		t.Fatalf("tool fields were not disabled: %#v", model)
+	for _, test := range []struct {
+		name   string
+		mutate func(map[string]any)
+	}{
+		{name: "code mode", mutate: func(map[string]any) {}},
+		{name: "null tool mode", mutate: func(model map[string]any) { model["tool_mode"] = nil }},
+		{name: "omitted tool mode", mutate: func(model map[string]any) { delete(model, "tool_mode") }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			model := compatibleTestModel("test-model", 1)
+			test.mutate(model)
+			if err := removeAgentTools(model); err != nil {
+				t.Fatal(err)
+			}
+			if model["apply_patch_tool_type"] != nil || model["tool_mode"] != nil || model["use_responses_lite"] != false {
+				t.Fatalf("tool fields were not disabled: %#v", model)
+			}
+		})
 	}
 
 	for name, mutate := range map[string]func(map[string]any){
-		"missing metadata": func(model map[string]any) { delete(model, "tool_mode") },
-		"unknown patch":    func(model map[string]any) { model["apply_patch_tool_type"] = "secret-value" },
-		"unknown mode":     func(model map[string]any) { model["tool_mode"] = "secret-value" },
-		"invalid lite":     func(model map[string]any) { model["use_responses_lite"] = "secret-value" },
+		"missing patch metadata":     func(model map[string]any) { delete(model, "apply_patch_tool_type") },
+		"missing responses metadata": func(model map[string]any) { delete(model, "use_responses_lite") },
+		"unknown patch":              func(model map[string]any) { model["apply_patch_tool_type"] = "secret-value" },
+		"unknown mode":               func(model map[string]any) { model["tool_mode"] = "secret-value" },
+		"invalid lite":               func(model map[string]any) { model["use_responses_lite"] = "secret-value" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			model := compatibleTestModel("test-model", 1)
