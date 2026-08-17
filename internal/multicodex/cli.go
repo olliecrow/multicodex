@@ -1,6 +1,7 @@
 package multicodex
 
 import (
+	"context"
 	"fmt"
 )
 
@@ -12,7 +13,7 @@ func (a *App) cmdCLI(args []string) error {
 		return a.cmdCLIWithAccount(args[1:])
 	}
 
-	selected, err := a.selectAccountForCodexArgs(args)
+	selected, err := a.selectAccountForCodexArgs(context.Background(), args)
 	if err != nil {
 		return err
 	}

@@ -160,6 +160,12 @@ func TestCompletionSuggestsProfilesOnlyForAccountArguments(t *testing.T) {
 	}
 }
 
+func TestFishCompletionIncludesGenerateHelp(t *testing.T) {
+	if !strings.Contains(renderFishCompletion(), "cli exec generate status") {
+		t.Fatal("Fish help completion omits generate")
+	}
+}
+
 func TestCompleteProfilesSorted(t *testing.T) {
 	app := newTestAppForCLI(t)
 	if err := app.store.EnsureBaseDirs(); err != nil {
