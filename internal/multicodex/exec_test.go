@@ -480,7 +480,7 @@ func TestSelectExecProfilePassesModelToSelector(t *testing.T) {
 
 	model := "gpt-5-codex-spark"
 	calledWith := ""
-	selected, err := app.selectExecProfile(cfg, func(_ context.Context, _ []usage.MonitorAccount, selectedModel string) (usage.SelectedAccount, error) {
+	selected, err := app.selectExecProfile(context.Background(), cfg, func(_ context.Context, _ []usage.MonitorAccount, selectedModel string) (usage.SelectedAccount, error) {
 		calledWith = selectedModel
 		return usage.SelectedAccount{
 			Account:           usage.MonitorAccount{Label: "alpha"},
@@ -754,7 +754,7 @@ func TestSelectExecProfileReturnsErrorWhenSelectionFails(t *testing.T) {
 		t.Fatalf("loadConfigIfExists: %v", err)
 	}
 
-	selected, err := app.selectExecProfile(cfg, func(context.Context, []usage.MonitorAccount, string) (usage.SelectedAccount, error) {
+	selected, err := app.selectExecProfile(context.Background(), cfg, func(context.Context, []usage.MonitorAccount, string) (usage.SelectedAccount, error) {
 		return usage.SelectedAccount{}, errors.New("boom")
 	}, "")
 	if err == nil {
@@ -771,7 +771,7 @@ func TestSelectExecProfileReturnsErrorForOnlyProfileWhenSelectionFails(t *testin
 		t.Fatalf("loadConfigIfExists: %v", err)
 	}
 
-	selected, err := app.selectExecProfile(cfg, func(context.Context, []usage.MonitorAccount, string) (usage.SelectedAccount, error) {
+	selected, err := app.selectExecProfile(context.Background(), cfg, func(context.Context, []usage.MonitorAccount, string) (usage.SelectedAccount, error) {
 		return usage.SelectedAccount{}, errors.New("boom")
 	}, "")
 	if err == nil {
@@ -788,7 +788,7 @@ func TestSelectExecProfileReturnsErrorForSparkModelWhenNoModelWindowAvailable(t 
 		t.Fatalf("loadConfigIfExists: %v", err)
 	}
 
-	selected, err := app.selectExecProfile(cfg, func(context.Context, []usage.MonitorAccount, string) (usage.SelectedAccount, error) {
+	selected, err := app.selectExecProfile(context.Background(), cfg, func(context.Context, []usage.MonitorAccount, string) (usage.SelectedAccount, error) {
 		return usage.SelectedAccount{}, errors.New("usage selection failed")
 	}, "gpt-5-codex-spark")
 	if err == nil {
@@ -896,7 +896,7 @@ func TestSelectExecProfilePersistsUsageSelectionMetadata(t *testing.T) {
 		t.Fatalf("loadConfigIfExists: %v", err)
 	}
 
-	selected, err := app.selectExecProfile(cfg, func(context.Context, []usage.MonitorAccount, string) (usage.SelectedAccount, error) {
+	selected, err := app.selectExecProfile(context.Background(), cfg, func(context.Context, []usage.MonitorAccount, string) (usage.SelectedAccount, error) {
 		return usage.SelectedAccount{
 			Account:           usage.MonitorAccount{Label: "beta"},
 			WeeklyUsedPercent: 7,
@@ -924,7 +924,7 @@ func TestSelectExecProfileOmitsUnavailableWeeklyUsageMetadataForReserve(t *testi
 	if err != nil {
 		t.Fatalf("loadConfigIfExists: %v", err)
 	}
-	selected, err := app.selectExecProfile(cfg, func(_ context.Context, accounts []usage.MonitorAccount, _ string) (usage.SelectedAccount, error) {
+	selected, err := app.selectExecProfile(context.Background(), cfg, func(_ context.Context, accounts []usage.MonitorAccount, _ string) (usage.SelectedAccount, error) {
 		for _, account := range accounts {
 			if account.Label == defaultExecAccountLabel {
 				return usage.SelectedAccount{Account: account, WeeklyUsedPercent: -1}, nil

@@ -123,6 +123,26 @@ func TestCmdGenerateUsesExplicitProfile(t *testing.T) {
 	}
 }
 
+func TestSelectGenerateAccountHonorsCancellation(t *testing.T) {
+	app, _ := newExecTestApp(t)
+	createExecProfiles(t, app, "alpha")
+
+	originalSelector := defaultExecAccountSelector
+	defaultExecAccountSelector = func(ctx context.Context, _ []usage.MonitorAccount, _ string) (usage.SelectedAccount, error) {
+		if err := ctx.Err(); err != nil {
+			return usage.SelectedAccount{}, err
+		}
+		return usage.SelectedAccount{}, errors.New("selector context was not canceled")
+	}
+	defer func() { defaultExecAccountSelector = originalSelector }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := app.selectGenerateAccount(ctx, generateCommandOptions{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("selection error = %v, want context canceled", err)
+	}
+}
+
 type errorReader struct{}
 
 func (errorReader) Read([]byte) (int, error) {

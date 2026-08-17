@@ -12,7 +12,7 @@ import (
 
 const maxCodexConfigBytes = 16 * 1024 * 1024
 
-func configuredMCPServerNames(codexHome string) ([]string, error) {
+func inspectGenerationConfig(codexHome string) ([]string, error) {
 	file, err := os.Open(filepath.Join(codexHome, "config.toml"))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
@@ -33,6 +33,12 @@ func configuredMCPServerNames(codexHome string) ([]string, error) {
 		MCPServers     map[string]any `toml:"mcp_servers"`
 		ModelProviders map[string]any `toml:"model_providers"`
 		OpenAIBaseURL  *string        `toml:"openai_base_url"`
+		ChatGPTBaseURL *string        `toml:"chatgpt_base_url"`
+		Debug          struct {
+			ConfigLockfile struct {
+				LoadPath *string `toml:"load_path"`
+			} `toml:"config_lockfile"`
+		} `toml:"debug"`
 	}
 	if err := toml.Unmarshal(data, &config); err != nil {
 		return nil, errors.New("decode Codex configuration")
@@ -40,8 +46,11 @@ func configuredMCPServerNames(codexHome string) ([]string, error) {
 	if _, overridden := config.ModelProviders[subscriptionProvider]; overridden {
 		return nil, errors.New("generate cannot use a configuration that replaces the built-in OpenAI provider")
 	}
-	if config.OpenAIBaseURL != nil {
+	if config.OpenAIBaseURL != nil || config.ChatGPTBaseURL != nil {
 		return nil, errors.New("generate cannot use a configuration that overrides the OpenAI provider endpoint")
+	}
+	if config.Debug.ConfigLockfile.LoadPath != nil {
+		return nil, errors.New("generate cannot use a Codex configuration lockfile")
 	}
 
 	names := make([]string, 0, len(config.MCPServers))

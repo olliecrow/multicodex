@@ -268,16 +268,6 @@ func (s *appServerSession) request(ctx context.Context, method string, params an
 	return client.Request(ctx, method, params, out)
 }
 
-func (s *appServerSession) notify(method string, params any) error {
-	s.mu.Lock()
-	client := s.client
-	s.mu.Unlock()
-	if client == nil {
-		return errors.New("app-server process not started")
-	}
-	return client.Notify(method, params)
-}
-
 func (s *appServerSession) close() error {
 	s.mu.Lock()
 	client := s.client

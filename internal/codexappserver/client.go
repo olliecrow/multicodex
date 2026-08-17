@@ -19,24 +19,23 @@ import (
 const (
 	defaultCommand          = "codex"
 	defaultNotificationSize = 256
-	maxMessageBytes         = 8 * 1024 * 1024
-	shutdownTimeout         = 2 * time.Second
+	// Allow worst-case JSON escaping of the documented 4 MiB generation prompt.
+	maxMessageBytes = 32 * 1024 * 1024
+	shutdownTimeout = 2 * time.Second
 )
 
 type ErrorSanitizer func(method string, code int, message string) error
 
 type Config struct {
-	Command          []string
-	GlobalArgs       []string
-	ServerArgs       []string
-	BaseEnv          []string
-	CodexHome        string
-	ActiveProfile    string
-	ClientName       string
-	ClientVersion    string
-	CaptureEvents    bool
-	ErrorSanitizer   ErrorSanitizer
-	NotificationSize int
+	Command        []string
+	GlobalArgs     []string
+	BaseEnv        []string
+	CodexHome      string
+	ActiveProfile  string
+	ClientName     string
+	ClientVersion  string
+	CaptureEvents  bool
+	ErrorSanitizer ErrorSanitizer
 }
 
 type Event struct {
@@ -46,7 +45,8 @@ type Event struct {
 }
 
 type Client struct {
-	mu sync.Mutex
+	mu      sync.Mutex
+	writeMu sync.Mutex
 
 	config Config
 	cmd    *exec.Cmd
@@ -56,9 +56,11 @@ type Client struct {
 	pending map[int]chan message
 	nextID  int
 
-	events  chan Event
-	done    chan struct{}
-	doneErr error
+	events   chan Event
+	done     chan struct{}
+	stopping chan struct{}
+	stopOnce sync.Once
+	doneErr  error
 }
 
 type request struct {
@@ -97,16 +99,14 @@ func New(config Config) *Client {
 	if len(config.Command) == 0 {
 		config.Command = []string{defaultCommand}
 	}
-	if config.NotificationSize <= 0 {
-		config.NotificationSize = defaultNotificationSize
-	}
 	client := &Client{
-		config:  config,
-		pending: make(map[int]chan message),
-		done:    make(chan struct{}),
+		config:   config,
+		pending:  make(map[int]chan message),
+		done:     make(chan struct{}),
+		stopping: make(chan struct{}),
 	}
 	if config.CaptureEvents {
-		client.events = make(chan Event, config.NotificationSize)
+		client.events = make(chan Event, defaultNotificationSize)
 	}
 	return client
 }
@@ -121,7 +121,6 @@ func (c *Client) Start() error {
 	args := append([]string{}, c.config.Command[1:]...)
 	args = append(args, c.config.GlobalArgs...)
 	args = append(args, "app-server")
-	args = append(args, c.config.ServerArgs...)
 	cmd := exec.Command(c.config.Command[0], args...)
 	baseEnv := c.config.BaseEnv
 	if baseEnv == nil {
@@ -142,11 +141,6 @@ func (c *Client) Start() error {
 		_ = stdin.Close()
 		return fmt.Errorf("open app-server stdout: %w", err)
 	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		_ = stdin.Close()
-		return fmt.Errorf("open app-server stderr: %w", err)
-	}
 	if err := cmd.Start(); err != nil {
 		_ = stdin.Close()
 		return fmt.Errorf("start codex app-server: %w", err)
@@ -155,7 +149,6 @@ func (c *Client) Start() error {
 	c.cmd = cmd
 	c.stdin = stdin
 	c.enc = json.NewEncoder(stdin)
-	go discard(stderr)
 	go c.readLoop(stdout)
 	return nil
 }
@@ -189,19 +182,20 @@ func (c *Client) Request(ctx context.Context, method string, params, out any) er
 	id := c.nextID
 	response := make(chan message, 1)
 	c.pending[id] = response
-	err := c.enc.Encode(request{
+	enc := c.enc
+	done := c.done
+	c.mu.Unlock()
+
+	err := c.write(enc, request{
 		JSONRPC: "2.0",
 		ID:      json.RawMessage(fmt.Sprintf("%d", id)),
 		Method:  method,
 		Params:  params,
 	})
-	done := c.done
 	if err != nil {
-		delete(c.pending, id)
-		c.mu.Unlock()
+		c.removePending(id)
 		return fmt.Errorf("send app-server request %s: %w", method, err)
 	}
-	c.mu.Unlock()
 
 	select {
 	case msg, ok := <-response:
@@ -231,11 +225,13 @@ func (c *Client) Request(ctx context.Context, method string, params, out any) er
 
 func (c *Client) Notify(method string, params any) error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	if c.cmd == nil || c.enc == nil {
+		c.mu.Unlock()
 		return errors.New("app-server is not running")
 	}
-	if err := c.enc.Encode(request{JSONRPC: "2.0", Method: method, Params: params}); err != nil {
+	enc := c.enc
+	c.mu.Unlock()
+	if err := c.write(enc, request{JSONRPC: "2.0", Method: method, Params: params}); err != nil {
 		return fmt.Errorf("send app-server notification %s: %w", method, err)
 	}
 	return nil
@@ -266,6 +262,7 @@ func (c *Client) Close() error {
 	if cmd == nil {
 		return nil
 	}
+	c.stop()
 	_ = cmd.Process.Kill()
 	select {
 	case <-done:
@@ -286,10 +283,10 @@ func (c *Client) readLoop(stdout io.Reader) {
 		if msg.Method != "" {
 			serverRequest := len(msg.ID) != 0
 			if serverRequest {
-				c.denyServerRequest(msg.ID)
+				go c.denyServerRequest(msg.ID)
 			}
 			if !c.emit(Event{Method: msg.Method, Params: msg.Params, ServerRequest: serverRequest}) {
-				c.terminate(errors.New("app-server event buffer exceeded safety limit"))
+				c.terminate(errors.New("app-server event delivery stopped"))
 				return
 			}
 			continue
@@ -319,11 +316,13 @@ func (c *Client) readLoop(stdout io.Reader) {
 
 func (c *Client) denyServerRequest(id json.RawMessage) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	if c.enc == nil {
+		c.mu.Unlock()
 		return
 	}
-	_ = c.enc.Encode(request{
+	enc := c.enc
+	c.mu.Unlock()
+	_ = c.write(enc, request{
 		JSONRPC: "2.0",
 		ID:      id,
 		Error: &wireError{
@@ -333,6 +332,12 @@ func (c *Client) denyServerRequest(id json.RawMessage) {
 	})
 }
 
+func (c *Client) write(enc *json.Encoder, value request) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	return enc.Encode(value)
+}
+
 func (c *Client) emit(event Event) bool {
 	if c.events == nil {
 		return true
@@ -340,12 +345,13 @@ func (c *Client) emit(event Event) bool {
 	select {
 	case c.events <- event:
 		return true
-	default:
+	case <-c.stopping:
 		return false
 	}
 }
 
 func (c *Client) terminate(err error) {
+	c.stop()
 	c.mu.Lock()
 	cmd := c.cmd
 	c.mu.Unlock()
@@ -353,6 +359,10 @@ func (c *Client) terminate(err error) {
 		_ = cmd.Process.Kill()
 	}
 	c.finish(err)
+}
+
+func (c *Client) stop() {
+	c.stopOnce.Do(func() { close(c.stopping) })
 }
 
 func (c *Client) finish(err error) {
@@ -409,8 +419,4 @@ func safeRPCError(method string, rpcErr *wireError) error {
 		message += ": authentication rejected; sign in again"
 	}
 	return errors.New(message)
-}
-
-func discard(reader io.Reader) {
-	_, _ = io.Copy(io.Discard, reader)
 }

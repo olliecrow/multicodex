@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -27,15 +28,22 @@ func TestGenerate(t *testing.T) {
 		notInError string
 	}{
 		{name: "success", mode: "success", wantOutput: "safe output"},
+		{name: "burst before response", mode: "burst-before-response", wantOutput: strings.Repeat("x", defaultNotificationSize+1)},
 		{name: "api key rejected", mode: "api-key", wantError: "requires ChatGPT subscription"},
+		{name: "unsafe effective config rejected", mode: "unsafe-effective-config", wantError: "safe generation configuration"},
 		{name: "server request rejected", mode: "server-request", wantError: "unsupported action"},
 		{name: "tool event rejected", mode: "tool-event", wantError: "commandexecution action"},
 		{name: "RPC detail sanitized", mode: "rpc-error", wantError: "RPC code -32000", notInError: "private-secret"},
+		{name: "turn RPC detail sanitized", mode: "turn-rpc-error", wantError: "RPC code -32002", notInError: "private-secret"},
 		{name: "turn failure sanitized", mode: "turn-error", wantError: "generation failed", notInError: "private-secret"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Setenv(helperModeEnv, test.mode)
 			var output bytes.Buffer
+			var writer io.Writer = &output
+			if test.mode == "burst-before-response" {
+				writer = delayedWriter{writer: &output, delay: time.Millisecond}
+			}
 			tempRoot := t.TempDir()
 			err := Generate(t.Context(), GenerateOptions{
 				Command:       helperCommand(t),
@@ -44,7 +52,7 @@ func TestGenerate(t *testing.T) {
 				ActiveProfile: "synthetic-profile",
 				Model:         "test-model",
 				Prompt:        "synthetic prompt",
-				Output:        &output,
+				Output:        writer,
 				TempRoot:      tempRoot,
 			})
 			entries, readErr := os.ReadDir(tempRoot)
@@ -70,6 +78,16 @@ func TestGenerate(t *testing.T) {
 	}
 }
 
+type delayedWriter struct {
+	writer io.Writer
+	delay  time.Duration
+}
+
+func (w delayedWriter) Write(data []byte) (int, error) {
+	time.Sleep(w.delay)
+	return w.writer.Write(data)
+}
+
 func TestGenerateRejectsEmptyPrompt(t *testing.T) {
 	err := Generate(t.Context(), GenerateOptions{Prompt: " \n", Output: &bytes.Buffer{}})
 	if err == nil || !strings.Contains(err.Error(), "prompt is empty") {
@@ -84,15 +102,87 @@ func TestGenerateRejectsMissingCodexHome(t *testing.T) {
 	}
 }
 
+func TestGenerateBoundsHandshakeNotificationPressure(t *testing.T) {
+	t.Setenv(helperModeEnv, "handshake-burst")
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	err := Generate(ctx, GenerateOptions{
+		Command:   helperCommand(t),
+		BaseEnv:   []string{helperModeEnv + "=handshake-burst", "PATH=" + os.Getenv("PATH")},
+		CodexHome: t.TempDir(),
+		Model:     "test-model",
+		Prompt:    "synthetic prompt",
+		Output:    &bytes.Buffer{},
+		TempRoot:  t.TempDir(),
+	})
+	if err == nil || !strings.Contains(err.Error(), "canceled") {
+		t.Fatalf("handshake error = %v, want bounded cancellation", err)
+	}
+}
+
 func TestGenerationArgsEnforceSubscriptionIsolation(t *testing.T) {
 	args := generationArgs("catalog.json", []string{"alpha.with.dot", "zeta"})
 	for _, override := range []string{
 		`model_provider="openai"`,
+		`chatgpt_base_url="https://chatgpt.com/backend-api/"`,
 		`mcp_servers={"alpha.with.dot"={enabled=false},"zeta"={enabled=false}}`,
+		`notify=[]`,
 	} {
 		if !containsArg(args, override) {
 			t.Fatalf("generation arguments do not contain %q", override)
 		}
+	}
+}
+
+func TestGenerationConfigIsSafe(t *testing.T) {
+	config := map[string]json.RawMessage{
+		"model_provider":     json.RawMessage(`"openai"`),
+		"model_catalog_json": json.RawMessage(`"catalog.json"`),
+		"openai_base_url":    json.RawMessage(`null`),
+		"chatgpt_base_url":   json.RawMessage(`"https://chatgpt.com/backend-api/"`),
+		"debug":              json.RawMessage(`null`),
+		"notify":             json.RawMessage(`[]`),
+		"mcp_servers":        json.RawMessage(`{"safe":{"enabled":false}}`),
+	}
+	if !generationConfigIsSafe(config, "catalog.json") {
+		t.Fatal("safe configuration was rejected")
+	}
+	for _, name := range []string{"model_provider", "model_catalog_json", "chatgpt_base_url", "notify"} {
+		t.Run(name, func(t *testing.T) {
+			changed := make(map[string]json.RawMessage, len(config))
+			for key, value := range config {
+				changed[key] = value
+			}
+			changed[name] = json.RawMessage(`null`)
+			if generationConfigIsSafe(changed, "catalog.json") {
+				t.Fatalf("unsafe %s configuration was accepted", name)
+			}
+		})
+	}
+	config["openai_base_url"] = json.RawMessage(`"https://example.invalid/v1"`)
+	if generationConfigIsSafe(config, "catalog.json") {
+		t.Fatal("overridden OpenAI endpoint was accepted")
+	}
+	config["openai_base_url"] = json.RawMessage(`null`)
+	config["debug"] = json.RawMessage(`{"config_lockfile":{"load_path":"/synthetic/config.lock.toml"}}`)
+	if generationConfigIsSafe(config, "catalog.json") {
+		t.Fatal("effective config lockfile was accepted")
+	}
+	config["debug"] = json.RawMessage(`null`)
+	config["mcp_servers"] = json.RawMessage(`{"unsafe":{"enabled":true}}`)
+	if generationConfigIsSafe(config, "catalog.json") {
+		t.Fatal("enabled MCP server was accepted")
+	}
+}
+
+func TestGenerationItemAllowed(t *testing.T) {
+	for _, itemType := range []string{"agentMessage", "contextCompaction", "reasoning", "userMessage"} {
+		if !generationItemAllowed(itemType) {
+			t.Fatalf("safe item %q was rejected", itemType)
+		}
+	}
+	if generationItemAllowed("commandExecution") {
+		t.Fatal("tool item was accepted")
 	}
 }
 
@@ -176,7 +266,7 @@ func TestCodexWireHasNoHarnessOrTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mcpServers, err := configuredMCPServerNames(tempDir)
+	mcpServers, err := inspectGenerationConfig(tempDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -348,7 +438,7 @@ func TestAppServerHelper(t *testing.T) {
 		}
 		fmt.Println(SupportedCodexVersion)
 		os.Exit(0)
-	case len(args) == 2 && args[0] == "debug" && args[1] == "models":
+	case len(args) == 3 && args[0] == "debug" && args[1] == "models" && args[2] == "--bundled":
 		if os.Getenv("OPENAI_API_KEY") != "" || os.Getenv("CODEX_API_KEY") != "" {
 			os.Exit(20)
 		}
@@ -358,6 +448,9 @@ func TestAppServerHelper(t *testing.T) {
 	}
 	if !containsArg(args, "app-server") || !containsArg(args, "-c") {
 		os.Exit(21)
+	}
+	if !containsArg(args, "notify=[]") {
+		os.Exit(23)
 	}
 	if os.Getenv("OPENAI_API_KEY") != "" || os.Getenv("CODEX_API_KEY") != "" {
 		os.Exit(22)
@@ -395,6 +488,25 @@ func runAppServerHelper(mode string) {
 		result := any(map[string]any{})
 		switch req.Method {
 		case "initialize":
+		case "config/read":
+			if mode == "handshake-burst" {
+				for range defaultNotificationSize + 1 {
+					_ = encoder.Encode(map[string]any{"method": "fs/changed", "params": map[string]any{}})
+				}
+			}
+			config := map[string]any{
+				"model_provider":     subscriptionProvider,
+				"model_catalog_json": generationArgValue("model_catalog_json"),
+				"openai_base_url":    nil,
+				"chatgpt_base_url":   chatGPTBaseURL,
+				"debug":              nil,
+				"notify":             []string{},
+				"mcp_servers":        map[string]any{},
+			}
+			if mode == "unsafe-effective-config" {
+				config["chatgpt_base_url"] = "https://example.invalid/"
+			}
+			result = map[string]any{"config": config, "origins": map[string]any{}}
 		case "account/read":
 			if mode == "rpc-error" {
 				_ = encoder.Encode(map[string]any{"id": req.ID, "error": map[string]any{"code": -32000, "message": "private-secret"}})
@@ -416,6 +528,16 @@ func runAppServerHelper(mode string) {
 				_ = encoder.Encode(map[string]any{"id": req.ID, "error": map[string]any{"code": -32002, "message": "unsafe turn parameters"}})
 				continue
 			}
+			if mode == "turn-rpc-error" {
+				_ = encoder.Encode(map[string]any{"method": "item/agentMessage/delta", "params": map[string]any{"delta": "partial"}})
+				_ = encoder.Encode(map[string]any{"id": req.ID, "error": map[string]any{"code": -32002, "message": "private-secret"}})
+				continue
+			}
+			if mode == "burst-before-response" {
+				for range defaultNotificationSize + 1 {
+					_ = encoder.Encode(map[string]any{"method": "item/agentMessage/delta", "params": map[string]any{"delta": "x"}})
+				}
+			}
 			result = map[string]any{"turn": map[string]any{"id": "turn-1", "status": "inProgress"}}
 		}
 		_ = encoder.Encode(map[string]any{"id": req.ID, "result": result})
@@ -423,6 +545,8 @@ func runAppServerHelper(mode string) {
 			continue
 		}
 		switch mode {
+		case "burst-before-response":
+			_ = encoder.Encode(map[string]any{"method": "turn/completed", "params": map[string]any{"turn": map[string]any{"status": "completed"}}})
 		case "server-request":
 			_ = encoder.Encode(map[string]any{"id": 99, "method": "item/commandExecution/requestApproval", "params": map[string]any{}})
 		case "tool-event":
@@ -437,6 +561,23 @@ func runAppServerHelper(mode string) {
 			_ = encoder.Encode(map[string]any{"method": "turn/completed", "params": map[string]any{"turn": map[string]any{"status": "completed"}}})
 		}
 	}
+}
+
+func generationArgValue(name string) string {
+	args := helperArgs(os.Args)
+	for index := 0; index+1 < len(args); index++ {
+		if args[index] != "-c" {
+			continue
+		}
+		key, value, ok := strings.Cut(args[index+1], "=")
+		if ok && key == name {
+			unquoted, err := strconv.Unquote(value)
+			if err == nil {
+				return unquoted
+			}
+		}
+	}
+	return ""
 }
 
 func threadParamsAreToolFree(raw json.RawMessage) bool {

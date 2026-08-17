@@ -279,7 +279,7 @@ complete -c multicodex -f -n '__fish_seen_subcommand_from monitor' -l discover
 complete -c multicodex -f -n '__fish_seen_subcommand_from completion; and __fish_seen_subcommand_from monitor' -a 'bash zsh fish'
 complete -c multicodex -f -n '__fish_seen_subcommand_from dry-run' -a 'login'
 complete -c multicodex -f -n '__fish_seen_subcommand_from completion' -a 'bash zsh fish'
-complete -c multicodex -f -n '__fish_seen_subcommand_from help' -a 'init add login login-all cli exec status reconcile heartbeat monitor doctor dry-run completion version help "monitor doctor" "monitor completion" "monitor tui"'
+complete -c multicodex -f -n '__fish_seen_subcommand_from help' -a 'init add login login-all cli exec generate status reconcile heartbeat monitor doctor dry-run completion version help "monitor doctor" "monitor completion" "monitor tui"'
 complete -c multicodex -f -n '__fish_seen_subcommand_from doctor' -l json
 complete -c multicodex -f -n '__fish_seen_subcommand_from doctor' -l timeout
 complete -c multicodex -f -n '__fish_seen_subcommand_from doctor; and __fish_seen_subcommand_from monitor' -l json
