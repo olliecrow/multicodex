@@ -8,6 +8,7 @@
 - `multicodex login-all`
 - `multicodex cli [--account <name>] [--] [codex args...]`
 - `multicodex exec [codex exec args]`
+- `multicodex generate [--account <name>] [-m|--model <model>] [prompt]`
 - `multicodex status`
 - `multicodex reconcile`
 - `multicodex heartbeat`
@@ -85,6 +86,21 @@ Multicodex intentionally has no command for changing the shared default Codex ac
 - Writes selected-profile metadata only under `MULTICODEX_HOME/run` when `MULTICODEX_SELECTED_PROFILE_PATH` is set.
 - Selected-profile metadata exposes the optional usage field `weekly_used_percent`; the older generic percent fields are not emitted.
 - Returns the child exit code.
+
+`multicodex generate [--account <name>] [-m|--model <model>] [prompt]`
+- Sends one text prompt through Codex App Server using ChatGPT subscription authentication.
+- Reads the prompt from standard input when no prompt argument is present and rejects input larger than 4 MiB.
+- Uses normal weekly-aware routing, including the protected default reserve, unless `--account <name>` selects one configured profile directly.
+- Passes an explicit model to the existing model-aware selector. Otherwise, uses the highest-priority visible model in the installed Codex catalog.
+- Requires exactly `codex-cli 0.147.0` and fails before generation for any other version.
+- Requires App Server `account/read` to report managed ChatGPT authentication. It rejects API-key billing and does not start login or token-refresh flows.
+- Runs an ephemeral thread in a private empty temporary directory with read-only sandboxing and approval policy `never`.
+- Sends empty base and developer instructions, disables client context sources and tools, and uses a private `0600` one-model catalog with tool metadata removed.
+- Rejects server requests, command, file, web, image, and unexpected item events.
+- Streams only assistant text to standard output. Resource notices and safe errors use standard error. A failure can occur after partial text was written.
+- Deletes the temporary workspace and model catalog when the command ends.
+- Does not expose sessions, custom tools, images, output schemas, raw events, or a persistent App Server.
+- Re-checks profile filesystem and file-backed auth isolation before a configured-profile run. It never changes or manages default account authentication.
 
 `multicodex status`
 - Shows all profiles and each profile login status.
@@ -171,8 +187,8 @@ Multicodex intentionally has no command for changing the shared default Codex ac
 - Explicit resource management owns symlinks at its managed profile positions, including pre-existing symlinks. It may retarget or remove them and reports old targets. Regular files and directories are preserved.
 - `inherit: false` removes managed symlinks. Populated source fields are invalid in this mode.
 - `~` expands to the user home. Relative paths resolve from the config file directory. Custom source directories must exist and have the expected type before reconciliation starts.
-- `add`, `login`, `login-all`, `cli`, `exec`, and `heartbeat` reconcile resources before a profile-scoped Codex launch. `reconcile` applies the same managed profile state to all profiles without launching Codex. `doctor`, `dry-run`, `status`, and `monitor` do not mutate profile resources.
-- Resource changes use normal command output, except `exec` writes them to standard error so Codex's standard output remains safe for scripts.
+- `add`, `login`, `login-all`, `cli`, `exec`, `generate`, and `heartbeat` reconcile resources before a profile-scoped Codex launch. `reconcile` applies the same managed profile state to all profiles without launching Codex. `doctor`, `dry-run`, `status`, and `monitor` do not mutate profile resources.
+- Resource changes use normal command output, except `exec` and `generate` write them to standard error so standard output remains safe for scripts.
 
 `multicodex completion <shell>`
 - Prints tab-completion script for bash, zsh, or fish.

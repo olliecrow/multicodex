@@ -83,7 +83,7 @@ func commandKnown(command string) bool {
 	switch command {
 	case "status", "doctor", "dry-run", "monitor", "completion", "__complete-profiles":
 		return true
-	case "init", "add", "login", "login-all", "cli", "exec", "heartbeat", "reconcile":
+	case "init", "add", "login", "login-all", "cli", "exec", "generate", "heartbeat", "reconcile":
 		return true
 	default:
 		return false
@@ -117,6 +117,8 @@ func (a *App) Run(args []string) error {
 		return a.cmdCLI(args[1:])
 	case "exec":
 		return a.cmdExec(args[1:])
+	case "generate":
+		return a.cmdGenerate(args[1:])
 	case "status":
 		return a.cmdStatus()
 	case "reconcile":

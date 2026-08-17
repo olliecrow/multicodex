@@ -73,3 +73,9 @@ Context: Some users need common guidance or several skill sources, while existin
 Rationale: One optional `profile_resources` policy manages only documented symlink positions, preserves regular local overrides, and leaves omitted settings on their established behavior.
 Trade-offs: Explicit management may retarget or remove symlinks at owned positions, so every such change is reported.
 References: `internal/multicodex/resources.go`, `docs/command-spec.md`, `docs/security-and-privacy.md`
+
+Decision: Add one-shot tool-free generation through Codex App Server.
+Context: Subscription authentication is useful for general text generation, but `codex exec` always includes the client-side coding-agent harness. The official Codex SDK exposes the same agent behavior and is not a Go dependency.
+Rationale: A small App Server client reuses existing profile routing and managed ChatGPT authentication. An exact Codex version gate, empty instructions, disabled context, a one-model tool-free catalog, and fail-closed event handling make the wire request contain only the user message and no tools. Normal tolerant config loading preserves user-owned Codex settings that strict parsing can reject.
+Trade-offs: The command is one-shot and text-only, requires a tested Codex version, and must be updated when the experimental protocol changes. Provider-side instructions remain outside client control.
+References: `internal/codexappserver/`, `internal/multicodex/generate.go`, `docs/command-spec.md`
