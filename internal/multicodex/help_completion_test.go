@@ -26,7 +26,7 @@ func TestHelpCommandGlobal(t *testing.T) {
 	if !strings.Contains(out, "exec [codex exec args]") {
 		t.Fatalf("expected exec command in help output")
 	}
-	if !strings.Contains(out, "cli <name>") {
+	if !strings.Contains(out, "cli [--account <name>]") {
 		t.Fatalf("expected cli command in help output")
 	}
 	if !strings.Contains(out, "reconcile") {
@@ -63,6 +63,21 @@ func TestHelpExecDescribesDefaultLoginCheck(t *testing.T) {
 	}
 	if !strings.Contains(out, "official Codex CLI confirms its login") {
 		t.Fatalf("expected default login check in exec help: %s", out)
+	}
+}
+
+func TestHelpCLIDescribesAutomaticAndManualAccountSelection(t *testing.T) {
+	app := newTestAppForCLI(t)
+	out, err := captureStdout(t, func() error {
+		return app.Run([]string{"help", "cli"})
+	})
+	if err != nil {
+		t.Fatalf("help cli failed: %v", err)
+	}
+	for _, want := range []string{"same weekly-usage rules", "--account <name>", "multicodex cli --account work"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected %q in cli help: %s", want, out)
+		}
 	}
 }
 
@@ -128,23 +143,19 @@ func TestCompletionCommandUnsupportedShell(t *testing.T) {
 	}
 }
 
-func TestCompletionDoesNotSuggestExistingProfilesForAdd(t *testing.T) {
+func TestCompletionSuggestsProfilesOnlyForAccountArguments(t *testing.T) {
 	tests := []struct {
 		name string
 		out  string
-		bad  string
-		good string
+		want string
 	}{
-		{name: "bash", out: renderBashCompletion(), bad: "add|login|cli)", good: "login|cli)"},
-		{name: "zsh", out: renderZshCompletion(), bad: "add|login|cli)", good: "login|cli)"},
-		{name: "fish", out: renderFishCompletion(), bad: "__fish_seen_subcommand_from add login cli", good: "__fish_seen_subcommand_from login cli"},
+		{name: "bash", out: renderBashCompletion(), want: `[[ "${COMP_WORDS[2]}" == "--account" ]]`},
+		{name: "zsh", out: renderZshCompletion(), want: `[[ "${words[3]:-}" == "--account" ]]`},
+		{name: "fish", out: renderFishCompletion(), want: "__fish_seen_subcommand_from cli' -l account -r"},
 	}
 	for _, test := range tests {
-		if strings.Contains(test.out, test.bad) {
-			t.Errorf("%s completion still suggests existing profiles for add", test.name)
-		}
-		if !strings.Contains(test.out, test.good) {
-			t.Errorf("%s completion no longer suggests profiles for login and cli", test.name)
+		if !strings.Contains(test.out, test.want) {
+			t.Errorf("%s completion does not scope profiles to --account: missing %q", test.name, test.want)
 		}
 	}
 }

@@ -5,11 +5,33 @@ import (
 )
 
 func (a *App) cmdCLI(args []string) error {
-	if len(args) < 1 {
-		return &ExitError{Code: 2, Message: "usage: multicodex cli <name> [codex args...]"}
-	}
 	if len(args) == 1 && (args[0] == "-h" || args[0] == "--help") {
 		return a.cmdHelp([]string{"cli"})
+	}
+	if len(args) > 0 && args[0] == "--account" {
+		return a.cmdCLIWithAccount(args[1:])
+	}
+
+	selected, err := a.selectAccountForCodexArgs(args)
+	if err != nil {
+		return err
+	}
+	if selected.IsProfile {
+		if err := ensureProfileCodexExecutionReady(a.store.paths, selected.Profile); err != nil {
+			return err
+		}
+	}
+
+	activeProfile := selected.Name
+	if !selected.IsProfile {
+		activeProfile = ""
+	}
+	return RunInteractiveCodexWithProfile(selected.CodexHome, activeProfile, args)
+}
+
+func (a *App) cmdCLIWithAccount(args []string) error {
+	if len(args) < 1 || args[0] == "" {
+		return &ExitError{Code: 2, Message: "usage: multicodex cli --account <name> [--] [codex args...]"}
 	}
 
 	name := args[0]
@@ -30,5 +52,9 @@ func (a *App) cmdCLI(args []string) error {
 		return err
 	}
 
-	return RunInteractiveCodexWithProfile(profile.CodexHome, name, args[1:])
+	codexArgs := args[1:]
+	if len(codexArgs) > 0 && codexArgs[0] == "--" {
+		codexArgs = codexArgs[1:]
+	}
+	return RunInteractiveCodexWithProfile(profile.CodexHome, name, codexArgs)
 }

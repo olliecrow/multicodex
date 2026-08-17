@@ -1203,7 +1203,7 @@ for raw_line in sys.stdin:
 ' "$CODEX_HOME"
   exit $?
 fi
-if [[ "${1:-}" == "exec" ]]; then
+if [[ "${1:-}" == "exec" || "${MULTICODEX_FAKE_ALLOW_INTERACTIVE:-}" == "1" ]]; then
   : "${MULTICODEX_FAKE_CODEX_LOG:?MULTICODEX_FAKE_CODEX_LOG must be set}"
   {
     printf 'profile=%s\n' "${MULTICODEX_ACTIVE_PROFILE:-}"

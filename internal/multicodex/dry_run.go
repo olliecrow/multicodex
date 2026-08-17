@@ -47,7 +47,7 @@ func renderDryRunOverview(store *Store, cfg *Config, resolved *resolvedProfileRe
 	b.WriteString("1. init creates local multicodex directories and config only.\n")
 	b.WriteString("2. add <name> creates an isolated profile CODEX_HOME and links profile config to the default Codex config by default.\n")
 	b.WriteString("3. login <name> runs official codex login within that profile context.\n")
-	b.WriteString("4. cli <name> starts an interactive Codex session with profile-local state.\n")
+	b.WriteString("4. cli routes an interactive Codex session by weekly usage; --account <name> selects one profile directly.\n")
 	b.WriteString("5. exec routes codex exec to a configured profile when one is usable, otherwise to the default reserve account after Codex confirms its login.\n")
 	b.WriteString("6. heartbeat sends one fixed, ephemeral, read-only keepalive for logged-in profiles without persisting Codex sessions.\n")
 	b.WriteString("7. multicodex does not switch or restore the shared default Codex auth account.\n\n")

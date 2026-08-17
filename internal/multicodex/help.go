@@ -20,7 +20,7 @@ var commandSummaries = []struct {
 	{Name: "add <name>", Summary: "add a named account profile"},
 	{Name: "login <name> [codex login args]", Summary: "login profile using official codex flow"},
 	{Name: "login-all", Summary: "run login for every known profile"},
-	{Name: "cli <name> [codex args...]", Summary: "run the interactive Codex CLI with one profile"},
+	{Name: "cli [--account <name>] [--] [codex args...]", Summary: "run interactive Codex on the best available account"},
 	{Name: "exec [codex exec args]", Summary: "run codex exec on the best available account"},
 	{Name: "status", Summary: "show all profile auth states"},
 	{Name: "reconcile", Summary: "reconcile resources for all profiles"},
@@ -68,11 +68,13 @@ var commandHelpByName = map[string]commandHelp{
 		},
 	},
 	"cli": {
-		Usage:       "multicodex cli <name> [codex args...]",
-		Description: "Run the interactive Codex CLI with the selected profile. Codex defaults such as model, reasoning, approvals, and sandbox come from the shared Codex config unless you pass explicit Codex args.",
+		Usage:       "multicodex cli [--account <name>] [--] [codex args...]",
+		Description: "Run the interactive Codex CLI after automatically selecting an account with the same weekly-usage rules as `multicodex exec`. Use `--account <name>` to bypass routing and select one configured profile. Codex defaults such as model, reasoning, approvals, and sandbox come from the selected home unless you pass explicit Codex args.",
 		Examples: []string{
-			"multicodex cli personal",
-			`multicodex cli work "check this repo"`,
+			"multicodex cli",
+			"multicodex cli -m gpt-5-codex-spark",
+			"multicodex cli --account work",
+			`multicodex cli --account work -- "check this repo"`,
 		},
 	},
 	"exec": {
@@ -196,7 +198,8 @@ func printHelp() {
 	fmt.Println("Examples:")
 	fmt.Println("  multicodex init")
 	fmt.Println("  multicodex add personal")
-	fmt.Println("  multicodex cli personal")
+	fmt.Println("  multicodex cli")
+	fmt.Println("  multicodex cli --account personal")
 	fmt.Println("  multicodex monitor")
 	fmt.Println("  multicodex heartbeat")
 	fmt.Println("  multicodex reconcile")
@@ -206,7 +209,7 @@ func printHelp() {
 	fmt.Println("  multicodex help <command> [subcommand]")
 	fmt.Println()
 	fmt.Println("Notes:")
-	fmt.Println("  - commands are profile-local and do not change shared default auth")
+	fmt.Println("  - profile launches keep state isolated and routing never changes shared default auth")
 }
 
 func (a *App) cmdHelp(args []string) error {
