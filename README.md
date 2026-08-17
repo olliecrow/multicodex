@@ -56,11 +56,11 @@ multicodex status
 multicodex reconcile
 ```
 
-Run interactive Codex with one profile.
+Run interactive Codex on the best available account, or select one profile directly.
 
 ```bash
-multicodex cli personal
-multicodex cli work "check this repo"
+multicodex cli
+multicodex cli --account work -- "check this repo"
 ```
 
 Run `codex exec` on the best available account.
@@ -130,7 +130,7 @@ multicodex init
 multicodex add <name>
 multicodex login <name> [codex login args]
 multicodex login-all
-multicodex cli <name> [codex args...]
+multicodex cli [--account <name>] [--] [codex args...]
 multicodex exec [codex exec args]
 multicodex status
 multicodex reconcile
@@ -151,26 +151,26 @@ Commands reject undocumented positional arguments instead of silently ignoring t
 
 ## Interactive CLI
 
-`multicodex cli <name> [codex args...]` launches the official `codex` CLI with that profile's `CODEX_HOME`.
+`multicodex cli [codex args...]` launches the official interactive `codex` CLI after applying the same weekly-usage account selection as `multicodex exec`. Add `--account <name>` before the Codex arguments to bypass routing and use one configured profile. An optional `--` after the profile name separates multicodex arguments from Codex arguments and is not passed through.
 
-Codex defaults such as model, reasoning level, approvals, sandbox, and search come from the shared Codex config unless you pass explicit Codex args. Multicodex does not inject its own model or permission defaults.
+Automatic mode prepares and validates every configured profile, considers profiles before the protected default reserve, and uses explicit `-m` or `--model` arguments for Spark routing. Manual mode prepares and validates only the named profile and does not inspect usage. Codex defaults such as model, reasoning level, approvals, sandbox, and search come from the selected home unless you pass explicit Codex args. Multicodex does not inject its own model or permission defaults.
 
-Two terminals can run `multicodex cli` with different profiles at the same time. Each terminal uses its own account, auth, threads, and `/goal` state because each one has a different `CODEX_HOME`.
+Two terminals can run `multicodex cli --account <name>` with different profiles at the same time. Each terminal uses its own account, auth, threads, and `/goal` state because each one has a different `CODEX_HOME`.
 
-## Exec Routing
+## Automatic Routing
 
-`multicodex exec [codex exec args]` runs `codex exec` after selecting among configured multicodex profiles, with the default Codex home as a built-in reserve account.
+`multicodex cli [codex args...]` and `multicodex exec [codex exec args]` select among configured multicodex profiles, with the default Codex home as a built-in reserve account. Manual `cli --account <name>` launches do not use these rules.
 
 - Help requests such as `multicodex exec --help` delegate directly to `codex exec` and do not require profiles.
-- Exec can run with no configured profiles when Codex confirms that the default account is logged in.
+- Automatic routing can run with no configured profiles when Codex confirms that the default account is logged in.
 - Configured profiles at 100% weekly usage are not selected.
-- Exec uses configured selection priority first, then prefers the profile whose known weekly reset is soonest.
+- Automatic routing uses configured selection priority first, then prefers the profile whose known weekly reset is soonest.
 - Profiles with an unknown weekly reset follow profiles with a known reset. Exact ties are randomized.
-- The default Codex home is a protected reserve. It is used only when no configured profile has usable weekly usage.
-- Before launching the default reserve, exec asks the official Codex CLI to confirm its login. File and OS keyring credential stores are both supported; an absent `auth.json` does not imply that the default is logged out.
-- If the default Codex home is the only remaining destination, exec uses it as the final fallback even when its usage data is unavailable or exhausted, provided its login is confirmed.
+- The default Codex home is a protected reserve. Automatic `cli` and `exec` routing use it only when no configured profile has usable weekly usage.
+- Before launching the default reserve, multicodex asks the official Codex CLI to confirm its login. File and OS keyring credential stores are both supported; an absent `auth.json` does not imply that the default is logged out.
+- If the default Codex home is the only remaining destination, automatic routing uses it as the final fallback even when its usage data is unavailable or exhausted, provided its login is confirmed.
 - For explicit Spark model names, configured profiles need Spark usage windows to win normal routing; the logged-in default Codex home still remains the final fallback.
-- If the default is logged out or its login status cannot be confirmed, exec fails without launching the prompt.
+- If the default is logged out or its login status cannot be confirmed, automatic routing fails without launching the prompt.
 
 ## Heartbeat
 

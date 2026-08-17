@@ -43,18 +43,7 @@ func (a *App) cmdExec(args []string) error {
 	if execArgsAreHelpRequest(args) {
 		return runCommandWithEnv("codex", append([]string{"exec"}, args...), neutralCodexEnv(os.Environ()), fmt.Sprintf("command failed: %s", strings.Join(append([]string{"codex", "exec"}, args...), " ")))
 	}
-	model := parseModelFromExecArgs(args)
-
-	cfg, err := a.loadOrInitConfig()
-	if err != nil {
-		return err
-	}
-	cfg, err = a.execReadyConfig(cfg)
-	if err != nil {
-		return err
-	}
-
-	selected, err := a.selectExecProfile(cfg, defaultExecAccountSelector, model)
+	selected, err := a.selectAccountForCodexArgs(args)
 	if err != nil {
 		return err
 	}
@@ -72,6 +61,18 @@ func (a *App) cmdExec(args []string) error {
 		activeProfile = ""
 	}
 	return RunCodexWithProfile(selected.CodexHome, activeProfile, append([]string{"exec"}, args...))
+}
+
+func (a *App) selectAccountForCodexArgs(args []string) (execSelection, error) {
+	cfg, err := a.loadOrInitConfig()
+	if err != nil {
+		return execSelection{}, err
+	}
+	cfg, err = a.execReadyConfig(cfg)
+	if err != nil {
+		return execSelection{}, err
+	}
+	return a.selectExecProfile(cfg, defaultExecAccountSelector, parseModelFromExecArgs(args))
 }
 
 func (a *App) execReadyConfig(cfg *Config) (*Config, error) {

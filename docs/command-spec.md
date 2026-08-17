@@ -6,7 +6,7 @@
 - `multicodex add <name>`
 - `multicodex login <name> [codex login args]`
 - `multicodex login-all`
-- `multicodex cli <name> [codex args...]`
+- `multicodex cli [--account <name>] [--] [codex args...]`
 - `multicodex exec [codex exec args]`
 - `multicodex status`
 - `multicodex reconcile`
@@ -48,14 +48,22 @@ Multicodex intentionally has no command for changing the shared default Codex ac
 - Runs profile-scoped login for each known profile in sorted order.
 - Summarizes success and failure per profile.
 
-`multicodex cli <name> [codex args...]`
-- Runs the interactive official Codex CLI with the selected profile's `CODEX_HOME`.
+`multicodex cli [--account <name>] [--] [codex args...]`
+- Runs the interactive official Codex CLI with an automatically selected account by default.
+- Without `--account`, uses the same configured-profile priority, weekly-reset, exhaustion, Spark, and protected default-reserve selection rules as `multicodex exec`.
+- Automatic mode prepares and validates every configured profile before selection and fails closed if any configured profile is unsafe or incompatible.
+- Parses explicit `--model`, `--model=`, `-m`, and `-m=` arguments for automatic routing.
+- With a leading `--account <name>`, bypasses usage selection and launches that configured profile even when its weekly usage is exhausted or unavailable.
+- Manual mode prepares and validates only the named profile, so unrelated profile errors do not block it.
+- Removes one optional `--` immediately after the manual profile name; passes all other Codex arguments through unchanged.
+- Treats `cli --help` and `cli -h` as multicodex help requests without selecting an account.
+- Includes the existing default Codex home only as the final automatic reserve and verifies its login with the official Codex CLI before launch.
 - Does not inject model, reasoning, sandbox, approval, or search defaults.
-- Uses shared Codex config defaults unless the caller passes explicit Codex args.
-- Re-checks file-backed auth isolation before launch.
+- Uses the selected home's Codex config defaults unless the caller passes explicit Codex args.
+- Re-checks file-backed auth isolation before every configured-profile launch.
 - Replaces the multicodex process with `codex` when stdin, stdout, and stderr are real terminals.
-- Keeps auth, threads, sessions, and `/goal` state profile-local.
-- Leaves the default Codex account untouched.
+- Keeps auth, threads, sessions, and `/goal` state inside the selected `CODEX_HOME`.
+- Never changes or manages the default Codex account authentication.
 
 `multicodex exec [codex exec args]`
 - Runs `codex exec` with all remaining arguments passed through unchanged.

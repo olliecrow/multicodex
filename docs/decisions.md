@@ -16,8 +16,8 @@ References: `internal/buildinfo/version.go`, `.github/workflows/release.yml`, `C
 
 Decision: Keep non-default account use entirely inside profile-local `CODEX_HOME` directories.
 Context: Auth, sessions, threads, `/goal`, and other Codex state belong together, while the shared default Codex account remains outside multicodex ownership.
-Rationale: Profile-local process environments let concurrent accounts operate without switching or sharing state. The default home can still serve as a protected final exec reserve and read-only monitor source without becoming managed state.
-Trade-offs: Users must launch profile-scoped commands explicitly and sign in separately on each machine.
+Rationale: Profile-local process environments let concurrent accounts operate without switching or sharing state. The default home can still serve as a protected final routing reserve and read-only monitor source without becoming managed state.
+Trade-offs: Users must sign in separately on each machine and use `cli --account` when they need a specific profile.
 References: `docs/command-spec.md`, `docs/security-and-privacy.md`
 
 Decision: Fail closed when profile filesystem ownership or auth isolation is ambiguous.
@@ -54,13 +54,13 @@ Decision: Normalize usage and routing around weekly default and Spark limits onl
 Context: Weekly subscription limits are the useful account-selection signal, while older payloads may omit declared durations and expose the weekly window only in the secondary position.
 Rationale: One weekly model keeps the monitor, metadata, observed estimates, and exec eligibility aligned. Declared 10,080-minute windows win; only the established secondary-position fallback remains for older payloads.
 Trade-offs: Obsolete shorter limits are not exposed. Spark routing depends on a Spark model name and a Spark bucket for configured profiles.
-References: `internal/monitor/usage/raw_types.go`, `internal/monitor/usage/select.go`, `internal/multicodex/exec.go`, `docs/command-spec.md`
+References: `internal/monitor/usage/raw_types.go`, `internal/monitor/usage/select.go`, `internal/multicodex/cli.go`, `internal/multicodex/exec.go`, `docs/command-spec.md`
 
-Decision: Keep the default Codex home as the final `exec` reserve.
+Decision: Keep the default Codex home as the final automatic-routing reserve.
 Context: A prompt should still have a destination when configured profiles are exhausted or unavailable.
-Rationale: Configured profiles get normal weekly-aware selection, while the unmanaged default home is used only after they cannot accept the request and the official Codex CLI confirms its login. Checking at selection time supports both file and OS keyring credential stores without treating `auth.json` presence as account state.
-Trade-offs: Selecting the default adds one bounded login-status subprocess. If its status is logged out or unavailable, exec fails before launching the prompt even when the underlying credentials might recover later.
-References: `internal/multicodex/exec.go`, `internal/multicodex/status.go`, `internal/monitor/usage/select.go`, `docs/command-spec.md`
+Rationale: Automatic interactive and non-interactive launches share one weekly-aware selector. The unmanaged default home is used only after configured profiles cannot accept the request and the official Codex CLI confirms its login. Checking at selection time supports both file and OS keyring credential stores without treating `auth.json` presence as account state.
+Trade-offs: Automatic `cli` startup now depends on a bounded usage check. Selecting the default adds one bounded login-status subprocess. If its status is logged out or unavailable, automatic routing fails before launch even when the underlying credentials might recover later.
+References: `internal/multicodex/cli.go`, `internal/multicodex/exec.go`, `internal/multicodex/status.go`, `internal/monitor/usage/select.go`, `docs/command-spec.md`
 
 Decision: Share normal Codex configuration defaults while preserving profile-local overrides.
 Context: Model, reasoning, permission, and other Codex preferences should stay consistent across default and profile sessions without copied configuration.

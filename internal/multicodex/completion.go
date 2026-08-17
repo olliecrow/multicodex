@@ -59,8 +59,18 @@ _multicodex_complete() {
   fi
 
   case "$cmd" in
-    login|cli)
+    login)
       if (( COMP_CWORD == 2 )); then
+        COMPREPLY=( $(compgen -W "$(_multicodex_profiles)" -- "$cur") )
+        return 0
+      fi
+      ;;
+    cli)
+      if (( COMP_CWORD == 2 )); then
+        COMPREPLY=( $(compgen -W "--account" -- "$cur") )
+        return 0
+      fi
+      if (( COMP_CWORD == 3 )) && [[ "${COMP_WORDS[2]}" == "--account" ]]; then
         COMPREPLY=( $(compgen -W "$(_multicodex_profiles)" -- "$cur") )
         return 0
       fi
@@ -154,8 +164,18 @@ _multicodex_complete() {
   fi
 
   case "$cmd" in
-    login|cli)
+    login)
       if (( CURRENT == 3 )); then
+        compadd -- ${=($(_multicodex_profiles))}
+        return
+      fi
+      ;;
+    cli)
+      if (( CURRENT == 3 )); then
+        compadd -- --account
+        return
+      fi
+      if (( CURRENT == 4 )) && [[ "${words[3]:-}" == "--account" ]]; then
         compadd -- ${=($(_multicodex_profiles))}
         return
       fi
@@ -227,7 +247,8 @@ function __multicodex_profiles
 end
 
 complete -c multicodex -f -n '__fish_use_subcommand' -a 'init add login login-all cli exec status reconcile heartbeat monitor doctor dry-run completion version help'
-complete -c multicodex -f -n '__fish_seen_subcommand_from login cli' -a '(__multicodex_profiles)'
+complete -c multicodex -f -n '__fish_seen_subcommand_from login' -a '(__multicodex_profiles)'
+complete -c multicodex -f -n '__fish_seen_subcommand_from cli' -l account -r -a '(__multicodex_profiles)'
 complete -c multicodex -f -n '__fish_seen_subcommand_from monitor' -a 'doctor completion help tui'
 complete -c multicodex -f -n '__fish_seen_subcommand_from monitor' -l interval
 complete -c multicodex -f -n '__fish_seen_subcommand_from monitor' -l timeout

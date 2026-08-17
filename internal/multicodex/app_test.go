@@ -31,7 +31,7 @@ func TestCmdCLIMigratesGeneratedProfileConfig(t *testing.T) {
 	}
 	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	if err := app.cmdCLI([]string{profile.Name}); err != nil {
+	if err := app.cmdCLI([]string{"--account", profile.Name}); err != nil {
 		t.Fatalf("cmdCLI: %v", err)
 	}
 
@@ -153,7 +153,7 @@ func TestCmdCLIFailsWhenSharedConfigDoesNotUseFileStoreFromApp(t *testing.T) {
 	createExecProfiles(t, app, "alpha")
 	writeDefaultConfig(t, app, "model = \"global\"\n")
 
-	err := app.cmdCLI([]string{"alpha"})
+	err := app.cmdCLI([]string{"--account", "alpha"})
 	var exitErr *ExitError
 	if !errors.As(err, &exitErr) {
 		t.Fatalf("expected ExitError, got %T (%v)", err, err)
@@ -199,7 +199,7 @@ func TestProfileCommandsApplyCustomResourcePolicy(t *testing.T) {
 			case "login-all":
 				err = app.cmdLoginAll()
 			case "cli":
-				err = app.cmdCLI([]string{"alpha"})
+				err = app.cmdCLI([]string{"--account", "alpha"})
 			}
 			if err != nil {
 				t.Fatalf("%s failed: %v", command, err)

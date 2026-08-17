@@ -1,20 +1,35 @@
 package multicodex
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/olliecrow/multicodex/internal/monitor/usage"
 )
 
-func TestCmdCLIRunsInteractiveCodexWithProfileEnv(t *testing.T) {
+func TestCmdCLIAutomaticallySelectsAccountAndRunsInteractiveCodex(t *testing.T) {
 	app, logPath := newExecTestApp(t)
 	createExecProfiles(t, app, "primary")
 
-	if err := app.Run([]string{"cli", "primary", "check this repo"}); err != nil {
+	originalSelector := defaultExecAccountSelector
+	var selectedModel string
+	defaultExecAccountSelector = func(_ context.Context, _ []usage.MonitorAccount, model string) (usage.SelectedAccount, error) {
+		selectedModel = model
+		return usage.SelectedAccount{Account: usage.MonitorAccount{Label: "primary"}, WeeklyUsedPercent: 12}, nil
+	}
+	defer func() { defaultExecAccountSelector = originalSelector }()
+
+	if err := app.Run([]string{"cli", "-m=gpt-5-codex-spark", "check this repo"}); err != nil {
 		t.Fatalf("cli failed: %v", err)
+	}
+	if selectedModel != "gpt-5-codex-spark" {
+		t.Fatalf("expected explicit model to reach selector, got %q", selectedModel)
 	}
 
 	data, err := os.ReadFile(logPath)
@@ -29,9 +44,182 @@ func TestCmdCLIRunsInteractiveCodexWithProfileEnv(t *testing.T) {
 	if !strings.Contains(log, "codex_home="+wantCodexHome) {
 		t.Fatalf("expected primary CODEX_HOME in log, got %q", log)
 	}
-	wantArgs := "check this repo"
+	wantArgs := "-m=gpt-5-codex-spark check this repo"
 	if !strings.Contains(log, "args="+wantArgs) {
 		t.Fatalf("expected cli args %q in log, got %q", wantArgs, log)
+	}
+}
+
+func TestCmdCLISelectsBestProfileUsingDefaultSelector(t *testing.T) {
+	app, logPath, root := newExecSelectionTestApp(t)
+	t.Setenv("MULTICODEX_FAKE_ALLOW_INTERACTIVE", "1")
+	createExecProfiles(t, app, "alpha", "beta", "gamma")
+	writeExecSelectionProfileData(t, root, "alpha", 10, 40, 96*time.Hour)
+	writeExecSelectionProfileData(t, root, "beta", 20, 20, 36*time.Hour)
+	writeExecSelectionProfileData(t, root, "gamma", 80, 1, 12*time.Hour)
+
+	if err := app.Run([]string{"cli", "prompt with spaces"}); err != nil {
+		t.Fatalf("cli failed: %v", err)
+	}
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	log := string(data)
+	if !strings.Contains(log, "profile=gamma") {
+		t.Fatalf("expected gamma with the soonest weekly reset, got %q", log)
+	}
+	if !strings.Contains(log, "arg[0]=prompt with spaces") {
+		t.Fatalf("expected prompt arg to pass through unchanged, got %q", log)
+	}
+}
+
+func TestCmdCLIManualAccountBypassesRoutingAndStripsSeparator(t *testing.T) {
+	app, logPath := newExecTestApp(t)
+	createExecProfiles(t, app, "primary")
+
+	originalSelector := defaultExecAccountSelector
+	selectorCalled := false
+	defaultExecAccountSelector = func(context.Context, []usage.MonitorAccount, string) (usage.SelectedAccount, error) {
+		selectorCalled = true
+		return usage.SelectedAccount{}, errors.New("selector must not run")
+	}
+	defer func() { defaultExecAccountSelector = originalSelector }()
+
+	if err := app.Run([]string{"cli", "--account", "primary", "--", "check this repo"}); err != nil {
+		t.Fatalf("cli failed: %v", err)
+	}
+	if selectorCalled {
+		t.Fatal("manual account selection unexpectedly ran usage routing")
+	}
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	log := string(data)
+	if !strings.Contains(log, "profile=primary") || !strings.Contains(log, "args=check this repo") {
+		t.Fatalf("unexpected manual cli launch: %q", log)
+	}
+	if strings.Contains(log, "args=-- ") {
+		t.Fatalf("manual separator reached Codex: %q", log)
+	}
+}
+
+func TestCmdCLIAutomaticRoutingCanUseDefaultReserve(t *testing.T) {
+	app, logPath := newExecTestApp(t)
+
+	originalSelector := defaultExecAccountSelector
+	defaultExecAccountSelector = selectDefaultExecAccountForTest(t)
+	defer func() { defaultExecAccountSelector = originalSelector }()
+
+	if err := app.Run([]string{"cli"}); err != nil {
+		t.Fatalf("cli failed: %v", err)
+	}
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	log := string(data)
+	if !strings.Contains(log, "profile=\n") {
+		t.Fatalf("expected no active profile for default reserve, got %q", log)
+	}
+	if !strings.Contains(log, "codex_home="+normalizeExecCodexHome(app.store.paths.DefaultCodexHome)) {
+		t.Fatalf("expected default reserve CODEX_HOME, got %q", log)
+	}
+	if !strings.Contains(log, "args=\n") {
+		t.Fatalf("expected interactive launch without arguments, got %q", log)
+	}
+}
+
+func TestCmdCLIAutomaticRoutingFailsClosedForAnyInvalidProfile(t *testing.T) {
+	app, logPath := newExecTestApp(t)
+	createExecProfiles(t, app, "primary", "broken")
+	makeStoredProfilePathInvalid(t, app, "broken")
+
+	originalSelector := defaultExecAccountSelector
+	selectorCalled := false
+	defaultExecAccountSelector = func(context.Context, []usage.MonitorAccount, string) (usage.SelectedAccount, error) {
+		selectorCalled = true
+		return usage.SelectedAccount{Account: usage.MonitorAccount{Label: "primary"}}, nil
+	}
+	defer func() { defaultExecAccountSelector = originalSelector }()
+
+	err := app.Run([]string{"cli"})
+	if err == nil || !strings.Contains(err.Error(), "profile-local path") {
+		t.Fatalf("expected unsafe profile to stop automatic routing, got %v", err)
+	}
+	if selectorCalled {
+		t.Fatal("usage selector ran before every profile passed validation")
+	}
+	if _, statErr := os.Stat(logPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("expected Codex not to launch, stat err=%v", statErr)
+	}
+}
+
+func TestCmdCLIManualAccountIgnoresUnrelatedInvalidProfile(t *testing.T) {
+	app, logPath := newExecTestApp(t)
+	createExecProfiles(t, app, "primary", "broken")
+	makeStoredProfilePathInvalid(t, app, "broken")
+
+	if err := app.Run([]string{"cli", "--account", "primary"}); err != nil {
+		t.Fatalf("manual cli failed because of unrelated profile: %v", err)
+	}
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if !strings.Contains(string(data), "profile=primary") {
+		t.Fatalf("expected primary manual profile, got %q", data)
+	}
+}
+
+func TestCmdCLIAutomaticDefaultReserveMustBeLoggedIn(t *testing.T) {
+	app, logPath := newExecTestApp(t)
+	t.Setenv("MULTICODEX_FAKE_LOGIN_STATE", "logged-out")
+
+	originalSelector := defaultExecAccountSelector
+	defaultExecAccountSelector = selectDefaultExecAccountForTest(t)
+	defer func() { defaultExecAccountSelector = originalSelector }()
+
+	err := app.Run([]string{"cli"})
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) || exitErr.Code != 2 {
+		t.Fatalf("expected logged-out reserve error, got %T (%v)", err, err)
+	}
+	if !strings.Contains(exitErr.Message, "default Codex account is not logged in") {
+		t.Fatalf("unexpected reserve error: %s", exitErr.Message)
+	}
+	if _, statErr := os.Stat(logPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("expected Codex not to launch, stat err=%v", statErr)
+	}
+}
+
+func makeStoredProfilePathInvalid(t *testing.T, app *App, name string) {
+	t.Helper()
+	cfg, err := app.loadOrInitConfig()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	profile := cfg.Profiles[name]
+	profile.CodexHome = filepath.Join(t.TempDir(), "outside-profile-home")
+	cfg.Profiles[name] = profile
+	if err := app.store.Save(cfg); err != nil {
+		t.Fatalf("save invalid profile fixture: %v", err)
+	}
+}
+
+func TestCmdCLIManualAccountRequiresName(t *testing.T) {
+	app := newTestAppForCLI(t)
+	err := app.Run([]string{"cli", "--account"})
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) || exitErr.Code != 2 {
+		t.Fatalf("expected usage ExitError, got %T (%v)", err, err)
+	}
+	if !strings.Contains(exitErr.Message, "--account <name>") {
+		t.Fatalf("unexpected usage error: %s", exitErr.Message)
 	}
 }
 
@@ -40,7 +228,7 @@ func TestCmdCLIFailsWhenSharedConfigDoesNotUseFileStore(t *testing.T) {
 	createExecProfiles(t, app, "primary")
 	writeDefaultConfig(t, app, "model = \"global\"\n")
 
-	err := app.Run([]string{"cli", "primary"})
+	err := app.Run([]string{"cli", "--account", "primary"})
 	var exitErr *ExitError
 	if !errors.As(err, &exitErr) {
 		t.Fatalf("expected ExitError, got %T (%v)", err, err)
@@ -65,7 +253,7 @@ func TestCmdCLIHelpWorksWithoutProfiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cli --help failed: %v", err)
 	}
-	if !strings.Contains(out, "multicodex cli <name>") {
+	if !strings.Contains(out, "multicodex cli [--account <name>] [--] [codex args...]") {
 		t.Fatalf("expected cli help, got %q", out)
 	}
 }
@@ -123,7 +311,7 @@ sleep 0.1
 				errs <- runErr
 				return
 			}
-			errs <- runApp.Run([]string{"cli", profileName, "check goal state"})
+			errs <- runApp.Run([]string{"cli", "--account", profileName, "--", "check goal state"})
 		}()
 	}
 	wg.Wait()
