@@ -43,7 +43,7 @@ func (a *App) cmdExec(args []string) error {
 	if execArgsAreHelpRequest(args) {
 		return runCommandWithEnv("codex", append([]string{"exec"}, args...), neutralCodexEnv(os.Environ()), fmt.Sprintf("command failed: %s", strings.Join(append([]string{"codex", "exec"}, args...), " ")))
 	}
-	selected, err := a.selectAccountForCodexArgs(args)
+	selected, err := a.selectAccountForCodexArgs(context.Background(), args)
 	if err != nil {
 		return err
 	}
@@ -63,7 +63,7 @@ func (a *App) cmdExec(args []string) error {
 	return RunCodexWithProfile(selected.CodexHome, activeProfile, append([]string{"exec"}, args...))
 }
 
-func (a *App) selectAccountForCodexArgs(args []string) (execSelection, error) {
+func (a *App) selectAccountForCodexArgs(ctx context.Context, args []string) (execSelection, error) {
 	cfg, err := a.loadOrInitConfig()
 	if err != nil {
 		return execSelection{}, err
@@ -72,7 +72,7 @@ func (a *App) selectAccountForCodexArgs(args []string) (execSelection, error) {
 	if err != nil {
 		return execSelection{}, err
 	}
-	return a.selectExecProfile(cfg, defaultExecAccountSelector, parseModelFromExecArgs(args))
+	return a.selectExecProfile(ctx, cfg, defaultExecAccountSelector, parseModelFromExecArgs(args))
 }
 
 func (a *App) execReadyConfig(cfg *Config) (*Config, error) {
@@ -196,7 +196,7 @@ func execArgsAreHelpRequest(args []string) bool {
 	return len(args) == 1 && args[0] == "help"
 }
 
-func (a *App) selectExecProfile(cfg *Config, selector execAccountSelector, model string) (execSelection, error) {
+func (a *App) selectExecProfile(ctx context.Context, cfg *Config, selector execAccountSelector, model string) (execSelection, error) {
 	names := sortedProfileNames(cfg)
 	accounts := make([]usage.MonitorAccount, 0, len(names))
 	for _, name := range names {
@@ -220,7 +220,7 @@ func (a *App) selectExecProfile(cfg *Config, selector execAccountSelector, model
 		return execSelection{}, fmt.Errorf("missing exec account selector")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), execSelectionTimeout)
+	ctx, cancel := context.WithTimeout(ctx, execSelectionTimeout)
 	defer cancel()
 
 	selected, err := selector(ctx, accounts, model)
