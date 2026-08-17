@@ -77,23 +77,53 @@ func TestGenerateRejectsEmptyPrompt(t *testing.T) {
 	}
 }
 
+func TestGenerateRejectsMissingCodexHome(t *testing.T) {
+	err := Generate(t.Context(), GenerateOptions{Prompt: "synthetic prompt", Output: &bytes.Buffer{}})
+	if err == nil || !strings.Contains(err.Error(), "Codex home is not configured") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestGenerationArgsEnforceSubscriptionIsolation(t *testing.T) {
+	args := generationArgs("catalog.json", []string{"alpha.with.dot", "zeta"})
+	for _, override := range []string{
+		`model_provider="openai"`,
+		`mcp_servers={"alpha.with.dot"={enabled=false},"zeta"={enabled=false}}`,
+	} {
+		if !containsArg(args, override) {
+			t.Fatalf("generation arguments do not contain %q", override)
+		}
+	}
+}
+
 func TestLiveGenerate(t *testing.T) {
 	if os.Getenv("MULTICODEX_TEST_LIVE_GENERATE") != "1" {
 		t.Skip("set MULTICODEX_TEST_LIVE_GENERATE=1 to use the active ChatGPT subscription")
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
-	defer cancel()
-	var output bytes.Buffer
-	err := Generate(ctx, GenerateOptions{
-		CodexHome: os.Getenv("CODEX_HOME"),
-		Prompt:    "Reply with exactly OK and no other text.",
-		Output:    &output,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.TrimSpace(output.String()) != "OK" {
-		t.Fatal("live generation returned unexpected text")
+	for _, test := range []struct {
+		name  string
+		model string
+	}{
+		{name: "default"},
+		{name: "explicit model", model: "gpt-5.5"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+			defer cancel()
+			var output bytes.Buffer
+			err := Generate(ctx, GenerateOptions{
+				CodexHome: os.Getenv("CODEX_HOME"),
+				Model:     test.model,
+				Prompt:    "Reply with exactly OK and no other text.",
+				Output:    &output,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.TrimSpace(output.String()) != "OK" {
+				t.Fatal("live generation returned unexpected text")
+			}
+		})
 	}
 }
 
@@ -102,6 +132,14 @@ func TestCodexWireHasNoHarnessOrTools(t *testing.T) {
 		t.Skip("set MULTICODEX_TEST_CODEX_WIRE=1 to inspect the installed Codex request locally")
 	}
 	requestBody := make(chan map[string]any, 1)
+	mcpRequest := make(chan struct{}, 1)
+	mcpServer := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		select {
+		case mcpRequest <- struct{}{}:
+		default:
+		}
+	}))
+	defer mcpServer.Close()
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		defer request.Body.Close()
 		var body map[string]any
@@ -129,12 +167,20 @@ func TestCodexWireHasNoHarnessOrTools(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	tempDir := t.TempDir()
+	config := fmt.Sprintf("[mcp_servers.\"multicodex.test\"]\nurl = %s\n", strconv.Quote(mcpServer.URL))
+	if err := os.WriteFile(filepath.Join(tempDir, "config.toml"), []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	catalogPath := filepath.Join(tempDir, "catalog.json")
 	model, err := PrepareToolFreeCatalog(ctx, CatalogOptions{CodexHome: tempDir, OutputPath: catalogPath})
 	if err != nil {
 		t.Fatal(err)
 	}
-	args := generationArgs(catalogPath)
+	mcpServers, err := configuredMCPServerNames(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := generationArgs(catalogPath, mcpServers)
 	for _, override := range []string{
 		`model_provider="multicodex_test"`,
 		`model_providers.multicodex_test.name="Multicodex test"`,
@@ -196,6 +242,64 @@ func TestCodexWireHasNoHarnessOrTools(t *testing.T) {
 		t.Fatal("Codex sent no provider request")
 	}
 	assertToolFreeWireRequest(t, body)
+	select {
+	case <-mcpRequest:
+		t.Fatal("Codex started a configured MCP server")
+	default:
+	}
+}
+
+func TestCodexRuntimePinsOpenAIProvider(t *testing.T) {
+	if os.Getenv("MULTICODEX_TEST_CODEX_WIRE") != "1" {
+		t.Skip("set MULTICODEX_TEST_CODEX_WIRE=1 to inspect the installed Codex runtime locally")
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	tempDir := t.TempDir()
+	config := `
+model_provider = "multicodex_test"
+
+[model_providers.multicodex_test]
+name = "Multicodex test"
+base_url = "https://example.invalid/v1"
+env_key = "MULTICODEX_SYNTHETIC_KEY"
+wire_api = "responses"
+`
+	if err := os.WriteFile(filepath.Join(tempDir, "config.toml"), []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	catalogPath := filepath.Join(tempDir, "catalog.json")
+	if _, err := PrepareToolFreeCatalog(ctx, CatalogOptions{
+		BaseEnv:    []string{"PATH=" + os.Getenv("PATH"), "MULTICODEX_SYNTHETIC_KEY=synthetic"},
+		CodexHome:  tempDir,
+		OutputPath: catalogPath,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	client := New(Config{
+		GlobalArgs:    generationArgs(catalogPath, nil),
+		BaseEnv:       []string{"PATH=" + os.Getenv("PATH"), "MULTICODEX_SYNTHETIC_KEY=synthetic"},
+		CodexHome:     tempDir,
+		ClientName:    "multicodex-provider-test",
+		ClientVersion: "test",
+	})
+	if err := client.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	if err := client.Initialize(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var account accountReadResult
+	if err := client.Request(ctx, "account/read", map[string]any{"refreshToken": false}, &account); err != nil {
+		t.Fatal(err)
+	}
+	if account.Account != nil {
+		t.Fatalf("configured provider remained active: account type %q", account.Account.Type)
+	}
+	if !account.RequiresOpenAIAuth {
+		t.Fatal("runtime did not require OpenAI authentication")
+	}
 }
 
 func assertToolFreeWireRequest(t *testing.T, body map[string]any) {
@@ -205,7 +309,12 @@ func assertToolFreeWireRequest(t *testing.T, body map[string]any) {
 	}
 	tools, ok := body["tools"].([]any)
 	if !ok || len(tools) != 0 {
-		t.Fatalf("Codex sent tools: count=%d", len(tools))
+		var kinds []string
+		for _, value := range tools {
+			tool, _ := value.(map[string]any)
+			kinds = append(kinds, fmt.Sprintf("%v:%v", tool["type"], tool["name"]))
+		}
+		t.Fatalf("Codex sent tools: count=%d kinds=%v", len(tools), kinds)
 	}
 	input, ok := body["input"].([]any)
 	if !ok || len(input) != 1 {
@@ -337,6 +446,7 @@ func threadParamsAreToolFree(raw json.RawMessage) bool {
 	}
 	return params["baseInstructions"] == "" &&
 		params["developerInstructions"] == "" &&
+		params["modelProvider"] == subscriptionProvider &&
 		params["approvalPolicy"] == "never" &&
 		params["sandbox"] == "read-only" &&
 		params["ephemeral"] == true &&

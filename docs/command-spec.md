@@ -88,14 +88,15 @@ Multicodex intentionally has no command for changing the shared default Codex ac
 - Returns the child exit code.
 
 `multicodex generate [--account <name>] [-m|--model <model>] [prompt]`
-- Sends one text prompt through Codex App Server using ChatGPT subscription authentication.
+- Sends one text prompt through Codex App Server using ChatGPT subscription authentication and Codex's built-in OpenAI provider and endpoint.
 - Reads the prompt from standard input when no prompt argument is present and rejects input larger than 4 MiB.
 - Uses normal weekly-aware routing, including the protected default reserve, unless `--account <name>` selects one configured profile directly.
 - Passes an explicit model to the existing model-aware selector. Otherwise, uses the highest-priority visible model in the installed Codex catalog.
 - Requires exactly `codex-cli 0.147.0` and fails before generation for any other version.
 - Requires App Server `account/read` to report managed ChatGPT authentication. It rejects API-key billing and does not start login or token-refresh flows.
 - Runs an ephemeral thread in a private empty temporary directory with read-only sandboxing and approval policy `never`.
-- Sends empty base and developer instructions, disables client context sources and tools, and uses a private `0600` one-model catalog with tool metadata removed.
+- Sends empty base and developer instructions, disables client context sources and tools, ignores configured MCP servers and unrelated custom model providers, and uses a private `0600` one-model catalog with tool metadata removed.
+- Fails closed if Codex config replaces the built-in OpenAI provider or overrides its endpoint.
 - Rejects server requests, command, file, web, image, and unexpected item events.
 - Streams only assistant text to standard output. Resource notices and safe errors use standard error. A failure can occur after partial text was written.
 - Deletes the temporary workspace and model catalog when the command ends.

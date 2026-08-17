@@ -182,7 +182,7 @@ Two terminals can run `multicodex cli --account <name>` with different profiles 
 
 ## Tool-Free Text Generation
 
-`multicodex generate` sends one text prompt through Codex App Server and the selected ChatGPT subscription. It streams assistant text to standard output. If the prompt argument is omitted, it reads up to 4 MiB from standard input.
+`multicodex generate` sends one text prompt through Codex App Server and the selected ChatGPT subscription. It always uses Codex's built-in OpenAI provider and default provider endpoint. It streams assistant text to standard output. If the prompt argument is omitted, it reads up to 4 MiB from standard input.
 
 ```bash
 multicodex generate "Draft a concise release note."
@@ -190,7 +190,7 @@ multicodex generate --account work "Translate this paragraph to French."
 multicodex generate -m gpt-5.5 < prompt.txt
 ```
 
-The request uses an ephemeral thread in a private empty directory. Multicodex supplies empty base and developer instructions, disables project context and client tools, and limits the temporary model catalog to one tool-free model. It rejects API-key authentication, server action requests, and unexpected tool items. This removes the client-side Codex coding-agent harness; it cannot control provider-side instructions.
+The request uses an ephemeral thread in a private empty directory. Multicodex supplies empty base and developer instructions, disables project context and client tools, ignores configured MCP servers and unrelated custom model providers, and limits the temporary model catalog to one tool-free model. It fails closed if Codex config replaces the built-in OpenAI provider or its endpoint. It rejects API-key authentication, server action requests, and unexpected tool items. This removes the client-side Codex coding-agent harness; it cannot control provider-side instructions.
 
 The command requires `codex-cli 0.147.0`. App Server and its model catalog are experimental Codex interfaces, so multicodex fails closed on another version until compatibility is tested. The default model is the highest-priority visible model in that Codex catalog. Use `--model` to select another catalog model.
 
