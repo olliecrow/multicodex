@@ -46,6 +46,39 @@ func TestCmdExecRunsCodexExecWithSelectedProfile(t *testing.T) {
 	}
 }
 
+func TestCmdExecMovesSearchBeforeExec(t *testing.T) {
+	app, logPath := newExecTestApp(t)
+	createExecProfiles(t, app, "alpha")
+
+	originalSelector := defaultExecAccountSelector
+	defaultExecAccountSelector = func(context.Context, []usage.MonitorAccount, string) (usage.SelectedAccount, error) {
+		return usage.SelectedAccount{Account: usage.MonitorAccount{Label: "alpha"}}, nil
+	}
+	defer func() { defaultExecAccountSelector = originalSelector }()
+
+	if err := app.Run([]string{"exec", "--search", "--skip-git-repo-check", "hello"}); err != nil {
+		t.Fatalf("exec failed: %v", err)
+	}
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if log := string(data); !strings.Contains(log, "args=--search exec --skip-git-repo-check hello") {
+		t.Fatalf("expected global search before exec, got %q", log)
+	}
+}
+
+func TestSplitExecGlobalArgsPreservesSearchAfterTerminator(t *testing.T) {
+	globalArgs, execArgs := splitExecGlobalArgs([]string{"--", "--search"})
+	if len(globalArgs) != 0 {
+		t.Fatalf("expected no global args, got %v", globalArgs)
+	}
+	if got := strings.Join(execArgs, " "); got != "-- --search" {
+		t.Fatalf("expected prompt text to remain unchanged, got %q", got)
+	}
+}
+
 func TestCmdExecPreservesCustomResourcePolicyThroughSelection(t *testing.T) {
 	app, _ := newExecTestApp(t)
 	createExecProfiles(t, app, "alpha")

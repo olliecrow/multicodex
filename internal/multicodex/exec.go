@@ -40,10 +40,12 @@ var defaultExecAccountSelector execAccountSelector = func(ctx context.Context, a
 }
 
 func (a *App) cmdExec(args []string) error {
-	if execArgsAreHelpRequest(args) {
-		return runCommandWithEnv("codex", append([]string{"exec"}, args...), neutralCodexEnv(os.Environ()), fmt.Sprintf("command failed: %s", strings.Join(append([]string{"codex", "exec"}, args...), " ")))
+	globalArgs, execArgs := splitExecGlobalArgs(args)
+	codexArgs := append(append(globalArgs, "exec"), execArgs...)
+	if execArgsAreHelpRequest(execArgs) {
+		return runCommandWithEnv("codex", codexArgs, neutralCodexEnv(os.Environ()), fmt.Sprintf("command failed: %s", strings.Join(append([]string{"codex"}, codexArgs...), " ")))
 	}
-	selected, err := a.selectAccountForCodexArgs(context.Background(), args)
+	selected, err := a.selectAccountForCodexArgs(context.Background(), execArgs)
 	if err != nil {
 		return err
 	}
@@ -60,7 +62,28 @@ func (a *App) cmdExec(args []string) error {
 	if !selected.IsProfile {
 		activeProfile = ""
 	}
-	return RunCodexWithProfile(selected.CodexHome, activeProfile, append([]string{"exec"}, args...))
+	return RunCodexWithProfile(selected.CodexHome, activeProfile, codexArgs)
+}
+
+func splitExecGlobalArgs(args []string) ([]string, []string) {
+	globalArgs := make([]string, 0, 1)
+	execArgs := make([]string, 0, len(args))
+	terminated := false
+	for _, arg := range args {
+		if arg == "--" {
+			terminated = true
+			execArgs = append(execArgs, arg)
+			continue
+		}
+		if !terminated && arg == "--search" {
+			if len(globalArgs) == 0 {
+				globalArgs = append(globalArgs, arg)
+			}
+			continue
+		}
+		execArgs = append(execArgs, arg)
+	}
+	return globalArgs, execArgs
 }
 
 func (a *App) selectAccountForCodexArgs(ctx context.Context, args []string) (execSelection, error) {

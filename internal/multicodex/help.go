@@ -21,7 +21,7 @@ var commandSummaries = []struct {
 	{Name: "login <name> [codex login args]", Summary: "login profile using official codex flow"},
 	{Name: "login-all", Summary: "run login for every known profile"},
 	{Name: "cli [--account <name>] [--] [codex args...]", Summary: "run interactive Codex on the best available account"},
-	{Name: "exec [codex exec args]", Summary: "run codex exec on the best available account"},
+	{Name: "exec [--search] [codex exec args]", Summary: "run codex exec on the best available account"},
 	{Name: "generate [flags] [prompt]", Summary: "generate text without the coding-agent harness"},
 	{Name: "status", Summary: "show all profile auth states"},
 	{Name: "reconcile", Summary: "reconcile resources for all profiles"},
@@ -79,10 +79,11 @@ var commandHelpByName = map[string]commandHelp{
 		},
 	},
 	"exec": {
-		Usage:       "multicodex exec [codex exec args]",
-		Description: "Run `codex exec` after automatically selecting the best available account. Configured profiles are considered before the protected default reserve account. Profiles at 100% weekly usage are skipped, and known weekly resets are tried soonest first. The default Codex home is used only when no configured profile has usable weekly usage left, and is launched only after the official Codex CLI confirms its login.",
+		Usage:       "multicodex exec [--search] [codex exec args]",
+		Description: "Run `codex exec` after automatically selecting the best available account. Use `--search` to enable Codex live web search. Configured profiles are considered before the protected default reserve account. Profiles at 100% weekly usage are skipped, and known weekly resets are tried soonest first. The default Codex home is used only when no configured profile has usable weekly usage left, and is launched only after the official Codex CLI confirms its login.",
 		Examples: []string{
 			`multicodex exec -s read-only "Summarize the README in 3 bullets."`,
+			`multicodex exec --search -s read-only "Research the latest release."`,
 			"multicodex exec --skip-git-repo-check -C /path/to/repo \"Review the latest diff.\"",
 		},
 	},
