@@ -7,7 +7,7 @@
 - `multicodex login <name> [codex login args]`
 - `multicodex login-all`
 - `multicodex cli [--account <name>] [--] [codex args...]`
-- `multicodex exec [codex exec args]`
+- `multicodex exec [--search] [codex exec args]`
 - `multicodex generate [--account <name>] [-m|--model <model>] [--effort <effort>] [--base-instructions-file <path>] [--developer-instructions-file <path>] [--output-schema <path>] [--json] [prompt]`
 - `multicodex status`
 - `multicodex reconcile`
@@ -66,8 +66,10 @@ Multicodex intentionally has no command for changing the shared default Codex ac
 - Keeps auth, threads, sessions, and `/goal` state inside the selected `CODEX_HOME`.
 - Never changes or manages the default Codex account authentication.
 
-`multicodex exec [codex exec args]`
+`multicodex exec [--search] [codex exec args]`
 - Runs `codex exec` with all remaining arguments passed through unchanged.
+- Moves `--search` before the `exec` subcommand because Codex defines it as a global flag.
+- Treats `--search` after `--` as prompt text.
 - Delegates exact help requests (`--help`, `-h`, or `help`) directly to `codex exec` without requiring profiles.
 - Automatically selects among configured multicodex profiles first.
 - Includes the default Codex home as a built-in reserve account after configured profiles.

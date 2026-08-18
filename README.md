@@ -138,7 +138,7 @@ multicodex add <name>
 multicodex login <name> [codex login args]
 multicodex login-all
 multicodex cli [--account <name>] [--] [codex args...]
-multicodex exec [codex exec args]
+multicodex exec [--search] [codex exec args]
 multicodex generate [--account <name>] [-m|--model <model>] [--effort <effort>] [--base-instructions-file <path>] [--developer-instructions-file <path>] [--output-schema <path>] [--json] [prompt]
 multicodex status
 multicodex reconcile
@@ -170,6 +170,7 @@ Two terminals can run `multicodex cli --account <name>` with different profiles 
 `multicodex cli`, `multicodex exec`, and `multicodex generate` select among configured multicodex profiles, with the default Codex home as a built-in reserve account. Manual `cli --account <name>` and `generate --account <name>` launches do not use these rules.
 
 - Help requests such as `multicodex exec --help` delegate directly to `codex exec` and do not require profiles.
+- `multicodex exec --search ...` enables Codex live web search by placing the global Codex flag before the `exec` subcommand. A `--search` token after `--` remains prompt text.
 - Automatic routing can run with no configured profiles when Codex confirms that the default account is logged in.
 - Configured profiles at 100% weekly usage are not selected.
 - Automatic routing uses configured selection priority first, then prefers the profile whose known weekly reset is soonest.

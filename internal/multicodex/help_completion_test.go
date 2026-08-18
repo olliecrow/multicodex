@@ -23,7 +23,7 @@ func TestHelpCommandGlobal(t *testing.T) {
 	if !strings.Contains(out, "monitor [flags]") {
 		t.Fatalf("expected monitor command in help output")
 	}
-	if !strings.Contains(out, "exec [codex exec args]") {
+	if !strings.Contains(out, "exec [--search] [codex exec args]") {
 		t.Fatalf("expected exec command in help output")
 	}
 	if !strings.Contains(out, "cli [--account <name>]") {
