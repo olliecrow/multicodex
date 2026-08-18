@@ -87,12 +87,13 @@ var commandHelpByName = map[string]commandHelp{
 		},
 	},
 	"generate": {
-		Usage:       "multicodex generate [--account <name>] [-m|--model <model>] [prompt]",
-		Description: "Generate one text response through Codex App Server and a routed ChatGPT subscription account. The request has empty client instructions, no project context, no coding tools, and no persistent thread. If prompt is omitted, read it from standard input. API-key billing is rejected.",
+		Usage:       strings.TrimPrefix(generateUsage, "usage: "),
+		Description: "Generate one response through Codex App Server and a routed ChatGPT subscription account. Base and developer instruction files, model reasoning effort, and a JSON output schema are optional. `--json` returns the response text with sanitized model, effective effort, duration, and token usage. The request has no project context, coding tools, or persistent thread. If prompt is omitted, read it from standard input. API-key billing is rejected.",
 		Examples: []string{
 			`multicodex generate "Write a short product description."`,
 			`printf '%s' "Summarize this text." | multicodex generate`,
-			`multicodex generate --account personal -m gpt-5.5 "Explain this concept."`,
+			`multicodex generate -m gpt-5.5 --effort high --developer-instructions-file instructions.md "Explain this concept."`,
+			`multicodex generate --output-schema schema.json --json "Return the requested fields."`,
 		},
 	},
 	"status": {

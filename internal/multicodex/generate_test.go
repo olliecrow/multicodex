@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -49,15 +51,87 @@ func TestParseGenerateArgs(t *testing.T) {
 }
 
 func TestReadBoundedPrompt(t *testing.T) {
-	prompt, err := readBoundedPrompt(strings.NewReader(strings.Repeat("x", generatePromptLimit)))
-	if err != nil || len(prompt) != generatePromptLimit {
+	prompt, err := readBoundedPrompt(strings.NewReader(strings.Repeat("x", generateInputLimit)))
+	if err != nil || len(prompt) != generateInputLimit {
 		t.Fatalf("limit prompt: len=%d err=%v", len(prompt), err)
 	}
-	if _, err := readBoundedPrompt(strings.NewReader(strings.Repeat("x", generatePromptLimit+1))); err == nil {
+	if _, err := readBoundedPrompt(strings.NewReader(strings.Repeat("x", generateInputLimit+1))); err == nil {
 		t.Fatal("oversized prompt succeeded")
 	}
 	if _, err := readBoundedPrompt(errorReader{}); err == nil {
 		t.Fatal("input error was ignored")
+	}
+}
+
+func TestParseGenerateCustomFilesAndJSON(t *testing.T) {
+	dir := t.TempDir()
+	basePath := filepath.Join(dir, "base.txt")
+	developerPath := filepath.Join(dir, "developer.txt")
+	schemaPath := filepath.Join(dir, "schema.json")
+	for path, content := range map[string]string{
+		basePath:      "synthetic base instructions\n",
+		developerPath: "synthetic developer instructions\n",
+		schemaPath:    `{"type":"object","properties":{"answer":{"type":"string"}}}`,
+	} {
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	options, err := parseGenerateArgs([]string{
+		"--effort", "high",
+		"--base-instructions-file", basePath,
+		"--developer-instructions-file", developerPath,
+		"--output-schema", schemaPath,
+		"--json",
+		"synthetic prompt",
+	}, strings.NewReader(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if options.effort != "high" || options.baseInstructions != "synthetic base instructions\n" ||
+		options.developerInstructions != "synthetic developer instructions\n" ||
+		options.outputSchema != `{"type":"object","properties":{"answer":{"type":"string"}}}` ||
+		!options.jsonOutput || options.prompt != "synthetic prompt" {
+		t.Fatalf("unexpected options: %#v", options)
+	}
+}
+
+func TestParseGenerateRejectsUnsafeInputFiles(t *testing.T) {
+	dir := t.TempDir()
+	arraySchema := filepath.Join(dir, "array-schema.json")
+	invalidSchema := filepath.Join(dir, "invalid-schema.json")
+	largeInstructions := filepath.Join(dir, "large-instructions.txt")
+	if err := os.WriteFile(arraySchema, []byte(`[]`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(invalidSchema, []byte(`{"type":`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(largeInstructions, []byte(strings.Repeat("x", generateInputLimit+1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name      string
+		args      []string
+		wantError string
+	}{
+		{name: "array schema", args: []string{"--output-schema", arraySchema, "prompt"}, wantError: "must be a JSON object"},
+		{name: "invalid schema", args: []string{"--output-schema", invalidSchema, "prompt"}, wantError: "must be a JSON object"},
+		{name: "large instructions", args: []string{"--base-instructions-file", largeInstructions, "prompt"}, wantError: "exceeds 4 MiB"},
+		{name: "directory", args: []string{"--developer-instructions-file", dir, "prompt"}, wantError: "must be a regular file"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := parseGenerateArgs(test.args, strings.NewReader(""))
+			if err == nil || !strings.Contains(err.Error(), test.wantError) {
+				t.Fatalf("error = %v, want %q", err, test.wantError)
+			}
+		})
+	}
+
+	missing := filepath.Join(dir, "private-missing-name.txt")
+	_, err := parseGenerateArgs([]string{"--base-instructions-file", missing, "prompt"}, strings.NewReader(""))
+	if err == nil || strings.Contains(err.Error(), missing) || strings.Contains(err.Error(), "private-missing-name") {
+		t.Fatalf("missing-file error exposed path or did not fail: %v", err)
 	}
 }
 
@@ -120,6 +194,42 @@ func TestCmdGenerateUsesExplicitProfile(t *testing.T) {
 	}
 	if err := app.Run([]string{"generate", "--account", "missing", "hello"}); err == nil {
 		t.Fatal("unknown explicit account succeeded")
+	}
+}
+
+func TestCmdGeneratePassesCustomOptions(t *testing.T) {
+	app, _ := newExecTestApp(t)
+	createExecProfiles(t, app, "alpha")
+	dir := t.TempDir()
+	basePath := filepath.Join(dir, "base.txt")
+	developerPath := filepath.Join(dir, "developer.txt")
+	schemaPath := filepath.Join(dir, "schema.json")
+	for path, content := range map[string]string{
+		basePath: "base", developerPath: "developer", schemaPath: `{"type":"object"}`,
+	} {
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	originalGenerate := generateWithSubscription
+	generateWithSubscription = func(_ context.Context, options codexappserver.GenerateOptions) error {
+		if options.ActiveProfile != "alpha" || options.Model != "gpt-test" || options.Effort != "high" ||
+			options.BaseInstructions != "base" || options.DeveloperInstructions != "developer" ||
+			string(options.OutputSchema) != `{"type":"object"}` || !options.JSONOutput || options.Prompt != "hello" {
+			return fmt.Errorf("unexpected generation options")
+		}
+		return nil
+	}
+	defer func() { generateWithSubscription = originalGenerate }()
+
+	err := app.Run([]string{
+		"generate", "--account", "alpha", "--model", "gpt-test", "--effort", "high",
+		"--base-instructions-file", basePath, "--developer-instructions-file", developerPath,
+		"--output-schema", schemaPath, "--json", "hello",
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

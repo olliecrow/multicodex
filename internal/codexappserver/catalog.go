@@ -21,19 +21,25 @@ const (
 )
 
 type CatalogOptions struct {
-	Command        []string
-	BaseEnv        []string
-	CodexHome      string
-	ActiveProfile  string
-	RequestedModel string
-	OutputPath     string
+	Command         []string
+	BaseEnv         []string
+	CodexHome       string
+	ActiveProfile   string
+	RequestedModel  string
+	RequestedEffort string
+	OutputPath      string
+}
+
+type CatalogSelection struct {
+	Model  string
+	Effort string
 }
 
 type rawCatalog struct {
 	Models []map[string]any `json:"models"`
 }
 
-func PrepareToolFreeCatalog(ctx context.Context, options CatalogOptions) (string, error) {
+func PrepareToolFreeCatalog(ctx context.Context, options CatalogOptions) (CatalogSelection, error) {
 	command := options.Command
 	if len(command) == 0 {
 		command = []string{defaultCommand}
@@ -41,36 +47,40 @@ func PrepareToolFreeCatalog(ctx context.Context, options CatalogOptions) (string
 	env := isolatedEnv(options.BaseEnv, options.CodexHome, options.ActiveProfile)
 	versionOutput, err := runBounded(ctx, command, []string{"--version"}, env, 1024)
 	if err != nil {
-		return "", fmt.Errorf("check Codex compatibility: %w", err)
+		return CatalogSelection{}, fmt.Errorf("check Codex compatibility: %w", err)
 	}
 	version := strings.TrimSpace(string(versionOutput))
 	if version != SupportedCodexVersion {
-		return "", fmt.Errorf("unsupported Codex version; generate requires %s", SupportedCodexVersion)
+		return CatalogSelection{}, fmt.Errorf("unsupported Codex version; generate requires %s", SupportedCodexVersion)
 	}
 
 	catalogOutput, err := runBounded(ctx, command, []string{"debug", "models", "--bundled"}, env, maxCatalogBytes)
 	if err != nil {
-		return "", fmt.Errorf("read Codex model catalog: %w", err)
+		return CatalogSelection{}, fmt.Errorf("read Codex model catalog: %w", err)
 	}
 	var catalog rawCatalog
 	if err := json.Unmarshal(catalogOutput, &catalog); err != nil {
-		return "", fmt.Errorf("decode Codex model catalog: %w", err)
+		return CatalogSelection{}, fmt.Errorf("decode Codex model catalog: %w", err)
 	}
 	model, name, err := selectCatalogModel(catalog.Models, options.RequestedModel)
 	if err != nil {
-		return "", err
+		return CatalogSelection{}, err
+	}
+	effort, err := selectReasoningEffort(model, options.RequestedEffort)
+	if err != nil {
+		return CatalogSelection{}, err
 	}
 	if err := removeAgentTools(model); err != nil {
-		return "", fmt.Errorf("selected model is not compatible with tool-free generation: %w", err)
+		return CatalogSelection{}, fmt.Errorf("selected model is not compatible with tool-free generation: %w", err)
 	}
 
 	encoded, err := json.Marshal(rawCatalog{Models: []map[string]any{model}})
 	if err != nil {
-		return "", fmt.Errorf("encode tool-free model catalog: %w", err)
+		return CatalogSelection{}, fmt.Errorf("encode tool-free model catalog: %w", err)
 	}
 	file, err := os.OpenFile(options.OutputPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
-		return "", fmt.Errorf("create temporary model catalog: %w", err)
+		return CatalogSelection{}, fmt.Errorf("create temporary model catalog: %w", err)
 	}
 	closed := false
 	defer func() {
@@ -79,14 +89,46 @@ func PrepareToolFreeCatalog(ctx context.Context, options CatalogOptions) (string
 		}
 	}()
 	if _, err := file.Write(encoded); err != nil {
-		return "", fmt.Errorf("write temporary model catalog: %w", err)
+		return CatalogSelection{}, fmt.Errorf("write temporary model catalog: %w", err)
 	}
 	if err := file.Close(); err != nil {
 		closed = true
-		return "", fmt.Errorf("close temporary model catalog: %w", err)
+		return CatalogSelection{}, fmt.Errorf("close temporary model catalog: %w", err)
 	}
 	closed = true
-	return name, nil
+	return CatalogSelection{Model: name, Effort: effort}, nil
+}
+
+func selectReasoningEffort(model map[string]any, requested string) (string, error) {
+	defaultEffort, _ := model["default_reasoning_level"].(string)
+	levels, ok := model["supported_reasoning_levels"].([]any)
+	if !ok || strings.TrimSpace(defaultEffort) == "" {
+		return "", errors.New("selected model has incomplete reasoning metadata")
+	}
+
+	supported := make(map[string]struct{}, len(levels))
+	for _, raw := range levels {
+		level, ok := raw.(map[string]any)
+		if !ok {
+			return "", errors.New("selected model has invalid reasoning metadata")
+		}
+		effort, _ := level["effort"].(string)
+		if strings.TrimSpace(effort) == "" {
+			return "", errors.New("selected model has invalid reasoning metadata")
+		}
+		supported[effort] = struct{}{}
+	}
+	if _, ok := supported[defaultEffort]; !ok {
+		return "", errors.New("selected model has invalid default reasoning effort")
+	}
+	requested = strings.TrimSpace(requested)
+	if requested == "" {
+		return defaultEffort, nil
+	}
+	if _, ok := supported[requested]; !ok {
+		return "", fmt.Errorf("reasoning effort %q is not available for the selected model", requested)
+	}
+	return requested, nil
 }
 
 func selectCatalogModel(models []map[string]any, requested string) (map[string]any, string, error) {

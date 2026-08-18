@@ -78,23 +78,73 @@ func TestRemoveAgentTools(t *testing.T) {
 	}
 }
 
+func TestSelectReasoningEffort(t *testing.T) {
+	model := compatibleTestModel("test-model", 1)
+	for _, test := range []struct {
+		name      string
+		requested string
+		want      string
+		wantError string
+	}{
+		{name: "default", want: "medium"},
+		{name: "explicit", requested: "high", want: "high"},
+		{name: "trimmed", requested: " low ", want: "low"},
+		{name: "unsupported", requested: "ultra", wantError: "not available"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := selectReasoningEffort(model, test.requested)
+			if test.wantError == "" {
+				if err != nil || got != test.want {
+					t.Fatalf("effort = %q, err = %v", got, err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), test.wantError) {
+				t.Fatalf("error = %v, want %q", err, test.wantError)
+			}
+		})
+	}
+
+	for name, mutate := range map[string]func(map[string]any){
+		"missing default": func(candidate map[string]any) { delete(candidate, "default_reasoning_level") },
+		"missing levels":  func(candidate map[string]any) { delete(candidate, "supported_reasoning_levels") },
+		"invalid level": func(candidate map[string]any) {
+			candidate["supported_reasoning_levels"] = []any{"private-catalog-value"}
+		},
+		"unsupported default": func(candidate map[string]any) { candidate["default_reasoning_level"] = "private-catalog-value" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			candidate := compatibleTestModel("test-model", 1)
+			mutate(candidate)
+			_, err := selectReasoningEffort(candidate, "")
+			if err == nil {
+				t.Fatal("invalid reasoning metadata succeeded")
+			}
+			if strings.Contains(err.Error(), "private-catalog-value") {
+				t.Fatalf("error exposed catalog data: %v", err)
+			}
+		})
+	}
+}
+
 func TestPrepareToolFreeCatalog(t *testing.T) {
 	t.Setenv(helperModeEnv, "success")
 	dir := t.TempDir()
 	path := filepath.Join(dir, "catalog.json")
 	model, err := PrepareToolFreeCatalog(t.Context(), CatalogOptions{
-		Command:        helperCommand(t),
-		BaseEnv:        []string{helperModeEnv + "=success", "OPENAI_API_KEY=dummy", "PATH=" + os.Getenv("PATH")},
-		CodexHome:      filepath.Join(dir, "codex-home"),
-		ActiveProfile:  "synthetic-profile",
-		RequestedModel: "test-model",
-		OutputPath:     path,
+		Command:         helperCommand(t),
+		BaseEnv:         []string{helperModeEnv + "=success", "OPENAI_API_KEY=dummy", "PATH=" + os.Getenv("PATH")},
+		CodexHome:       filepath.Join(dir, "codex-home"),
+		ActiveProfile:   "synthetic-profile",
+		RequestedModel:  "test-model",
+		RequestedEffort: "high",
+		OutputPath:      path,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if model != "test-model" {
-		t.Fatalf("model = %q", model)
+	if model.Model != "test-model" || model.Effort != "high" {
+		t.Fatalf("selection = %#v", model)
 	}
 	info, err := os.Stat(path)
 	if err != nil {
@@ -145,11 +195,17 @@ func TestPrepareToolFreeCatalogRejectsOtherCodexVersionSafely(t *testing.T) {
 
 func compatibleTestModel(slug string, priority int) map[string]any {
 	return map[string]any{
-		"slug":                  slug,
-		"visibility":            "list",
-		"priority":              float64(priority),
-		"apply_patch_tool_type": "freeform",
-		"tool_mode":             "code_mode_only",
-		"use_responses_lite":    true,
+		"slug":                    slug,
+		"visibility":              "list",
+		"priority":                float64(priority),
+		"apply_patch_tool_type":   "freeform",
+		"tool_mode":               "code_mode_only",
+		"use_responses_lite":      true,
+		"default_reasoning_level": "medium",
+		"supported_reasoning_levels": []any{
+			map[string]any{"effort": "low"},
+			map[string]any{"effort": "medium"},
+			map[string]any{"effort": "high"},
+		},
 	}
 }

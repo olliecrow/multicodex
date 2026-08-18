@@ -1,6 +1,7 @@
 package codexappserver
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -19,17 +20,61 @@ const (
 	subscriptionProvider       = "openai"
 	chatGPTBaseURL             = "https://chatgpt.com/backend-api/"
 	generationHandshakeTimeout = 30 * time.Second
+	maxBufferedResponseBytes   = 16 * 1024 * 1024
 )
 
 type GenerateOptions struct {
-	Command       []string
-	BaseEnv       []string
-	CodexHome     string
-	ActiveProfile string
-	Model         string
-	Prompt        string
-	Output        io.Writer
-	TempRoot      string
+	Command               []string
+	BaseEnv               []string
+	CodexHome             string
+	ActiveProfile         string
+	Model                 string
+	Effort                string
+	BaseInstructions      string
+	DeveloperInstructions string
+	OutputSchema          json.RawMessage
+	JSONOutput            bool
+	Prompt                string
+	Output                io.Writer
+	TempRoot              string
+}
+
+type GenerationUsage struct {
+	InputTokens           int64 `json:"input_tokens"`
+	CachedInputTokens     int64 `json:"cached_input_tokens"`
+	CacheWriteInputTokens int64 `json:"cache_write_input_tokens"`
+	OutputTokens          int64 `json:"output_tokens"`
+	ReasoningOutputTokens int64 `json:"reasoning_output_tokens"`
+	TotalTokens           int64 `json:"total_tokens"`
+}
+
+type generationJSONResult struct {
+	Text       string           `json:"text"`
+	Model      string           `json:"model"`
+	Effort     string           `json:"effort"`
+	DurationMS int64            `json:"duration_ms"`
+	Usage      *GenerationUsage `json:"usage"`
+}
+
+type generationStreamResult struct {
+	Usage *GenerationUsage
+	Err   error
+}
+
+type boundedGenerationBuffer struct {
+	buffer bytes.Buffer
+	limit  int
+}
+
+func (b *boundedGenerationBuffer) Write(data []byte) (int, error) {
+	if len(data) > b.limit-b.buffer.Len() {
+		return 0, errors.New("buffered generation response exceeded safety limit")
+	}
+	return b.buffer.Write(data)
+}
+
+func (b *boundedGenerationBuffer) String() string {
+	return b.buffer.String()
 }
 
 type accountReadResult struct {
@@ -65,7 +110,21 @@ type configReadResult struct {
 	Config map[string]json.RawMessage `json:"config"`
 }
 
+type tokenUsageUpdatedParams struct {
+	TokenUsage struct {
+		Total *struct {
+			InputTokens           int64 `json:"inputTokens"`
+			CachedInputTokens     int64 `json:"cachedInputTokens"`
+			CacheWriteInputTokens int64 `json:"cacheWriteInputTokens"`
+			OutputTokens          int64 `json:"outputTokens"`
+			ReasoningOutputTokens int64 `json:"reasoningOutputTokens"`
+			TotalTokens           int64 `json:"totalTokens"`
+		} `json:"total"`
+	} `json:"tokenUsage"`
+}
+
 func Generate(ctx context.Context, options GenerateOptions) error {
+	started := time.Now()
 	if strings.TrimSpace(options.Prompt) == "" {
 		return errors.New("prompt is empty")
 	}
@@ -91,13 +150,14 @@ func Generate(ctx context.Context, options GenerateOptions) error {
 		return fmt.Errorf("create empty generation workspace: %w", err)
 	}
 	catalogPath := filepath.Join(tempDir, "model-catalog.json")
-	model, err := PrepareToolFreeCatalog(ctx, CatalogOptions{
-		Command:        options.Command,
-		BaseEnv:        options.BaseEnv,
-		CodexHome:      options.CodexHome,
-		ActiveProfile:  options.ActiveProfile,
-		RequestedModel: options.Model,
-		OutputPath:     catalogPath,
+	selection, err := PrepareToolFreeCatalog(ctx, CatalogOptions{
+		Command:         options.Command,
+		BaseEnv:         options.BaseEnv,
+		CodexHome:       options.CodexHome,
+		ActiveProfile:   options.ActiveProfile,
+		RequestedModel:  options.Model,
+		RequestedEffort: options.Effort,
+		OutputPath:      catalogPath,
 	})
 	if err != nil {
 		return err
@@ -150,13 +210,13 @@ func Generate(ctx context.Context, options GenerateOptions) error {
 
 	var thread threadStartResult
 	if err := client.Request(handshakeCtx, "thread/start", map[string]any{
-		"model":                 model,
+		"model":                 selection.Model,
 		"modelProvider":         subscriptionProvider,
 		"cwd":                   workDir,
 		"approvalPolicy":        "never",
 		"sandbox":               "read-only",
-		"baseInstructions":      "",
-		"developerInstructions": "",
+		"baseInstructions":      options.BaseInstructions,
+		"developerInstructions": options.DeveloperInstructions,
 		"ephemeral":             true,
 		"serviceName":           "multicodex_generate",
 	}, &thread); err != nil {
@@ -168,24 +228,37 @@ func Generate(ctx context.Context, options GenerateOptions) error {
 	cancelHandshake()
 	streamCtx, cancelStream := context.WithCancel(ctx)
 	defer cancelStream()
-	streamResult := make(chan error, 1)
+	streamOutput := options.Output
+	bufferedOutput := boundedGenerationBuffer{limit: maxBufferedResponseBytes}
+	if options.JSONOutput {
+		streamOutput = &bufferedOutput
+	}
+	streamResult := make(chan generationStreamResult, 1)
 	go func() {
-		streamResult <- streamGeneration(streamCtx, client, options.Output)
+		streamResult <- streamGeneration(streamCtx, client, streamOutput)
 	}()
 	turnResult := make(chan error, 1)
 	go func() {
 		var turn map[string]any
-		turnResult <- client.Request(ctx, "turn/start", map[string]any{
+		params := map[string]any{
 			"threadId": thread.Thread.ID,
 			"input": []map[string]any{{
 				"type": "text",
 				"text": options.Prompt,
 			}},
-		}, &turn)
+		}
+		if strings.TrimSpace(options.Effort) != "" {
+			params["effort"] = selection.Effort
+		}
+		if len(options.OutputSchema) != 0 {
+			params["outputSchema"] = options.OutputSchema
+		}
+		turnResult <- client.Request(ctx, "turn/start", params, &turn)
 	}()
 
 	turnDone := false
 	streamDone := false
+	var completed generationStreamResult
 	for !turnDone || !streamDone {
 		select {
 		case err := <-turnResult:
@@ -197,68 +270,111 @@ func Generate(ctx context.Context, options GenerateOptions) error {
 				}
 				return fmt.Errorf("start generation turn: %w", err)
 			}
-		case err := <-streamResult:
+		case result := <-streamResult:
 			streamDone = true
-			if err != nil {
-				return err
+			completed = result
+			if result.Err != nil {
+				return result.Err
 			}
+		}
+	}
+	if options.JSONOutput {
+		result := generationJSONResult{
+			Text:       bufferedOutput.String(),
+			Model:      selection.Model,
+			Effort:     selection.Effort,
+			DurationMS: time.Since(started).Milliseconds(),
+			Usage:      completed.Usage,
+		}
+		if err := json.NewEncoder(options.Output).Encode(result); err != nil {
+			return fmt.Errorf("write generation output: %w", err)
 		}
 	}
 	return nil
 }
 
-func streamGeneration(ctx context.Context, client *Client, output io.Writer) error {
+func streamGeneration(ctx context.Context, client *Client, output io.Writer) generationStreamResult {
 	failure := errors.New("generation failed")
+	var usage *GenerationUsage
 	for {
 		if err := ctx.Err(); err != nil {
-			return fmt.Errorf("generation canceled: %w", err)
+			return generationStreamResult{Err: fmt.Errorf("generation canceled: %w", err)}
 		}
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("generation canceled: %w", ctx.Err())
+			return generationStreamResult{Err: fmt.Errorf("generation canceled: %w", ctx.Err())}
 		case <-client.Done():
-			return fmt.Errorf("generation runtime stopped: %w", client.Err())
+			return generationStreamResult{Err: fmt.Errorf("generation runtime stopped: %w", client.Err())}
 		case event, ok := <-client.Events():
 			if !ok {
-				return fmt.Errorf("generation runtime stopped: %w", client.Err())
+				return generationStreamResult{Err: fmt.Errorf("generation runtime stopped: %w", client.Err())}
 			}
 			if event.ServerRequest {
-				return errors.New("generation stopped because the runtime requested an unsupported action")
+				return generationStreamResult{Err: errors.New("generation stopped because the runtime requested an unsupported action")}
 			}
 			if category := toolEventCategory(event); category != "" {
-				return fmt.Errorf("generation stopped because the runtime exposed a %s action", category)
+				return generationStreamResult{Err: fmt.Errorf("generation stopped because the runtime exposed a %s action", category)}
 			}
 			switch event.Method {
 			case "item/agentMessage/delta":
 				var params deltaParams
 				if err := json.Unmarshal(event.Params, &params); err != nil {
-					return errors.New("decode generation text event")
+					return generationStreamResult{Err: errors.New("decode generation text event")}
 				}
 				if _, err := io.WriteString(output, params.Delta); err != nil {
-					return fmt.Errorf("write generation output: %w", err)
+					return generationStreamResult{Err: fmt.Errorf("write generation output: %w", err)}
 				}
 			case "item/started", "item/completed":
 				var params itemParams
 				if err := json.Unmarshal(event.Params, &params); err != nil {
-					return errors.New("decode generation item event")
+					return generationStreamResult{Err: errors.New("decode generation item event")}
 				}
 				if !generationItemAllowed(params.Item.Type) {
-					return errors.New("generation stopped because the runtime exposed an unexpected item")
+					return generationStreamResult{Err: errors.New("generation stopped because the runtime exposed an unexpected item")}
+				}
+			case "thread/tokenUsage/updated":
+				parsed, err := parseGenerationUsage(event.Params)
+				if err == nil {
+					usage = &parsed
 				}
 			case "error":
 				failure = classifyGenerationFailure(event.Params)
 			case "turn/completed":
 				var params turnCompletedParams
 				if err := json.Unmarshal(event.Params, &params); err != nil {
-					return errors.New("decode generation completion event")
+					return generationStreamResult{Err: errors.New("decode generation completion event")}
 				}
 				if params.Turn.Status != "completed" {
-					return failure
+					return generationStreamResult{Err: failure}
 				}
-				return nil
+				return generationStreamResult{Usage: usage}
 			}
 		}
 	}
+}
+
+func parseGenerationUsage(raw json.RawMessage) (GenerationUsage, error) {
+	var params tokenUsageUpdatedParams
+	if err := json.Unmarshal(raw, &params); err != nil {
+		return GenerationUsage{}, errors.New("decode generation usage event")
+	}
+	if params.TokenUsage.Total == nil {
+		return GenerationUsage{}, errors.New("decode generation usage event")
+	}
+	total := params.TokenUsage.Total
+	usage := GenerationUsage{
+		InputTokens:           total.InputTokens,
+		CachedInputTokens:     total.CachedInputTokens,
+		CacheWriteInputTokens: total.CacheWriteInputTokens,
+		OutputTokens:          total.OutputTokens,
+		ReasoningOutputTokens: total.ReasoningOutputTokens,
+		TotalTokens:           total.TotalTokens,
+	}
+	if usage.InputTokens < 0 || usage.CachedInputTokens < 0 || usage.CacheWriteInputTokens < 0 ||
+		usage.OutputTokens < 0 || usage.ReasoningOutputTokens < 0 || usage.TotalTokens < 0 {
+		return GenerationUsage{}, errors.New("decode generation usage event")
+	}
+	return usage, nil
 }
 
 func generationArgs(catalogPath string, mcpServers []string) []string {
