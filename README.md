@@ -139,7 +139,7 @@ multicodex login <name> [codex login args]
 multicodex login-all
 multicodex cli [--account <name>] [--] [codex args...]
 multicodex exec [codex exec args]
-multicodex generate [--account <name>] [-m|--model <model>] [prompt]
+multicodex generate [--account <name>] [-m|--model <model>] [--effort <effort>] [--base-instructions-file <path>] [--developer-instructions-file <path>] [--output-schema <path>] [--json] [prompt]
 multicodex status
 multicodex reconcile
 multicodex heartbeat
@@ -182,19 +182,25 @@ Two terminals can run `multicodex cli --account <name>` with different profiles 
 
 ## Tool-Free Text Generation
 
-`multicodex generate` sends one text prompt through Codex App Server and the selected ChatGPT subscription. It always uses Codex's built-in OpenAI provider and default provider endpoint. It streams assistant text to standard output. If the prompt argument is omitted, it reads up to 4 MiB from standard input.
+`multicodex generate` sends one text prompt through Codex App Server and the selected ChatGPT subscription. It always uses Codex's built-in OpenAI provider and default provider endpoint. By default, it streams assistant text to standard output. If the prompt argument is omitted, it reads up to 4 MiB from standard input.
 
 ```bash
 multicodex generate "Draft a concise release note."
 multicodex generate --account work "Translate this paragraph to French."
 multicodex generate -m gpt-5.5 < prompt.txt
+multicodex generate --effort high --developer-instructions-file instructions.md "Analyze this scenario."
+multicodex generate --output-schema schema.json --json "Return the requested fields."
 ```
 
-The request uses an ephemeral thread in a private empty directory. Multicodex supplies empty base and developer instructions, disables project context, client tools, MCP servers, and notification hooks, ignores unrelated custom model providers, and limits the temporary model catalog to one tool-free model. It fails closed if Codex config replaces the built-in OpenAI provider or its endpoint, or loads a configuration lockfile. It rejects API-key authentication, server action requests, and unexpected tool items. This removes the client-side Codex coding-agent harness; it cannot control provider-side instructions.
+Use `--base-instructions-file` and `--developer-instructions-file` to supply exact instruction text. Each instruction file, the prompt, and the optional `--output-schema` file has a 4 MiB limit. File inputs must resolve to regular files. The schema file must contain one JSON object and is passed to App Server for structured-output enforcement. Use `--effort` to select an effort supported by the chosen model; multicodex validates it against the installed bundled model catalog before generation. Without this flag, the model's catalog default applies.
+
+Use `--json` for one atomic JSON object instead of streamed text. It contains `text`, `model`, `effort`, `duration_ms`, and `usage`. Usage contains only numeric token counts and is `null` if App Server emits no usage event. It never contains the selected account, profile, paths, raw events, or reasoning text. If generation fails or the buffered response exceeds 16 MiB, JSON mode writes no response object.
+
+The request uses an ephemeral thread in a private empty directory. Multicodex supplies empty base and developer instructions unless their files are given, disables project context, client tools, MCP servers, and notification hooks, ignores unrelated custom model providers, and limits the temporary model catalog to one tool-free model. It fails closed if Codex config replaces the built-in OpenAI provider or its endpoint, or loads a configuration lockfile. It rejects API-key authentication, server action requests, and unexpected tool items. This removes the client-side Codex coding-agent harness; it cannot control provider-side instructions.
 
 The command requires `codex-cli 0.147.0`. App Server and its model catalog are experimental Codex interfaces, so multicodex fails closed on another version until compatibility is tested. The default model is the highest-priority visible model in Codex's bundled catalog. Use `--model` to select another bundled model.
 
-Version 1 is intentionally one-shot and text-only. It does not expose sessions, custom tools, images, output schemas, raw events, or a daemon. Existing `cli` and `exec` commands remain unchanged for agent workflows.
+The command remains one-shot and tool-free. It does not expose sessions, custom tools, images, raw events, or a daemon. Existing `cli` and `exec` commands remain unchanged for agent workflows.
 
 ## Heartbeat
 

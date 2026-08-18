@@ -81,6 +81,21 @@ func TestHelpCLIDescribesAutomaticAndManualAccountSelection(t *testing.T) {
 	}
 }
 
+func TestHelpGenerateDescribesCustomGenerationControls(t *testing.T) {
+	app := newTestAppForCLI(t)
+	out, err := captureStdout(t, func() error {
+		return app.Run([]string{"help", "generate"})
+	})
+	if err != nil {
+		t.Fatalf("help generate failed: %v", err)
+	}
+	for _, want := range []string{"--base-instructions-file", "--developer-instructions-file", "--effort", "--output-schema", "--json", "sanitized"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected %q in generate help: %s", want, out)
+		}
+	}
+}
+
 func TestHelpUnknownTopic(t *testing.T) {
 	app := newTestAppForCLI(t)
 	_, err := captureStdout(t, func() error {
@@ -163,6 +178,20 @@ func TestCompletionSuggestsProfilesOnlyForAccountArguments(t *testing.T) {
 func TestFishCompletionIncludesGenerateHelp(t *testing.T) {
 	if !strings.Contains(renderFishCompletion(), "cli exec generate status") {
 		t.Fatal("Fish help completion omits generate")
+	}
+}
+
+func TestGenerateCompletionsIncludeCustomControls(t *testing.T) {
+	for name, completion := range map[string]string{
+		"bash": renderBashCompletion(),
+		"zsh":  renderZshCompletion(),
+		"fish": renderFishCompletion(),
+	} {
+		for _, flag := range []string{"--effort", "--base-instructions-file", "--developer-instructions-file", "--output-schema", "--json"} {
+			if !strings.Contains(completion, flag) && !strings.Contains(completion, strings.TrimPrefix(flag, "--")) {
+				t.Errorf("%s completion omits %s", name, flag)
+			}
+		}
 	}
 }
 

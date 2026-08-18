@@ -78,6 +78,117 @@ func TestGenerate(t *testing.T) {
 	}
 }
 
+func TestGenerateCustomInstructionsSchemaEffortAndJSON(t *testing.T) {
+	t.Setenv(helperModeEnv, "custom-options")
+	var output bytes.Buffer
+	err := Generate(t.Context(), GenerateOptions{
+		Command:               helperCommand(t),
+		BaseEnv:               []string{helperModeEnv + "=custom-options", "PATH=" + os.Getenv("PATH")},
+		CodexHome:             t.TempDir(),
+		Model:                 "test-model",
+		Effort:                "high",
+		BaseInstructions:      "synthetic base instructions",
+		DeveloperInstructions: "synthetic developer instructions",
+		OutputSchema:          json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`),
+		JSONOutput:            true,
+		Prompt:                "synthetic prompt",
+		Output:                &output,
+		TempRoot:              t.TempDir(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result generationJSONResult
+	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+		t.Fatalf("decode JSON output: %v; output=%q", err, output.String())
+	}
+	if result.Text != "safe output" || result.Model != "test-model" || result.Effort != "high" || result.DurationMS < 0 {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+	if result.Usage == nil || result.Usage.InputTokens != 80 || result.Usage.CachedInputTokens != 30 ||
+		result.Usage.CacheWriteInputTokens != 5 || result.Usage.OutputTokens != 20 ||
+		result.Usage.ReasoningOutputTokens != 7 || result.Usage.TotalTokens != 100 {
+		t.Fatalf("unexpected usage: %#v", result.Usage)
+	}
+	for _, forbidden := range []string{"synthetic-profile", "CodexHome", "ActiveProfile", "account"} {
+		if strings.Contains(output.String(), forbidden) {
+			t.Fatalf("JSON output exposed %q: %s", forbidden, output.String())
+		}
+	}
+}
+
+func TestGenerateJSONFailureWritesNoOutput(t *testing.T) {
+	t.Setenv(helperModeEnv, "turn-error")
+	var output bytes.Buffer
+	err := Generate(t.Context(), GenerateOptions{
+		Command:    helperCommand(t),
+		BaseEnv:    []string{helperModeEnv + "=turn-error", "PATH=" + os.Getenv("PATH")},
+		CodexHome:  t.TempDir(),
+		Model:      "test-model",
+		JSONOutput: true,
+		Prompt:     "synthetic prompt",
+		Output:     &output,
+		TempRoot:   t.TempDir(),
+	})
+	if err == nil || !strings.Contains(err.Error(), "generation failed") {
+		t.Fatalf("error = %v", err)
+	}
+	if output.Len() != 0 {
+		t.Fatalf("failed JSON generation wrote output: %q", output.String())
+	}
+}
+
+func TestGenerateJSONTreatsMalformedUsageAsUnavailable(t *testing.T) {
+	t.Setenv(helperModeEnv, "malformed-usage")
+	var output bytes.Buffer
+	err := Generate(t.Context(), GenerateOptions{
+		Command:    helperCommand(t),
+		BaseEnv:    []string{helperModeEnv + "=malformed-usage", "PATH=" + os.Getenv("PATH")},
+		CodexHome:  t.TempDir(),
+		Model:      "test-model",
+		JSONOutput: true,
+		Prompt:     "synthetic prompt",
+		Output:     &output,
+		TempRoot:   t.TempDir(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result generationJSONResult
+	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Text != "safe output" || result.Usage != nil {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+}
+
+func TestParseGenerationUsage(t *testing.T) {
+	usage, err := parseGenerationUsage(json.RawMessage(`{"tokenUsage":{"total":{"inputTokens":80,"cachedInputTokens":30,"cacheWriteInputTokens":5,"outputTokens":20,"reasoningOutputTokens":7,"totalTokens":100}}}`))
+	if err != nil || usage.TotalTokens != 100 || usage.CachedInputTokens != 30 {
+		t.Fatalf("usage = %#v, err = %v", usage, err)
+	}
+	for _, raw := range []json.RawMessage{
+		json.RawMessage(`{"tokenUsage":{"total":{"inputTokens":-1}}}`),
+		json.RawMessage(`{}`),
+		json.RawMessage(`{`),
+	} {
+		if _, err := parseGenerationUsage(raw); err == nil {
+			t.Fatalf("invalid usage succeeded: %s", raw)
+		}
+	}
+}
+
+func TestBoundedGenerationBuffer(t *testing.T) {
+	buffer := boundedGenerationBuffer{limit: 4}
+	if count, err := buffer.Write([]byte("safe")); err != nil || count != 4 || buffer.String() != "safe" {
+		t.Fatalf("bounded write: count=%d output=%q err=%v", count, buffer.String(), err)
+	}
+	if count, err := buffer.Write([]byte("x")); err == nil || count != 0 || buffer.String() != "safe" {
+		t.Fatalf("overflow write: count=%d output=%q err=%v", count, buffer.String(), err)
+	}
+}
+
 type delayedWriter struct {
 	writer io.Writer
 	delay  time.Duration
@@ -262,7 +373,7 @@ func TestCodexWireHasNoHarnessOrTools(t *testing.T) {
 		t.Fatal(err)
 	}
 	catalogPath := filepath.Join(tempDir, "catalog.json")
-	model, err := PrepareToolFreeCatalog(ctx, CatalogOptions{CodexHome: tempDir, OutputPath: catalogPath})
+	selection, err := PrepareToolFreeCatalog(ctx, CatalogOptions{CodexHome: tempDir, OutputPath: catalogPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,9 +415,9 @@ func TestCodexWireHasNoHarnessOrTools(t *testing.T) {
 	}
 	var thread threadStartResult
 	if err := client.Request(ctx, "thread/start", map[string]any{
-		"model": model, "modelProvider": "multicodex_test", "cwd": workDir,
+		"model": selection.Model, "modelProvider": "multicodex_test", "cwd": workDir,
 		"approvalPolicy": "never", "sandbox": "read-only",
-		"baseInstructions": "", "developerInstructions": "", "ephemeral": true,
+		"baseInstructions": "synthetic base instructions", "developerInstructions": "synthetic developer instructions", "ephemeral": true,
 	}, &thread); err != nil {
 		t.Fatal(err)
 	}
@@ -314,12 +425,17 @@ func TestCodexWireHasNoHarnessOrTools(t *testing.T) {
 	if err := client.Request(ctx, "turn/start", map[string]any{
 		"threadId": thread.Thread.ID,
 		"input":    []map[string]any{{"type": "text", "text": "wire prompt"}},
+		"effort":   "high",
+		"outputSchema": map[string]any{
+			"type": "object", "properties": map[string]any{"answer": map[string]any{"type": "string"}},
+			"required": []string{"answer"}, "additionalProperties": false,
+		},
 	}, &turn); err != nil {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	if err := streamGeneration(ctx, client, &output); err != nil {
-		t.Fatal(err)
+	if result := streamGeneration(ctx, client, &output); result.Err != nil {
+		t.Fatal(result.Err)
 	}
 	if output.String() != "wire output" {
 		t.Fatalf("output = %q", output.String())
@@ -331,7 +447,7 @@ func TestCodexWireHasNoHarnessOrTools(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("Codex sent no provider request")
 	}
-	assertToolFreeWireRequest(t, body)
+	assertCustomToolFreeWireRequest(t, body)
 	select {
 	case <-mcpRequest:
 		t.Fatal("Codex started a configured MCP server")
@@ -392,10 +508,10 @@ wire_api = "responses"
 	}
 }
 
-func assertToolFreeWireRequest(t *testing.T, body map[string]any) {
+func assertCustomToolFreeWireRequest(t *testing.T, body map[string]any) {
 	t.Helper()
-	if instructions, exists := body["instructions"]; exists && instructions != nil && instructions != "" {
-		t.Fatal("Codex sent non-empty instructions")
+	if body["instructions"] != "synthetic base instructions" {
+		t.Fatal("Codex did not send the exact base instructions")
 	}
 	tools, ok := body["tools"].([]any)
 	if !ok || len(tools) != 0 {
@@ -407,12 +523,24 @@ func assertToolFreeWireRequest(t *testing.T, body map[string]any) {
 		t.Fatalf("Codex sent tools: count=%d kinds=%v", len(tools), kinds)
 	}
 	input, ok := body["input"].([]any)
-	if !ok || len(input) != 1 {
-		t.Fatalf("Codex sent %d input items, want one", len(input))
+	if !ok || len(input) != 2 {
+		t.Fatalf("Codex sent %d input items, want developer and user messages", len(input))
 	}
-	message, ok := input[0].(map[string]any)
+	developer, ok := input[0].(map[string]any)
+	if !ok || developer["role"] != "developer" {
+		t.Fatal("Codex did not send one developer message")
+	}
+	developerContent, ok := developer["content"].([]any)
+	if !ok || len(developerContent) != 1 {
+		t.Fatal("Codex changed the developer instructions")
+	}
+	developerText, ok := developerContent[0].(map[string]any)
+	if !ok || developerText["type"] != "input_text" || developerText["text"] != "synthetic developer instructions" {
+		t.Fatal("Codex changed the developer instructions")
+	}
+	message, ok := input[1].(map[string]any)
 	if !ok || message["role"] != "user" {
-		t.Fatal("Codex did not send one user message")
+		t.Fatal("Codex did not send one user message after the developer message")
 	}
 	content, ok := message["content"].([]any)
 	if !ok || len(content) != 1 {
@@ -421,6 +549,17 @@ func assertToolFreeWireRequest(t *testing.T, body map[string]any) {
 	text, ok := content[0].(map[string]any)
 	if !ok || text["type"] != "input_text" || text["text"] != "wire prompt" {
 		t.Fatal("Codex changed the user prompt")
+	}
+	reasoning, ok := body["reasoning"].(map[string]any)
+	if !ok || reasoning["effort"] != "high" {
+		t.Fatal("Codex did not send the requested reasoning effort")
+	}
+	textOptions, ok := body["text"].(map[string]any)
+	format, formatOK := textOptions["format"].(map[string]any)
+	schema, schemaOK := format["schema"].(map[string]any)
+	if !ok || !formatOK || !schemaOK || format["type"] != "json_schema" || format["strict"] != true ||
+		schema["type"] != "object" || schema["additionalProperties"] != false {
+		t.Fatal("Codex did not send the strict output schema")
 	}
 }
 
@@ -518,13 +657,13 @@ func runAppServerHelper(mode string) {
 			}
 			result = map[string]any{"account": map[string]any{"type": accountType}, "requiresOpenaiAuth": true}
 		case "thread/start":
-			if !threadParamsAreToolFree(req.Params) {
+			if !threadParamsAreExpected(req.Params, mode) {
 				_ = encoder.Encode(map[string]any{"id": req.ID, "error": map[string]any{"code": -32001, "message": "unsafe thread parameters"}})
 				continue
 			}
 			result = map[string]any{"thread": map[string]any{"id": "thread-1"}}
 		case "turn/start":
-			if !turnParamsAreExpected(req.Params) {
+			if !turnParamsAreExpected(req.Params, mode) {
 				_ = encoder.Encode(map[string]any{"id": req.ID, "error": map[string]any{"code": -32002, "message": "unsafe turn parameters"}})
 				continue
 			}
@@ -558,6 +697,14 @@ func runAppServerHelper(mode string) {
 			_ = encoder.Encode(map[string]any{"method": "item/started", "params": map[string]any{"item": map[string]any{"type": "reasoning"}}})
 			_ = encoder.Encode(map[string]any{"method": "item/agentMessage/delta", "params": map[string]any{"delta": "safe output"}})
 			_ = encoder.Encode(map[string]any{"method": "item/completed", "params": map[string]any{"item": map[string]any{"type": "agentMessage"}}})
+			if mode == "custom-options" {
+				_ = encoder.Encode(map[string]any{"method": "thread/tokenUsage/updated", "params": map[string]any{"tokenUsage": map[string]any{"total": map[string]any{
+					"inputTokens": 80, "cachedInputTokens": 30, "cacheWriteInputTokens": 5,
+					"outputTokens": 20, "reasoningOutputTokens": 7, "totalTokens": 100,
+				}}}})
+			} else if mode == "malformed-usage" {
+				_ = encoder.Encode(map[string]any{"method": "thread/tokenUsage/updated", "params": map[string]any{"tokenUsage": map[string]any{"total": map[string]any{"inputTokens": -1}}}})
+			}
 			_ = encoder.Encode(map[string]any{"method": "turn/completed", "params": map[string]any{"turn": map[string]any{"status": "completed"}}})
 		}
 	}
@@ -580,13 +727,19 @@ func generationArgValue(name string) string {
 	return ""
 }
 
-func threadParamsAreToolFree(raw json.RawMessage) bool {
+func threadParamsAreExpected(raw json.RawMessage, mode string) bool {
 	var params map[string]any
 	if json.Unmarshal(raw, &params) != nil {
 		return false
 	}
-	return params["baseInstructions"] == "" &&
-		params["developerInstructions"] == "" &&
+	baseInstructions := ""
+	developerInstructions := ""
+	if mode == "custom-options" {
+		baseInstructions = "synthetic base instructions"
+		developerInstructions = "synthetic developer instructions"
+	}
+	return params["baseInstructions"] == baseInstructions &&
+		params["developerInstructions"] == developerInstructions &&
 		params["modelProvider"] == subscriptionProvider &&
 		params["approvalPolicy"] == "never" &&
 		params["sandbox"] == "read-only" &&
@@ -594,15 +747,29 @@ func threadParamsAreToolFree(raw json.RawMessage) bool {
 		params["model"] == "test-model"
 }
 
-func turnParamsAreExpected(raw json.RawMessage) bool {
-	var params struct {
-		ThreadID string `json:"threadId"`
-		Input    []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		} `json:"input"`
+func turnParamsAreExpected(raw json.RawMessage, mode string) bool {
+	var params map[string]any
+	if json.Unmarshal(raw, &params) != nil || params["threadId"] != "thread-1" {
+		return false
 	}
-	return json.Unmarshal(raw, &params) == nil && params.ThreadID == "thread-1" && len(params.Input) == 1 && params.Input[0].Type == "text" && params.Input[0].Text == "synthetic prompt"
+	input, ok := params["input"].([]any)
+	if !ok || len(input) != 1 {
+		return false
+	}
+	message, ok := input[0].(map[string]any)
+	if !ok || message["type"] != "text" || message["text"] != "synthetic prompt" {
+		return false
+	}
+	if mode != "custom-options" {
+		_, hasEffort := params["effort"]
+		_, hasSchema := params["outputSchema"]
+		return !hasEffort && !hasSchema
+	}
+	if params["effort"] != "high" {
+		return false
+	}
+	schema, ok := params["outputSchema"].(map[string]any)
+	return ok && schema["type"] == "object" && schema["additionalProperties"] == false
 }
 
 func containsArg(args []string, target string) bool {
