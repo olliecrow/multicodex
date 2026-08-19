@@ -199,7 +199,7 @@ Use `--json` for one atomic JSON object instead of streamed text. It contains `t
 
 The request uses an ephemeral thread in a private empty directory. Multicodex supplies empty base and developer instructions unless their files are given, disables project context, client tools, MCP servers, and notification hooks, ignores unrelated custom model providers, and limits the temporary model catalog to one tool-free model. It fails closed if Codex config replaces the built-in OpenAI provider or its endpoint, or loads a configuration lockfile. It rejects API-key authentication, server action requests, and unexpected tool items. This removes the client-side Codex coding-agent harness; it cannot control provider-side instructions.
 
-The command requires `codex-cli 0.147.0`. App Server and its model catalog are experimental Codex interfaces, so multicodex fails closed on another version until compatibility is tested. The default model is the highest-priority visible model in Codex's bundled catalog. Use `--model` to select another bundled model.
+The command supports `codex-cli 0.147.0` and `0.148.0`. App Server and its model catalog are experimental Codex interfaces, so multicodex fails closed on another version until compatibility is tested. The default model is the highest-priority visible model in Codex's bundled catalog. Use `--model` to select another bundled model.
 
 The command remains one-shot and tool-free. It does not expose sessions, custom tools, images, raw events, or a daemon. Existing `cli` and `exec` commands remain unchanged for agent workflows.
 
