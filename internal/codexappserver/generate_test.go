@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -26,13 +27,17 @@ func TestGenerate(t *testing.T) {
 		wantOutput string
 		wantError  string
 		notInError string
+		webSearch  bool
 	}{
 		{name: "success", mode: "success", wantOutput: "safe output"},
+		{name: "search success", mode: "search", wantOutput: "safe output"},
+		{name: "unexpected search rejected", mode: "unexpected-search", wantError: "unexpected item"},
 		{name: "burst before response", mode: "burst-before-response", wantOutput: strings.Repeat("x", defaultNotificationSize+1)},
 		{name: "api key rejected", mode: "api-key", wantError: "requires ChatGPT subscription"},
 		{name: "unsafe effective config rejected", mode: "unsafe-effective-config", wantError: "safe generation configuration"},
 		{name: "server request rejected", mode: "server-request", wantError: "unsupported action"},
 		{name: "tool event rejected", mode: "tool-event", wantError: "commandexecution action"},
+		{name: "non-search tool rejected during search", mode: "tool-event", webSearch: true, wantError: "commandexecution action"},
 		{name: "RPC detail sanitized", mode: "rpc-error", wantError: "RPC code -32000", notInError: "private-secret"},
 		{name: "turn RPC detail sanitized", mode: "turn-rpc-error", wantError: "RPC code -32002", notInError: "private-secret"},
 		{name: "turn failure sanitized", mode: "turn-error", wantError: "generation failed", notInError: "private-secret"},
@@ -51,6 +56,7 @@ func TestGenerate(t *testing.T) {
 				CodexHome:     t.TempDir(),
 				ActiveProfile: "synthetic-profile",
 				Model:         "test-model",
+				WebSearch:     test.mode == "search" || test.webSearch,
 				Prompt:        "synthetic prompt",
 				Output:        writer,
 				TempRoot:      tempRoot,
@@ -232,16 +238,34 @@ func TestGenerateBoundsHandshakeNotificationPressure(t *testing.T) {
 }
 
 func TestGenerationArgsEnforceSubscriptionIsolation(t *testing.T) {
-	args := generationArgs("catalog.json", []string{"alpha.with.dot", "zeta"})
+	args := generationArgs("catalog.json", []string{"alpha.with.dot", "zeta"}, false)
 	for _, override := range []string{
 		`model_provider="openai"`,
 		`chatgpt_base_url="https://chatgpt.com/backend-api/"`,
 		`mcp_servers={"alpha.with.dot"={enabled=false},"zeta"={enabled=false}}`,
 		`notify=[]`,
+		`web_search="disabled"`,
 	} {
 		if !containsArg(args, override) {
 			t.Fatalf("generation arguments do not contain %q", override)
 		}
+	}
+	if args := generationArgs("catalog.json", nil, true); !containsArg(args, `web_search="live"`) {
+		t.Fatal("search generation did not enable live web search")
+	}
+	toolFree := generationArgs("catalog.json", []string{"alpha.with.dot", "zeta"}, false)
+	search := generationArgs("catalog.json", []string{"alpha.with.dot", "zeta"}, true)
+	if len(toolFree) != len(search) {
+		t.Fatal("search mode changed the generation argument count")
+	}
+	differences := 0
+	for index := range toolFree {
+		if toolFree[index] != search[index] {
+			differences++
+		}
+	}
+	if differences != 1 {
+		t.Fatalf("search mode changed %d generation arguments, want one", differences)
 	}
 }
 
@@ -254,46 +278,85 @@ func TestGenerationConfigIsSafe(t *testing.T) {
 		"debug":              json.RawMessage(`null`),
 		"notify":             json.RawMessage(`[]`),
 		"mcp_servers":        json.RawMessage(`{"safe":{"enabled":false}}`),
+		"web_search":         json.RawMessage(`"disabled"`),
+		"tools":              json.RawMessage(`{}`),
 	}
-	if !generationConfigIsSafe(config, "catalog.json") {
+	if !generationConfigIsSafe(config, "catalog.json", false) {
 		t.Fatal("safe configuration was rejected")
 	}
-	for _, name := range []string{"model_provider", "model_catalog_json", "chatgpt_base_url", "notify"} {
+	for _, name := range []string{"model_provider", "model_catalog_json", "chatgpt_base_url", "notify", "web_search"} {
 		t.Run(name, func(t *testing.T) {
 			changed := make(map[string]json.RawMessage, len(config))
 			for key, value := range config {
 				changed[key] = value
 			}
 			changed[name] = json.RawMessage(`null`)
-			if generationConfigIsSafe(changed, "catalog.json") {
+			if generationConfigIsSafe(changed, "catalog.json", false) {
 				t.Fatalf("unsafe %s configuration was accepted", name)
 			}
 		})
 	}
 	config["openai_base_url"] = json.RawMessage(`"https://example.invalid/v1"`)
-	if generationConfigIsSafe(config, "catalog.json") {
+	if generationConfigIsSafe(config, "catalog.json", false) {
 		t.Fatal("overridden OpenAI endpoint was accepted")
 	}
 	config["openai_base_url"] = json.RawMessage(`null`)
 	config["debug"] = json.RawMessage(`{"config_lockfile":{"load_path":"/synthetic/config.lock.toml"}}`)
-	if generationConfigIsSafe(config, "catalog.json") {
+	if generationConfigIsSafe(config, "catalog.json", false) {
 		t.Fatal("effective config lockfile was accepted")
 	}
 	config["debug"] = json.RawMessage(`null`)
 	config["mcp_servers"] = json.RawMessage(`{"unsafe":{"enabled":true}}`)
-	if generationConfigIsSafe(config, "catalog.json") {
+	if generationConfigIsSafe(config, "catalog.json", false) {
 		t.Fatal("enabled MCP server was accepted")
+	}
+	config["mcp_servers"] = json.RawMessage(`{"safe":{"enabled":false}}`)
+	config["web_search"] = json.RawMessage(`"live"`)
+	if !generationConfigIsSafe(config, "catalog.json", true) {
+		t.Fatal("safe search configuration was rejected")
+	}
+	if generationConfigIsSafe(config, "catalog.json", false) {
+		t.Fatal("unexpected live web search was accepted")
+	}
+	config["tools"] = json.RawMessage(`{"web_search":{"allowed_domains":["example.com"],"search_context_size":"high","user_location":{"city":"Synthetic City","country":"GB","region":"Synthetic Region","timezone":"Etc/UTC"}}}`)
+	if generationConfigIsSafe(config, "catalog.json", true) {
+		t.Fatal("inherited web-search configuration was accepted")
+	}
+	config["tools"] = json.RawMessage(`{"web_search":{"allowed_domains":null,"search_context_size":null,"user_location":null}}`)
+	if !generationConfigIsSafe(config, "catalog.json", true) {
+		t.Fatal("null web-search defaults were rejected")
+	}
+	for _, tools := range []json.RawMessage{
+		json.RawMessage(`{"web_search":true}`),
+		json.RawMessage(`{"web_search":{"user_location":{"city":null,"country":null,"region":null,"timezone":null}}}`),
+		json.RawMessage(`{"web_search":{"user_location":{}}}`),
+	} {
+		config["tools"] = tools
+		if !generationConfigIsSafe(config, "catalog.json", true) {
+			t.Fatalf("benign web-search configuration was rejected: %s", tools)
+		}
+	}
+	config["tools"] = json.RawMessage(`{"web_search":{"unknown_setting":"value"}}`)
+	if generationConfigIsSafe(config, "catalog.json", true) {
+		t.Fatal("unknown non-null web-search setting was accepted")
+	}
+	config["web_search"] = json.RawMessage(`"disabled"`)
+	if !generationConfigIsSafe(config, "catalog.json", false) {
+		t.Fatal("tool-free generation rejected irrelevant nested search settings")
 	}
 }
 
 func TestGenerationItemAllowed(t *testing.T) {
 	for _, itemType := range []string{"agentMessage", "contextCompaction", "reasoning", "userMessage"} {
-		if !generationItemAllowed(itemType) {
+		if !generationItemAllowed(itemType, false) {
 			t.Fatalf("safe item %q was rejected", itemType)
 		}
 	}
-	if generationItemAllowed("commandExecution") {
+	if generationItemAllowed("commandExecution", true) {
 		t.Fatal("tool item was accepted")
+	}
+	if generationItemAllowed("webSearch", false) || !generationItemAllowed("webSearch", true) {
+		t.Fatal("web search item did not follow the explicit search boundary")
 	}
 }
 
@@ -302,11 +365,13 @@ func TestLiveGenerate(t *testing.T) {
 		t.Skip("set MULTICODEX_TEST_LIVE_GENERATE=1 to use the active ChatGPT subscription")
 	}
 	for _, test := range []struct {
-		name  string
-		model string
+		name      string
+		model     string
+		webSearch bool
 	}{
 		{name: "default"},
 		{name: "explicit model", model: "gpt-5.5"},
+		{name: "search", webSearch: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
@@ -315,6 +380,7 @@ func TestLiveGenerate(t *testing.T) {
 			err := Generate(ctx, GenerateOptions{
 				CodexHome: os.Getenv("CODEX_HOME"),
 				Model:     test.model,
+				WebSearch: test.webSearch,
 				Prompt:    "Reply with exactly OK and no other text.",
 				Output:    &output,
 			})
@@ -329,6 +395,33 @@ func TestLiveGenerate(t *testing.T) {
 }
 
 func TestCodexWireHasNoHarnessOrTools(t *testing.T) {
+	testCodexWireGeneration(t, false)
+}
+
+func TestCodexWireHasOnlyWebSearch(t *testing.T) {
+	testCodexWireGeneration(t, true)
+}
+
+func codexWireCommand(t *testing.T) []string {
+	t.Helper()
+	command := os.Getenv("MULTICODEX_TEST_CODEX_COMMAND")
+	if command == "" {
+		command = defaultCommand
+	}
+	output, err := exec.Command(command, "--version").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	version := strings.TrimSpace(string(output))
+	if _, supported := supportedCodexVersions[version]; !supported {
+		t.Fatalf("wire test Codex version %q is unsupported", version)
+	}
+	t.Logf("wire test runtime: %s", version)
+	return []string{command}
+}
+
+func testCodexWireGeneration(t *testing.T, webSearch bool) {
+	t.Helper()
 	if os.Getenv("MULTICODEX_TEST_CODEX_WIRE") != "1" {
 		t.Skip("set MULTICODEX_TEST_CODEX_WIRE=1 to inspect the installed Codex request locally")
 	}
@@ -367,21 +460,22 @@ func TestCodexWireHasNoHarnessOrTools(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
+	command := codexWireCommand(t)
 	tempDir := t.TempDir()
 	config := fmt.Sprintf("[mcp_servers.\"multicodex.test\"]\nurl = %s\n", strconv.Quote(mcpServer.URL))
 	if err := os.WriteFile(filepath.Join(tempDir, "config.toml"), []byte(config), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	catalogPath := filepath.Join(tempDir, "catalog.json")
-	selection, err := PrepareToolFreeCatalog(ctx, CatalogOptions{CodexHome: tempDir, OutputPath: catalogPath})
+	selection, err := PrepareGenerationCatalog(ctx, CatalogOptions{Command: command, CodexHome: tempDir, WebSearch: webSearch, OutputPath: catalogPath})
 	if err != nil {
 		t.Fatal(err)
 	}
-	mcpServers, err := inspectGenerationConfig(tempDir)
+	mcpServers, err := inspectGenerationConfig(tempDir, webSearch)
 	if err != nil {
 		t.Fatal(err)
 	}
-	args := generationArgs(catalogPath, mcpServers)
+	args := generationArgs(catalogPath, mcpServers, webSearch)
 	for _, override := range []string{
 		`model_provider="multicodex_test"`,
 		`model_providers.multicodex_test.name="Multicodex test"`,
@@ -394,6 +488,7 @@ func TestCodexWireHasNoHarnessOrTools(t *testing.T) {
 		args = append(args, "-c", override)
 	}
 	client := New(Config{
+		Command:        command,
 		GlobalArgs:     args,
 		BaseEnv:        []string{"PATH=" + os.Getenv("PATH"), "MULTICODEX_SYNTHETIC_KEY=synthetic"},
 		CodexHome:      tempDir,
@@ -434,7 +529,7 @@ func TestCodexWireHasNoHarnessOrTools(t *testing.T) {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	if result := streamGeneration(ctx, client, &output); result.Err != nil {
+	if result := streamGeneration(ctx, client, &output, webSearch); result.Err != nil {
 		t.Fatal(result.Err)
 	}
 	if output.String() != "wire output" {
@@ -447,7 +542,7 @@ func TestCodexWireHasNoHarnessOrTools(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("Codex sent no provider request")
 	}
-	assertCustomToolFreeWireRequest(t, body)
+	assertCustomWireRequest(t, body, webSearch)
 	select {
 	case <-mcpRequest:
 		t.Fatal("Codex started a configured MCP server")
@@ -461,6 +556,7 @@ func TestCodexRuntimePinsOpenAIProvider(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
+	command := codexWireCommand(t)
 	tempDir := t.TempDir()
 	config := `
 model_provider = "multicodex_test"
@@ -475,7 +571,8 @@ wire_api = "responses"
 		t.Fatal(err)
 	}
 	catalogPath := filepath.Join(tempDir, "catalog.json")
-	if _, err := PrepareToolFreeCatalog(ctx, CatalogOptions{
+	if _, err := PrepareGenerationCatalog(ctx, CatalogOptions{
+		Command:    command,
 		BaseEnv:    []string{"PATH=" + os.Getenv("PATH"), "MULTICODEX_SYNTHETIC_KEY=synthetic"},
 		CodexHome:  tempDir,
 		OutputPath: catalogPath,
@@ -483,7 +580,8 @@ wire_api = "responses"
 		t.Fatal(err)
 	}
 	client := New(Config{
-		GlobalArgs:    generationArgs(catalogPath, nil),
+		Command:       command,
+		GlobalArgs:    generationArgs(catalogPath, nil, false),
 		BaseEnv:       []string{"PATH=" + os.Getenv("PATH"), "MULTICODEX_SYNTHETIC_KEY=synthetic"},
 		CodexHome:     tempDir,
 		ClientName:    "multicodex-provider-test",
@@ -508,19 +606,33 @@ wire_api = "responses"
 	}
 }
 
-func assertCustomToolFreeWireRequest(t *testing.T, body map[string]any) {
+func assertCustomWireRequest(t *testing.T, body map[string]any, webSearch bool) {
 	t.Helper()
 	if body["instructions"] != "synthetic base instructions" {
 		t.Fatal("Codex did not send the exact base instructions")
 	}
 	tools, ok := body["tools"].([]any)
-	if !ok || len(tools) != 0 {
+	wantTools := 0
+	if webSearch {
+		wantTools = 1
+	}
+	if !ok || len(tools) != wantTools {
 		var kinds []string
 		for _, value := range tools {
 			tool, _ := value.(map[string]any)
 			kinds = append(kinds, fmt.Sprintf("%v:%v", tool["type"], tool["name"]))
 		}
 		t.Fatalf("Codex sent tools: count=%d kinds=%v", len(tools), kinds)
+	}
+	if webSearch {
+		tool, ok := tools[0].(map[string]any)
+		if !ok || tool["type"] != "web_search" || tool["external_web_access"] != true || len(tool) != 3 {
+			t.Fatalf("Codex sent a non-search tool: %#v", tools[0])
+		}
+		contentTypes, ok := tool["search_content_types"].([]any)
+		if !ok || len(contentTypes) != 2 || contentTypes[0] != "text" || contentTypes[1] != "image" {
+			t.Fatalf("Codex sent unexpected search content types: %#v", tool["search_content_types"])
+		}
 	}
 	input, ok := body["input"].([]any)
 	if !ok || len(input) != 2 {
@@ -645,6 +757,7 @@ func runAppServerHelper(mode string) {
 				"debug":              nil,
 				"notify":             []string{},
 				"mcp_servers":        map[string]any{},
+				"web_search":         generationArgValue("web_search"),
 			}
 			if mode == "unsafe-effective-config" {
 				config["chatgpt_base_url"] = "https://example.invalid/"
@@ -699,6 +812,11 @@ func runAppServerHelper(mode string) {
 			_ = encoder.Encode(map[string]any{"method": "turn/completed", "params": map[string]any{"turn": map[string]any{"status": "failed"}}})
 		default:
 			_ = encoder.Encode(map[string]any{"method": "item/started", "params": map[string]any{"item": map[string]any{"type": "reasoning"}}})
+			if mode == "search" || mode == "unexpected-search" {
+				_ = encoder.Encode(map[string]any{"method": "item/started", "params": map[string]any{"item": map[string]any{"type": "webSearch"}}})
+				_ = encoder.Encode(map[string]any{"method": "item/webSearch/progress", "params": map[string]any{}})
+				_ = encoder.Encode(map[string]any{"method": "item/completed", "params": map[string]any{"item": map[string]any{"type": "webSearch"}}})
+			}
 			_ = encoder.Encode(map[string]any{"method": "item/agentMessage/delta", "params": map[string]any{"delta": "safe output"}})
 			_ = encoder.Encode(map[string]any{"method": "item/completed", "params": map[string]any{"item": map[string]any{"type": "agentMessage"}}})
 			if mode == "custom-options" {

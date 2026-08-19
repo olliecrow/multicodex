@@ -83,7 +83,7 @@ _multicodex_complete() {
         COMPREPLY=( $(compgen -W "$(_multicodex_profiles)" -- "$cur") )
         return 0
       fi
-      COMPREPLY=( $(compgen -W "--account --model -m --effort --base-instructions-file --developer-instructions-file --output-schema --json" -- "$cur") )
+      COMPREPLY=( $(compgen -W "--search --account --model -m --effort --base-instructions-file --developer-instructions-file --output-schema --json" -- "$cur") )
       return 0
       ;;
     monitor)
@@ -196,7 +196,7 @@ _multicodex_complete() {
         compadd -- ${=($(_multicodex_profiles))}
         return
       fi
-      compadd -- --account --model -m --effort --base-instructions-file --developer-instructions-file --output-schema --json
+      compadd -- --search --account --model -m --effort --base-instructions-file --developer-instructions-file --output-schema --json
       return
       ;;
     monitor)
@@ -266,6 +266,7 @@ complete -c multicodex -f -n '__fish_use_subcommand' -a 'init add login login-al
 complete -c multicodex -f -n '__fish_seen_subcommand_from login' -a '(__multicodex_profiles)'
 complete -c multicodex -f -n '__fish_seen_subcommand_from cli' -l account -r -a '(__multicodex_profiles)'
 complete -c multicodex -f -n '__fish_seen_subcommand_from generate' -l account -r -a '(__multicodex_profiles)'
+complete -c multicodex -f -n '__fish_seen_subcommand_from generate' -l search
 complete -c multicodex -f -n '__fish_seen_subcommand_from generate' -l model -r
 complete -c multicodex -f -n '__fish_seen_subcommand_from generate' -s m -r
 complete -c multicodex -f -n '__fish_seen_subcommand_from generate' -l effort -r

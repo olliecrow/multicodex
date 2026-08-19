@@ -25,6 +25,7 @@ func TestParseGenerateArgs(t *testing.T) {
 	}{
 		{name: "argument", args: []string{"--account", "alpha", "-m", "gpt-test", "hello"}, want: generateCommandOptions{account: "alpha", accountSet: true, model: "gpt-test", prompt: "hello"}},
 		{name: "stdin", args: []string{"--model=gpt-test"}, stdin: "hello from stdin\n", want: generateCommandOptions{model: "gpt-test", prompt: "hello from stdin\n"}},
+		{name: "search", args: []string{"--search", "hello"}, want: generateCommandOptions{webSearch: true, prompt: "hello"}},
 		{name: "dash prompt", args: []string{"--", "-hello"}, want: generateCommandOptions{prompt: "-hello"}},
 		{name: "empty", stdin: " \n", wantCode: 2, wantError: "prompt is empty"},
 		{name: "empty account", args: []string{"--account", "", "hello"}, wantCode: 2, wantError: generateUsage},
@@ -82,6 +83,7 @@ func TestParseGenerateCustomFilesAndJSON(t *testing.T) {
 		"--base-instructions-file", basePath,
 		"--developer-instructions-file", developerPath,
 		"--output-schema", schemaPath,
+		"--search",
 		"--json",
 		"synthetic prompt",
 	}, strings.NewReader(""))
@@ -91,7 +93,7 @@ func TestParseGenerateCustomFilesAndJSON(t *testing.T) {
 	if options.effort != "high" || options.baseInstructions != "synthetic base instructions\n" ||
 		options.developerInstructions != "synthetic developer instructions\n" ||
 		options.outputSchema != `{"type":"object","properties":{"answer":{"type":"string"}}}` ||
-		!options.jsonOutput || options.prompt != "synthetic prompt" {
+		!options.jsonOutput || !options.webSearch || options.prompt != "synthetic prompt" {
 		t.Fatalf("unexpected options: %#v", options)
 	}
 }
@@ -216,7 +218,7 @@ func TestCmdGeneratePassesCustomOptions(t *testing.T) {
 	generateWithSubscription = func(_ context.Context, options codexappserver.GenerateOptions) error {
 		if options.ActiveProfile != "alpha" || options.Model != "gpt-test" || options.Effort != "high" ||
 			options.BaseInstructions != "base" || options.DeveloperInstructions != "developer" ||
-			string(options.OutputSchema) != `{"type":"object"}` || !options.JSONOutput || options.Prompt != "hello" {
+			string(options.OutputSchema) != `{"type":"object"}` || !options.JSONOutput || !options.WebSearch || options.Prompt != "hello" {
 			return fmt.Errorf("unexpected generation options")
 		}
 		return nil
@@ -226,7 +228,7 @@ func TestCmdGeneratePassesCustomOptions(t *testing.T) {
 	err := app.Run([]string{
 		"generate", "--account", "alpha", "--model", "gpt-test", "--effort", "high",
 		"--base-instructions-file", basePath, "--developer-instructions-file", developerPath,
-		"--output-schema", schemaPath, "--json", "hello",
+		"--output-schema", schemaPath, "--search", "--json", "hello",
 	})
 	if err != nil {
 		t.Fatal(err)
