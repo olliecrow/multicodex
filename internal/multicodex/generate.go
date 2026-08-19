@@ -17,7 +17,7 @@ import (
 
 const (
 	generateInputLimit = 4 * 1024 * 1024
-	generateUsage      = "usage: multicodex generate [--account <name>] [-m|--model <model>] [--effort <effort>] [--base-instructions-file <path>] [--developer-instructions-file <path>] [--output-schema <path>] [--json] [prompt]"
+	generateUsage      = "usage: multicodex generate [--search] [--account <name>] [-m|--model <model>] [--effort <effort>] [--base-instructions-file <path>] [--developer-instructions-file <path>] [--output-schema <path>] [--json] [prompt]"
 )
 
 var generateWithSubscription = codexappserver.Generate
@@ -31,6 +31,7 @@ type generateCommandOptions struct {
 	developerInstructions string
 	outputSchema          string
 	jsonOutput            bool
+	webSearch             bool
 	prompt                string
 }
 
@@ -66,6 +67,7 @@ func (a *App) cmdGenerate(args []string) error {
 		DeveloperInstructions: options.developerInstructions,
 		OutputSchema:          json.RawMessage(options.outputSchema),
 		JSONOutput:            options.jsonOutput,
+		WebSearch:             options.webSearch,
 		Prompt:                options.prompt,
 		Output:                os.Stdout,
 	})
@@ -132,6 +134,7 @@ func parseGenerateArgs(args []string, input io.Reader) (generateCommandOptions, 
 	flags.StringVar(&developerInstructionsPath, "developer-instructions-file", "", "developer instructions file")
 	flags.StringVar(&outputSchemaPath, "output-schema", "", "JSON output schema file")
 	flags.BoolVar(&options.jsonOutput, "json", false, "emit text and sanitized generation metrics as JSON")
+	flags.BoolVar(&options.webSearch, "search", false, "enable native live web search")
 	if err := flags.Parse(args); err != nil {
 		return generateCommandOptions{}, &ExitError{Code: 2, Message: generateUsage}
 	}

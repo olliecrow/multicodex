@@ -8,7 +8,7 @@
 - `multicodex login-all`
 - `multicodex cli [--account <name>] [--] [codex args...]`
 - `multicodex exec [--search] [codex exec args]`
-- `multicodex generate [--account <name>] [-m|--model <model>] [--effort <effort>] [--base-instructions-file <path>] [--developer-instructions-file <path>] [--output-schema <path>] [--json] [prompt]`
+- `multicodex generate [--search] [--account <name>] [-m|--model <model>] [--effort <effort>] [--base-instructions-file <path>] [--developer-instructions-file <path>] [--output-schema <path>] [--json] [prompt]`
 - `multicodex status`
 - `multicodex reconcile`
 - `multicodex heartbeat`
@@ -89,7 +89,7 @@ Multicodex intentionally has no command for changing the shared default Codex ac
 - Selected-profile metadata exposes the optional usage field `weekly_used_percent`; the older generic percent fields are not emitted.
 - Returns the child exit code.
 
-`multicodex generate [--account <name>] [-m|--model <model>] [--effort <effort>] [--base-instructions-file <path>] [--developer-instructions-file <path>] [--output-schema <path>] [--json] [prompt]`
+`multicodex generate [--search] [--account <name>] [-m|--model <model>] [--effort <effort>] [--base-instructions-file <path>] [--developer-instructions-file <path>] [--output-schema <path>] [--json] [prompt]`
 - Sends one text prompt through Codex App Server using ChatGPT subscription authentication and Codex's built-in OpenAI provider and endpoint.
 - Reads the prompt from standard input when no prompt argument is present and rejects input larger than 4 MiB.
 - Uses normal weekly-aware routing, including the protected default reserve, unless `--account <name>` selects one configured profile directly.
@@ -100,9 +100,10 @@ Multicodex intentionally has no command for changing the shared default Codex ac
 - Runs an ephemeral thread in a private empty temporary directory with read-only sandboxing and approval policy `never`.
 - Sends exact base or developer instruction file contents when selected and empty client instructions otherwise. The prompt and each optional input file have independent 4 MiB limits; file inputs must resolve to regular files.
 - Accepts `--output-schema` only when the file contains a JSON object and passes that object to App Server for structured-output enforcement.
-- Disables client context sources, tools, MCP servers, and notification hooks, ignores unrelated custom model providers, and uses a private `0600` one-model catalog with tool metadata removed.
-- Fails closed if Codex config replaces the built-in OpenAI provider, overrides its endpoint, or loads a configuration lockfile.
-- Rejects server requests, command, file, web, image, and unexpected item events.
+- Disables client context sources, coding tools, MCP servers, and notification hooks, ignores unrelated custom model providers, and uses a private `0600` one-model catalog with agent-tool metadata removed.
+- Exposes no tools by default. `--search` enables only the native live web-search tool; all other tools remain disabled.
+- Fails closed if Codex config replaces the built-in OpenAI provider, overrides its endpoint, changes the selected web-search mode, loads a configuration lockfile, or defines any non-null nested `tools.web_search` settings while `--search` is selected, such as domain, search-context, or approximate-location filters.
+- Rejects server requests, command, file, image, unexpected tool events, and web-search events unless `--search` was selected.
 - By default, streams only assistant text to standard output. Resource notices and safe errors use standard error. A failure can occur after partial text was written.
 - With `--json`, buffers up to 16 MiB of assistant text and writes one object only after success. The object contains response text, model, effective effort, elapsed milliseconds, and numeric token usage. Usage is `null` when App Server emits no usage event. It excludes account and profile identifiers, paths, reasoning text, and raw events. A generation failure or response-limit failure writes no JSON object.
 - Writes selected-profile metadata under `MULTICODEX_HOME/run` when `MULTICODEX_SELECTED_PROFILE_PATH` is set. The selection source is `explicit_account`, `usage_selector`, or `usage_selector_default_reserve`.

@@ -12,7 +12,7 @@ import (
 
 const maxCodexConfigBytes = 16 * 1024 * 1024
 
-func inspectGenerationConfig(codexHome string) ([]string, error) {
+func inspectGenerationConfig(codexHome string, webSearch bool) ([]string, error) {
 	file, err := os.Open(filepath.Join(codexHome, "config.toml"))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
@@ -39,6 +39,9 @@ func inspectGenerationConfig(codexHome string) ([]string, error) {
 				LoadPath *string `toml:"load_path"`
 			} `toml:"config_lockfile"`
 		} `toml:"debug"`
+		Tools struct {
+			WebSearch any `toml:"web_search"`
+		} `toml:"tools"`
 	}
 	if err := toml.Unmarshal(data, &config); err != nil {
 		return nil, errors.New("decode Codex configuration")
@@ -51,6 +54,11 @@ func inspectGenerationConfig(codexHome string) ([]string, error) {
 	}
 	if config.Debug.ConfigLockfile.LoadPath != nil {
 		return nil, errors.New("generate cannot use a Codex configuration lockfile")
+	}
+	if webSearch {
+		if settings, ok := config.Tools.WebSearch.(map[string]any); ok && len(settings) != 0 {
+			return nil, errors.New("generate --search cannot use inherited web-search settings")
+		}
 	}
 
 	names := make([]string, 0, len(config.MCPServers))
