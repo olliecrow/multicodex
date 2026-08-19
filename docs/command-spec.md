@@ -95,7 +95,7 @@ Multicodex intentionally has no command for changing the shared default Codex ac
 - Uses normal weekly-aware routing, including the protected default reserve, unless `--account <name>` selects one configured profile directly.
 - Passes an explicit model to the existing model-aware selector. Otherwise, uses the highest-priority visible model in the installed Codex bundled catalog.
 - Validates `--effort` against the selected model's bundled supported-effort metadata before generation. Without the flag, uses the selected model's bundled default effort.
-- Requires exactly `codex-cli 0.147.0` and fails before generation for any other version.
+- Supports exactly `codex-cli 0.147.0` and `0.148.0`, and fails before generation for any other version.
 - Requires App Server `account/read` to report managed ChatGPT authentication. It rejects API-key billing and does not start login or token-refresh flows.
 - Runs an ephemeral thread in a private empty temporary directory with read-only sandboxing and approval policy `never`.
 - Sends exact base or developer instruction file contents when selected and empty client instructions otherwise. The prompt and each optional input file have independent 4 MiB limits; file inputs must resolve to regular files.

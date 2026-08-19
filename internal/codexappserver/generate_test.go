@@ -575,6 +575,10 @@ func TestAppServerHelper(t *testing.T) {
 			fmt.Println("private-version-detail")
 			os.Exit(0)
 		}
+		if mode == "previous-version" {
+			fmt.Println(PreviousSupportedCodexVersion)
+			os.Exit(0)
+		}
 		fmt.Println(SupportedCodexVersion)
 		os.Exit(0)
 	case len(args) == 3 && args[0] == "debug" && args[1] == "models" && args[2] == "--bundled":

@@ -193,6 +193,36 @@ func TestPrepareToolFreeCatalogRejectsOtherCodexVersionSafely(t *testing.T) {
 	}
 }
 
+func TestSupportedCodexVersions(t *testing.T) {
+	want := []string{"codex-cli 0.147.0", "codex-cli 0.148.0"}
+	if PreviousSupportedCodexVersion != want[0] || SupportedCodexVersion != want[1] {
+		t.Fatalf("version constants = %q, %q; want %q, %q", PreviousSupportedCodexVersion, SupportedCodexVersion, want[0], want[1])
+	}
+	if len(supportedCodexVersions) != len(want) {
+		t.Fatalf("supported version count = %d; want %d", len(supportedCodexVersions), len(want))
+	}
+	for _, version := range want {
+		if _, ok := supportedCodexVersions[version]; !ok {
+			t.Fatalf("supported version %q is missing", version)
+		}
+	}
+	if _, ok := supportedCodexVersions["codex-cli 0.149.0"]; ok {
+		t.Fatal("untested Codex version was accepted")
+	}
+}
+
+func TestPrepareToolFreeCatalogSupportsPreviousCodexVersion(t *testing.T) {
+	t.Setenv(helperModeEnv, "previous-version")
+	_, err := PrepareToolFreeCatalog(t.Context(), CatalogOptions{
+		Command:    helperCommand(t),
+		BaseEnv:    []string{helperModeEnv + "=previous-version", "PATH=" + os.Getenv("PATH")},
+		OutputPath: filepath.Join(t.TempDir(), "catalog.json"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func compatibleTestModel(slug string, priority int) map[string]any {
 	return map[string]any{
 		"slug":                    slug,

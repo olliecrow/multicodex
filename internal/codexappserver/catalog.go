@@ -16,9 +16,15 @@ import (
 )
 
 const (
-	SupportedCodexVersion = "codex-cli 0.147.0"
-	maxCatalogBytes       = 16 * 1024 * 1024
+	SupportedCodexVersion         = "codex-cli 0.148.0"
+	PreviousSupportedCodexVersion = "codex-cli 0.147.0"
+	maxCatalogBytes               = 16 * 1024 * 1024
 )
+
+var supportedCodexVersions = map[string]struct{}{
+	PreviousSupportedCodexVersion: {},
+	SupportedCodexVersion:         {},
+}
 
 type CatalogOptions struct {
 	Command         []string
@@ -50,8 +56,12 @@ func PrepareToolFreeCatalog(ctx context.Context, options CatalogOptions) (Catalo
 		return CatalogSelection{}, fmt.Errorf("check Codex compatibility: %w", err)
 	}
 	version := strings.TrimSpace(string(versionOutput))
-	if version != SupportedCodexVersion {
-		return CatalogSelection{}, fmt.Errorf("unsupported Codex version; generate requires %s", SupportedCodexVersion)
+	if _, ok := supportedCodexVersions[version]; !ok {
+		return CatalogSelection{}, fmt.Errorf(
+			"unsupported Codex version; generate requires %s or %s",
+			PreviousSupportedCodexVersion,
+			SupportedCodexVersion,
+		)
 	}
 
 	catalogOutput, err := runBounded(ctx, command, []string{"debug", "models", "--bundled"}, env, maxCatalogBytes)
