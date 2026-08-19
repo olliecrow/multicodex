@@ -34,6 +34,7 @@ type GenerateOptions struct {
 	DeveloperInstructions string
 	OutputSchema          json.RawMessage
 	JSONOutput            bool
+	WebSearch             bool
 	Prompt                string
 	Output                io.Writer
 	TempRoot              string
@@ -134,7 +135,7 @@ func Generate(ctx context.Context, options GenerateOptions) error {
 	if strings.TrimSpace(options.CodexHome) == "" {
 		return errors.New("generation Codex home is not configured")
 	}
-	mcpServers, err := inspectGenerationConfig(options.CodexHome)
+	mcpServers, err := inspectGenerationConfig(options.CodexHome, options.WebSearch)
 	if err != nil {
 		return err
 	}
@@ -150,13 +151,14 @@ func Generate(ctx context.Context, options GenerateOptions) error {
 		return fmt.Errorf("create empty generation workspace: %w", err)
 	}
 	catalogPath := filepath.Join(tempDir, "model-catalog.json")
-	selection, err := PrepareToolFreeCatalog(ctx, CatalogOptions{
+	selection, err := PrepareGenerationCatalog(ctx, CatalogOptions{
 		Command:         options.Command,
 		BaseEnv:         options.BaseEnv,
 		CodexHome:       options.CodexHome,
 		ActiveProfile:   options.ActiveProfile,
 		RequestedModel:  options.Model,
 		RequestedEffort: options.Effort,
+		WebSearch:       options.WebSearch,
 		OutputPath:      catalogPath,
 	})
 	if err != nil {
@@ -165,7 +167,7 @@ func Generate(ctx context.Context, options GenerateOptions) error {
 
 	client := New(Config{
 		Command:        options.Command,
-		GlobalArgs:     generationArgs(catalogPath, mcpServers),
+		GlobalArgs:     generationArgs(catalogPath, mcpServers, options.WebSearch),
 		BaseEnv:        options.BaseEnv,
 		CodexHome:      options.CodexHome,
 		ActiveProfile:  options.ActiveProfile,
@@ -190,7 +192,7 @@ func Generate(ctx context.Context, options GenerateOptions) error {
 	}, &runtimeConfig); err != nil {
 		return fmt.Errorf("check generation configuration: %w", err)
 	}
-	if !generationConfigIsSafe(runtimeConfig.Config, catalogPath) {
+	if !generationConfigIsSafe(runtimeConfig.Config, catalogPath, options.WebSearch) {
 		return errors.New("Codex did not apply the required safe generation configuration")
 	}
 
@@ -235,7 +237,7 @@ func Generate(ctx context.Context, options GenerateOptions) error {
 	}
 	streamResult := make(chan generationStreamResult, 1)
 	go func() {
-		streamResult <- streamGeneration(streamCtx, client, streamOutput)
+		streamResult <- streamGeneration(streamCtx, client, streamOutput, options.WebSearch)
 	}()
 	turnResult := make(chan error, 1)
 	go func() {
@@ -293,7 +295,7 @@ func Generate(ctx context.Context, options GenerateOptions) error {
 	return nil
 }
 
-func streamGeneration(ctx context.Context, client *Client, output io.Writer) generationStreamResult {
+func streamGeneration(ctx context.Context, client *Client, output io.Writer, webSearch bool) generationStreamResult {
 	failure := errors.New("generation failed")
 	var usage *GenerationUsage
 	for {
@@ -312,7 +314,7 @@ func streamGeneration(ctx context.Context, client *Client, output io.Writer) gen
 			if event.ServerRequest {
 				return generationStreamResult{Err: errors.New("generation stopped because the runtime requested an unsupported action")}
 			}
-			if category := toolEventCategory(event); category != "" {
+			if category := toolEventCategory(event); category != "" && !(webSearch && category == "websearch") {
 				return generationStreamResult{Err: fmt.Errorf("generation stopped because the runtime exposed a %s action", category)}
 			}
 			switch event.Method {
@@ -329,7 +331,7 @@ func streamGeneration(ctx context.Context, client *Client, output io.Writer) gen
 				if err := json.Unmarshal(event.Params, &params); err != nil {
 					return generationStreamResult{Err: errors.New("decode generation item event")}
 				}
-				if !generationItemAllowed(params.Item.Type) {
+				if !generationItemAllowed(params.Item.Type, webSearch) {
 					return generationStreamResult{Err: errors.New("generation stopped because the runtime exposed an unexpected item")}
 				}
 			case "thread/tokenUsage/updated":
@@ -377,7 +379,11 @@ func parseGenerationUsage(raw json.RawMessage) (GenerationUsage, error) {
 	return usage, nil
 }
 
-func generationArgs(catalogPath string, mcpServers []string) []string {
+func generationArgs(catalogPath string, mcpServers []string, webSearch bool) []string {
+	webSearchMode := "disabled"
+	if webSearch {
+		webSearchMode = "live"
+	}
 	overrides := []string{
 		"model_catalog_json=" + strconv.Quote(catalogPath),
 		`model_provider="` + subscriptionProvider + `"`,
@@ -396,7 +402,7 @@ func generationArgs(catalogPath string, mcpServers []string) []string {
 		"agents.enabled=false",
 		"tools.update_plan.enabled=false",
 		"tools.experimental_request_user_input.enabled=false",
-		`web_search="disabled"`,
+		"web_search=" + strconv.Quote(webSearchMode),
 		"features.view_image=false",
 		"features.shell_tool=false",
 		"features.unified_exec=false",
@@ -422,11 +428,17 @@ func generationArgs(catalogPath string, mcpServers []string) []string {
 	return args
 }
 
-func generationConfigIsSafe(config map[string]json.RawMessage, catalogPath string) bool {
+func generationConfigIsSafe(config map[string]json.RawMessage, catalogPath string, webSearch bool) bool {
+	webSearchMode := "disabled"
+	if webSearch {
+		webSearchMode = "live"
+	}
 	if !configStringEquals(config, "model_provider", subscriptionProvider) ||
 		!configStringEquals(config, "model_catalog_json", catalogPath) ||
 		!configStringUnset(config, "openai_base_url") ||
 		!configStringEquals(config, "chatgpt_base_url", chatGPTBaseURL) ||
+		!configStringEquals(config, "web_search", webSearchMode) ||
+		(webSearch && !configWebSearchSettingsUnset(config)) ||
 		!configLockUnset(config) {
 		return false
 	}
@@ -448,6 +460,51 @@ func generationConfigIsSafe(config map[string]json.RawMessage, catalogPath strin
 		}
 	}
 	return true
+}
+
+func configWebSearchSettingsUnset(config map[string]json.RawMessage) bool {
+	raw, ok := config["tools"]
+	if !ok || string(raw) == "null" {
+		return true
+	}
+	var tools struct {
+		WebSearch json.RawMessage `json:"web_search"`
+	}
+	if json.Unmarshal(raw, &tools) != nil {
+		return false
+	}
+	value := bytes.TrimSpace(tools.WebSearch)
+	if len(value) == 0 || bytes.Equal(value, []byte("null")) || value[0] != '{' {
+		return true
+	}
+	var settings map[string]any
+	if json.Unmarshal(value, &settings) != nil {
+		return false
+	}
+	return !hasNonNullSetting(settings)
+}
+
+func hasNonNullSetting(value any) bool {
+	switch typed := value.(type) {
+	case nil:
+		return false
+	case map[string]any:
+		for _, item := range typed {
+			if hasNonNullSetting(item) {
+				return true
+			}
+		}
+		return false
+	case []any:
+		for _, item := range typed {
+			if hasNonNullSetting(item) {
+				return true
+			}
+		}
+		return false
+	default:
+		return true
+	}
 }
 
 func configStringEquals(config map[string]json.RawMessage, name, expected string) bool {
@@ -507,10 +564,12 @@ func toolEventCategory(event Event) string {
 	return ""
 }
 
-func generationItemAllowed(itemType string) bool {
+func generationItemAllowed(itemType string, webSearch bool) bool {
 	switch itemType {
 	case "agentMessage", "contextCompaction", "reasoning", "userMessage":
 		return true
+	case "webSearch":
+		return webSearch
 	default:
 		return false
 	}

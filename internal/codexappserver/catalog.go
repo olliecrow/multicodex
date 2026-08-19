@@ -33,6 +33,7 @@ type CatalogOptions struct {
 	ActiveProfile   string
 	RequestedModel  string
 	RequestedEffort string
+	WebSearch       bool
 	OutputPath      string
 }
 
@@ -45,7 +46,7 @@ type rawCatalog struct {
 	Models []map[string]any `json:"models"`
 }
 
-func PrepareToolFreeCatalog(ctx context.Context, options CatalogOptions) (CatalogSelection, error) {
+func PrepareGenerationCatalog(ctx context.Context, options CatalogOptions) (CatalogSelection, error) {
 	command := options.Command
 	if len(command) == 0 {
 		command = []string{defaultCommand}
@@ -81,12 +82,15 @@ func PrepareToolFreeCatalog(ctx context.Context, options CatalogOptions) (Catalo
 		return CatalogSelection{}, err
 	}
 	if err := removeAgentTools(model); err != nil {
-		return CatalogSelection{}, fmt.Errorf("selected model is not compatible with tool-free generation: %w", err)
+		return CatalogSelection{}, fmt.Errorf("selected model is not compatible with harness-free generation: %w", err)
+	}
+	if err := configureSearchMetadata(model, options.WebSearch); err != nil {
+		return CatalogSelection{}, fmt.Errorf("selected model is not compatible with requested search mode: %w", err)
 	}
 
 	encoded, err := json.Marshal(rawCatalog{Models: []map[string]any{model}})
 	if err != nil {
-		return CatalogSelection{}, fmt.Errorf("encode tool-free model catalog: %w", err)
+		return CatalogSelection{}, fmt.Errorf("encode generation model catalog: %w", err)
 	}
 	file, err := os.OpenFile(options.OutputPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
@@ -107,6 +111,23 @@ func PrepareToolFreeCatalog(ctx context.Context, options CatalogOptions) (Catalo
 	}
 	closed = true
 	return CatalogSelection{Model: name, Effort: effort}, nil
+}
+
+func configureSearchMetadata(model map[string]any, webSearch bool) error {
+	supported, present := model["supports_search_tool"]
+	if webSearch {
+		if !present || supported != true {
+			return errors.New("native web search is unavailable")
+		}
+		return nil
+	}
+	if present {
+		if _, ok := supported.(bool); !ok {
+			return errors.New("unexpected search metadata")
+		}
+		model["supports_search_tool"] = false
+	}
+	return nil
 }
 
 func selectReasoningEffort(model map[string]any, requested string) (string, error) {
