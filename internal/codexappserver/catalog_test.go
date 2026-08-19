@@ -127,11 +127,11 @@ func TestSelectReasoningEffort(t *testing.T) {
 	}
 }
 
-func TestPrepareToolFreeCatalog(t *testing.T) {
+func TestPrepareGenerationCatalog(t *testing.T) {
 	t.Setenv(helperModeEnv, "success")
 	dir := t.TempDir()
 	path := filepath.Join(dir, "catalog.json")
-	model, err := PrepareToolFreeCatalog(t.Context(), CatalogOptions{
+	model, err := PrepareGenerationCatalog(t.Context(), CatalogOptions{
 		Command:         helperCommand(t),
 		BaseEnv:         []string{helperModeEnv + "=success", "OPENAI_API_KEY=dummy", "PATH=" + os.Getenv("PATH")},
 		CodexHome:       filepath.Join(dir, "codex-home"),
@@ -165,11 +165,27 @@ func TestPrepareToolFreeCatalog(t *testing.T) {
 		t.Fatalf("model count = %d", len(catalog.Models))
 	}
 	selected := catalog.Models[0]
-	if selected["apply_patch_tool_type"] != nil || selected["tool_mode"] != nil || selected["use_responses_lite"] != false {
+	if selected["apply_patch_tool_type"] != nil || selected["tool_mode"] != nil || selected["use_responses_lite"] != false || selected["supports_search_tool"] != false {
 		t.Fatalf("unsafe catalog: %#v", selected)
 	}
 
-	if _, err := PrepareToolFreeCatalog(t.Context(), CatalogOptions{
+	searchPath := filepath.Join(dir, "search-catalog.json")
+	if _, err := PrepareGenerationCatalog(t.Context(), CatalogOptions{
+		Command: helperCommand(t), BaseEnv: []string{helperModeEnv + "=success", "PATH=" + os.Getenv("PATH")},
+		RequestedModel: "test-model", WebSearch: true, OutputPath: searchPath,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	searchData, err := os.ReadFile(searchPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var searchCatalog rawCatalog
+	if err := json.Unmarshal(searchData, &searchCatalog); err != nil || searchCatalog.Models[0]["supports_search_tool"] != true {
+		t.Fatalf("search catalog metadata is invalid: err=%v", err)
+	}
+
+	if _, err := PrepareGenerationCatalog(t.Context(), CatalogOptions{
 		Command:    helperCommand(t),
 		BaseEnv:    []string{helperModeEnv + "=success", "PATH=" + os.Getenv("PATH")},
 		OutputPath: path,
@@ -178,9 +194,44 @@ func TestPrepareToolFreeCatalog(t *testing.T) {
 	}
 }
 
-func TestPrepareToolFreeCatalogRejectsOtherCodexVersionSafely(t *testing.T) {
+func TestConfigureSearchMetadata(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		metadata  any
+		present   bool
+		webSearch bool
+		want      any
+		wantError bool
+	}{
+		{name: "search supported", metadata: true, present: true, webSearch: true, want: true},
+		{name: "search unsupported", metadata: false, present: true, webSearch: true, wantError: true},
+		{name: "search metadata missing", webSearch: true, wantError: true},
+		{name: "default disables support", metadata: true, present: true, want: false},
+		{name: "default permits missing metadata"},
+		{name: "default rejects malformed metadata", metadata: "private-value", present: true, wantError: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			model := map[string]any{}
+			if test.present {
+				model["supports_search_tool"] = test.metadata
+			}
+			err := configureSearchMetadata(model, test.webSearch)
+			if (err != nil) != test.wantError {
+				t.Fatalf("error = %v", err)
+			}
+			if err != nil && strings.Contains(err.Error(), "private-value") {
+				t.Fatalf("error exposed catalog data: %v", err)
+			}
+			if !test.wantError && test.present && model["supports_search_tool"] != test.want {
+				t.Fatalf("supports_search_tool = %#v, want %#v", model["supports_search_tool"], test.want)
+			}
+		})
+	}
+}
+
+func TestPrepareGenerationCatalogRejectsOtherCodexVersionSafely(t *testing.T) {
 	t.Setenv(helperModeEnv, "version-mismatch")
-	_, err := PrepareToolFreeCatalog(t.Context(), CatalogOptions{
+	_, err := PrepareGenerationCatalog(t.Context(), CatalogOptions{
 		Command:    helperCommand(t),
 		BaseEnv:    []string{helperModeEnv + "=version-mismatch", "PATH=" + os.Getenv("PATH")},
 		OutputPath: filepath.Join(t.TempDir(), "catalog.json"),
@@ -211,9 +262,9 @@ func TestSupportedCodexVersions(t *testing.T) {
 	}
 }
 
-func TestPrepareToolFreeCatalogSupportsPreviousCodexVersion(t *testing.T) {
+func TestPrepareGenerationCatalogSupportsPreviousCodexVersion(t *testing.T) {
 	t.Setenv(helperModeEnv, "previous-version")
-	_, err := PrepareToolFreeCatalog(t.Context(), CatalogOptions{
+	_, err := PrepareGenerationCatalog(t.Context(), CatalogOptions{
 		Command:    helperCommand(t),
 		BaseEnv:    []string{helperModeEnv + "=previous-version", "PATH=" + os.Getenv("PATH")},
 		OutputPath: filepath.Join(t.TempDir(), "catalog.json"),
@@ -231,6 +282,8 @@ func compatibleTestModel(slug string, priority int) map[string]any {
 		"apply_patch_tool_type":   "freeform",
 		"tool_mode":               "code_mode_only",
 		"use_responses_lite":      true,
+		"supports_search_tool":    true,
+		"web_search_tool_type":    "text_and_image",
 		"default_reasoning_level": "medium",
 		"supported_reasoning_levels": []any{
 			map[string]any{"effort": "low"},

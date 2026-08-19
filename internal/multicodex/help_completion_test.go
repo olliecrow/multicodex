@@ -89,7 +89,7 @@ func TestHelpGenerateDescribesCustomGenerationControls(t *testing.T) {
 	if err != nil {
 		t.Fatalf("help generate failed: %v", err)
 	}
-	for _, want := range []string{"--base-instructions-file", "--developer-instructions-file", "--effort", "--output-schema", "--json", "sanitized"} {
+	for _, want := range []string{"--search", "--base-instructions-file", "--developer-instructions-file", "--effort", "--output-schema", "--json", "sanitized"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("expected %q in generate help: %s", want, out)
 		}
@@ -187,7 +187,7 @@ func TestGenerateCompletionsIncludeCustomControls(t *testing.T) {
 		"zsh":  renderZshCompletion(),
 		"fish": renderFishCompletion(),
 	} {
-		for _, flag := range []string{"--effort", "--base-instructions-file", "--developer-instructions-file", "--output-schema", "--json"} {
+		for _, flag := range []string{"--search", "--effort", "--base-instructions-file", "--developer-instructions-file", "--output-schema", "--json"} {
 			if !strings.Contains(completion, flag) && !strings.Contains(completion, strings.TrimPrefix(flag, "--")) {
 				t.Errorf("%s completion omits %s", name, flag)
 			}
