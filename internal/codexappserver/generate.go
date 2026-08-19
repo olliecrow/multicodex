@@ -21,6 +21,8 @@ const (
 	chatGPTBaseURL             = "https://chatgpt.com/backend-api/"
 	generationHandshakeTimeout = 30 * time.Second
 	maxBufferedResponseBytes   = 16 * 1024 * 1024
+	maxGenerationSearchItems   = 1024
+	maxGenerationSearchIDBytes = 256
 )
 
 type GenerateOptions struct {
@@ -50,16 +52,18 @@ type GenerationUsage struct {
 }
 
 type generationJSONResult struct {
-	Text       string           `json:"text"`
-	Model      string           `json:"model"`
-	Effort     string           `json:"effort"`
-	DurationMS int64            `json:"duration_ms"`
-	Usage      *GenerationUsage `json:"usage"`
+	Text           string           `json:"text"`
+	Model          string           `json:"model"`
+	Effort         string           `json:"effort"`
+	DurationMS     int64            `json:"duration_ms"`
+	WebSearchCalls int64            `json:"web_search_calls"`
+	Usage          *GenerationUsage `json:"usage"`
 }
 
 type generationStreamResult struct {
-	Usage *GenerationUsage
-	Err   error
+	Usage          *GenerationUsage
+	WebSearchCalls int64
+	Err            error
 }
 
 type boundedGenerationBuffer struct {
@@ -103,6 +107,7 @@ type deltaParams struct {
 
 type itemParams struct {
 	Item struct {
+		ID   string `json:"id"`
 		Type string `json:"type"`
 	} `json:"item"`
 }
@@ -282,11 +287,12 @@ func Generate(ctx context.Context, options GenerateOptions) error {
 	}
 	if options.JSONOutput {
 		result := generationJSONResult{
-			Text:       bufferedOutput.String(),
-			Model:      selection.Model,
-			Effort:     selection.Effort,
-			DurationMS: time.Since(started).Milliseconds(),
-			Usage:      completed.Usage,
+			Text:           bufferedOutput.String(),
+			Model:          selection.Model,
+			Effort:         selection.Effort,
+			DurationMS:     time.Since(started).Milliseconds(),
+			WebSearchCalls: completed.WebSearchCalls,
+			Usage:          completed.Usage,
 		}
 		if err := json.NewEncoder(options.Output).Encode(result); err != nil {
 			return fmt.Errorf("write generation output: %w", err)
@@ -298,6 +304,8 @@ func Generate(ctx context.Context, options GenerateOptions) error {
 func streamGeneration(ctx context.Context, client *Client, output io.Writer, webSearch bool) generationStreamResult {
 	failure := errors.New("generation failed")
 	var usage *GenerationUsage
+	webSearchItems := map[string]struct{}{}
+	sawWebSearchActivity := false
 	for {
 		if err := ctx.Err(); err != nil {
 			return generationStreamResult{Err: fmt.Errorf("generation canceled: %w", err)}
@@ -314,8 +322,12 @@ func streamGeneration(ctx context.Context, client *Client, output io.Writer, web
 			if event.ServerRequest {
 				return generationStreamResult{Err: errors.New("generation stopped because the runtime requested an unsupported action")}
 			}
-			if category := toolEventCategory(event); category != "" && !(webSearch && category == "websearch") {
+			category := toolEventCategory(event)
+			if category != "" && !(webSearch && category == "websearch") {
 				return generationStreamResult{Err: fmt.Errorf("generation stopped because the runtime exposed a %s action", category)}
+			}
+			if category == "websearch" {
+				sawWebSearchActivity = true
 			}
 			switch event.Method {
 			case "item/agentMessage/delta":
@@ -334,6 +346,17 @@ func streamGeneration(ctx context.Context, client *Client, output io.Writer, web
 				if !generationItemAllowed(params.Item.Type, webSearch) {
 					return generationStreamResult{Err: errors.New("generation stopped because the runtime exposed an unexpected item")}
 				}
+				if params.Item.Type == "webSearch" {
+					sawWebSearchActivity = true
+					itemID := strings.TrimSpace(params.Item.ID)
+					if itemID == "" || len(itemID) > maxGenerationSearchIDBytes {
+						return generationStreamResult{Err: errors.New("generation stopped because a web-search item had an invalid identifier")}
+					}
+					webSearchItems[itemID] = struct{}{}
+					if len(webSearchItems) > maxGenerationSearchItems {
+						return generationStreamResult{Err: errors.New("generation stopped because it exceeded the web-search item limit")}
+					}
+				}
 			case "thread/tokenUsage/updated":
 				parsed, err := parseGenerationUsage(event.Params)
 				if err == nil {
@@ -349,7 +372,12 @@ func streamGeneration(ctx context.Context, client *Client, output io.Writer, web
 				if params.Turn.Status != "completed" {
 					return generationStreamResult{Err: failure}
 				}
-				return generationStreamResult{Usage: usage}
+				if sawWebSearchActivity && len(webSearchItems) == 0 {
+					return generationStreamResult{Err: errors.New("generation stopped because web-search activity had no item lifecycle")}
+				}
+				return generationStreamResult{
+					Usage: usage, WebSearchCalls: int64(len(webSearchItems)),
+				}
 			}
 		}
 	}

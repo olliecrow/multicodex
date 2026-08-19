@@ -89,7 +89,7 @@ var commandHelpByName = map[string]commandHelp{
 	},
 	"generate": {
 		Usage:       strings.TrimPrefix(generateUsage, "usage: "),
-		Description: "Generate one response through Codex App Server and a routed ChatGPT subscription account. Base and developer instruction files, model reasoning effort, and a JSON output schema are optional. Use `--search` to expose only native live web search; coding tools remain disabled. `--json` returns the response text with sanitized model, effective effort, duration, and token usage. The request has no project context or persistent thread. If prompt is omitted, read it from standard input. API-key billing is rejected.",
+		Description: "Generate one response through Codex App Server and a routed ChatGPT subscription account. Base and developer instruction files, model reasoning effort, and a JSON output schema are optional. Use `--search` to expose only native live web search; coding tools remain disabled. `--json` returns the response text with sanitized model, effective effort, duration, native web-search call count, and token usage. The request has no project context or persistent thread. If prompt is omitted, read it from standard input. API-key billing is rejected.",
 		Examples: []string{
 			`multicodex generate "Write a short product description."`,
 			`printf '%s' "Summarize this text." | multicodex generate`,

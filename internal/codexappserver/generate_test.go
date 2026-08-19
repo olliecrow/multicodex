@@ -108,6 +108,22 @@ func TestGenerateCustomInstructionsSchemaEffortAndJSON(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
 		t.Fatalf("decode JSON output: %v; output=%q", err, output.String())
 	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(output.Bytes(), &fields); err != nil {
+		t.Fatal(err)
+	}
+	wantFields := map[string]bool{
+		"text": true, "model": true, "effort": true, "duration_ms": true,
+		"web_search_calls": true, "usage": true,
+	}
+	if len(fields) != len(wantFields) {
+		t.Fatalf("JSON fields = %v", fields)
+	}
+	for field := range fields {
+		if !wantFields[field] {
+			t.Fatalf("unexpected JSON field %q", field)
+		}
+	}
 	if result.Text != "safe output" || result.Model != "test-model" || result.Effort != "high" || result.DurationMS < 0 {
 		t.Fatalf("unexpected result: %#v", result)
 	}
@@ -120,6 +136,75 @@ func TestGenerateCustomInstructionsSchemaEffortAndJSON(t *testing.T) {
 		if strings.Contains(output.String(), forbidden) {
 			t.Fatalf("JSON output exposed %q: %s", forbidden, output.String())
 		}
+	}
+}
+
+func TestGenerateJSONReportsWebSearchCalls(t *testing.T) {
+	for _, test := range []struct {
+		mode      string
+		webSearch bool
+		want      int64
+	}{
+		{mode: "success", want: 0},
+		{mode: "search", webSearch: true, want: 1},
+		{mode: "search-twice", webSearch: true, want: 2},
+		{mode: "search-completed-only", webSearch: true, want: 1},
+		{mode: "search-duplicate-start", webSearch: true, want: 1},
+	} {
+		t.Run(test.mode, func(t *testing.T) {
+			t.Setenv(helperModeEnv, test.mode)
+			var output bytes.Buffer
+			err := Generate(t.Context(), GenerateOptions{
+				Command:    helperCommand(t),
+				BaseEnv:    []string{helperModeEnv + "=" + test.mode, "PATH=" + os.Getenv("PATH")},
+				CodexHome:  t.TempDir(),
+				Model:      "test-model",
+				WebSearch:  test.webSearch,
+				JSONOutput: true,
+				Prompt:     "synthetic prompt",
+				Output:     &output,
+				TempRoot:   t.TempDir(),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var result generationJSONResult
+			if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			if result.WebSearchCalls != test.want {
+				t.Fatalf("web search calls = %d, want %d", result.WebSearchCalls, test.want)
+			}
+		})
+	}
+}
+
+func TestGenerateRejectsInvalidOrUnboundedWebSearchLifecycle(t *testing.T) {
+	for _, mode := range []string{
+		"search-without-id", "search-blank-id", "search-long-id",
+		"search-too-many", "search-progress-only",
+	} {
+		t.Run(mode, func(t *testing.T) {
+			t.Setenv(helperModeEnv, mode)
+			var output bytes.Buffer
+			err := Generate(t.Context(), GenerateOptions{
+				Command:    helperCommand(t),
+				BaseEnv:    []string{helperModeEnv + "=" + mode, "PATH=" + os.Getenv("PATH")},
+				CodexHome:  t.TempDir(),
+				Model:      "test-model",
+				WebSearch:  true,
+				JSONOutput: true,
+				Prompt:     "synthetic prompt",
+				Output:     &output,
+				TempRoot:   t.TempDir(),
+			})
+			if err == nil || output.Len() != 0 {
+				t.Fatalf("Generate() error = %v, output = %q", err, output.String())
+			}
+			if strings.Contains(err.Error(), strings.Repeat("x", maxGenerationSearchIDBytes+1)) {
+				t.Fatal("generation error exposed a rejected web-search identifier")
+			}
+		})
 	}
 }
 
@@ -443,15 +528,29 @@ func testCodexWireGeneration(t *testing.T, webSearch bool) {
 		}
 		requestBody <- body
 		writer.Header().Set("Content-Type", "text/event-stream")
-		for _, event := range []map[string]any{
+		events := []map[string]any{
 			{"type": "response.created", "response": map[string]any{"id": "resp_test"}},
-			{"type": "response.output_item.added", "output_index": 0, "item": map[string]any{"type": "message", "role": "assistant", "id": "msg_test", "status": "in_progress", "content": []any{}}},
-			{"type": "response.content_part.added", "item_id": "msg_test", "output_index": 0, "content_index": 0, "part": map[string]any{"type": "output_text", "text": "", "annotations": []any{}}},
-			{"type": "response.output_text.delta", "item_id": "msg_test", "output_index": 0, "content_index": 0, "delta": "wire output"},
-			{"type": "response.output_text.done", "item_id": "msg_test", "output_index": 0, "content_index": 0, "text": "wire output"},
-			{"type": "response.output_item.done", "output_index": 0, "item": map[string]any{"type": "message", "role": "assistant", "id": "msg_test", "status": "completed", "content": []map[string]any{{"type": "output_text", "text": "wire output", "annotations": []any{}}}}},
-			{"type": "response.completed", "response": map[string]any{"id": "resp_test"}},
-		} {
+		}
+		messageIndex := 0
+		if webSearch {
+			events = append(events,
+				map[string]any{"type": "response.output_item.added", "output_index": 0, "item": map[string]any{"type": "web_search_call", "id": "search_test", "status": "in_progress"}},
+				map[string]any{"type": "response.web_search_call.in_progress", "output_index": 0, "item_id": "search_test"},
+				map[string]any{"type": "response.web_search_call.searching", "output_index": 0, "item_id": "search_test"},
+				map[string]any{"type": "response.web_search_call.completed", "output_index": 0, "item_id": "search_test"},
+				map[string]any{"type": "response.output_item.done", "output_index": 0, "item": map[string]any{"type": "web_search_call", "id": "search_test", "status": "completed", "action": map[string]any{"type": "search", "query": "synthetic-private-query", "sources": []map[string]any{{"type": "url", "url": "https://synthetic.invalid/private"}}}}},
+			)
+			messageIndex = 1
+		}
+		events = append(events,
+			map[string]any{"type": "response.output_item.added", "output_index": messageIndex, "item": map[string]any{"type": "message", "role": "assistant", "id": "msg_test", "status": "in_progress", "content": []any{}}},
+			map[string]any{"type": "response.content_part.added", "item_id": "msg_test", "output_index": messageIndex, "content_index": 0, "part": map[string]any{"type": "output_text", "text": "", "annotations": []any{}}},
+			map[string]any{"type": "response.output_text.delta", "item_id": "msg_test", "output_index": messageIndex, "content_index": 0, "delta": "wire output"},
+			map[string]any{"type": "response.output_text.done", "item_id": "msg_test", "output_index": messageIndex, "content_index": 0, "text": "wire output"},
+			map[string]any{"type": "response.output_item.done", "output_index": messageIndex, "item": map[string]any{"type": "message", "role": "assistant", "id": "msg_test", "status": "completed", "content": []map[string]any{{"type": "output_text", "text": "wire output", "annotations": []any{}}}}},
+			map[string]any{"type": "response.completed", "response": map[string]any{"id": "resp_test"}},
+		)
+		for _, event := range events {
 			data, _ := json.Marshal(event)
 			fmt.Fprintf(writer, "data: %s\n\n", data)
 		}
@@ -529,11 +628,24 @@ func testCodexWireGeneration(t *testing.T, webSearch bool) {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	if result := streamGeneration(ctx, client, &output, webSearch); result.Err != nil {
+	result := streamGeneration(ctx, client, &output, webSearch)
+	if result.Err != nil {
 		t.Fatal(result.Err)
 	}
 	if output.String() != "wire output" {
 		t.Fatalf("output = %q", output.String())
+	}
+	wantSearchCalls := int64(0)
+	if webSearch {
+		wantSearchCalls = 1
+	}
+	if result.WebSearchCalls != wantSearchCalls {
+		t.Fatalf("web search calls = %d, want %d", result.WebSearchCalls, wantSearchCalls)
+	}
+	for _, forbidden := range []string{"synthetic-private-query", "synthetic.invalid"} {
+		if strings.Contains(output.String(), forbidden) {
+			t.Fatalf("wire output exposed %q", forbidden)
+		}
 	}
 
 	var body map[string]any
@@ -812,10 +924,34 @@ func runAppServerHelper(mode string) {
 			_ = encoder.Encode(map[string]any{"method": "turn/completed", "params": map[string]any{"turn": map[string]any{"status": "failed"}}})
 		default:
 			_ = encoder.Encode(map[string]any{"method": "item/started", "params": map[string]any{"item": map[string]any{"type": "reasoning"}}})
-			if mode == "search" || mode == "unexpected-search" {
+			if mode == "search-without-id" {
 				_ = encoder.Encode(map[string]any{"method": "item/started", "params": map[string]any{"item": map[string]any{"type": "webSearch"}}})
+			} else if mode == "search-blank-id" {
+				_ = encoder.Encode(map[string]any{"method": "item/started", "params": map[string]any{"item": map[string]any{"id": "   ", "type": "webSearch"}}})
+			} else if mode == "search-long-id" {
+				_ = encoder.Encode(map[string]any{"method": "item/started", "params": map[string]any{"item": map[string]any{"id": strings.Repeat("x", maxGenerationSearchIDBytes+1), "type": "webSearch"}}})
+			} else if mode == "search-too-many" {
+				for index := range maxGenerationSearchItems + 1 {
+					_ = encoder.Encode(map[string]any{"method": "item/started", "params": map[string]any{"item": map[string]any{"id": fmt.Sprintf("search-%d", index), "type": "webSearch"}}})
+				}
+			} else if mode == "search-progress-only" {
 				_ = encoder.Encode(map[string]any{"method": "item/webSearch/progress", "params": map[string]any{}})
-				_ = encoder.Encode(map[string]any{"method": "item/completed", "params": map[string]any{"item": map[string]any{"type": "webSearch"}}})
+			} else if mode == "search" || mode == "search-twice" || mode == "search-duplicate-start" || mode == "unexpected-search" {
+				count := 1
+				if mode == "search-twice" || mode == "search-duplicate-start" {
+					count = 2
+				}
+				for index := range count {
+					itemID := fmt.Sprintf("search-%d", index)
+					if mode == "search-duplicate-start" {
+						itemID = "search-0"
+					}
+					_ = encoder.Encode(map[string]any{"method": "item/started", "params": map[string]any{"item": map[string]any{"id": itemID, "type": "webSearch"}}})
+				}
+				_ = encoder.Encode(map[string]any{"method": "item/webSearch/progress", "params": map[string]any{}})
+				_ = encoder.Encode(map[string]any{"method": "item/completed", "params": map[string]any{"item": map[string]any{"id": "search-0", "type": "webSearch"}}})
+			} else if mode == "search-completed-only" {
+				_ = encoder.Encode(map[string]any{"method": "item/completed", "params": map[string]any{"item": map[string]any{"id": "search-0", "type": "webSearch"}}})
 			}
 			_ = encoder.Encode(map[string]any{"method": "item/agentMessage/delta", "params": map[string]any{"delta": "safe output"}})
 			_ = encoder.Encode(map[string]any{"method": "item/completed", "params": map[string]any{"item": map[string]any{"type": "agentMessage"}}})
