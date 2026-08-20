@@ -64,6 +64,9 @@ func TestHostServiceGitWindowReconnectAndSafeDeletion(t *testing.T) {
 	if got := commandOutput(t, "tmux", "-L", service.socketName(), "show-options", "-g", "-v", "set-clipboard"); got != "off" {
 		t.Fatalf("set-clipboard = %q", got)
 	}
+	if got := commandOutput(t, "tmux", "-L", service.socketName(), "show-options", "-g", "-v", "mouse"); got != "on" {
+		t.Fatalf("mouse = %q, want on", got)
+	}
 	for _, option := range []string{"prefix", "prefix2"} {
 		if got := commandOutput(t, "tmux", "-L", service.socketName(), "show-options", "-g", "-v", option); got != "None" {
 			t.Fatalf("%s = %q, want None", option, got)
@@ -119,11 +122,27 @@ func TestHostServiceGitWindowReconnectAndSafeDeletion(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitForRender(t, reconnected, "EDITOR_READY", 3*time.Second)
+	if err := reconnected.SendMouse(tea.MouseWheelMsg{X: 10, Y: 10, Button: tea.MouseWheelUp}, 10, 10); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if got := commandOutput(t, "tmux", "-L", service.socketName(), "display-message", "-p", "-t", window.Session, "#{pane_in_mode}"); got == "1" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("mouse wheel did not open tmux copy mode")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err := reconnected.SendKey(tea.KeyPressMsg{Code: 'q', Text: "q"}); err != nil {
+		t.Fatal(err)
+	}
 	if err := service.CopyMode(ctx, window.ID); err != nil {
 		t.Fatal(err)
 	}
 	if got := commandOutput(t, "tmux", "-L", service.socketName(), "display-message", "-p", "-t", window.Session, "#{pane_in_mode}"); got != "1" {
-		t.Fatalf("copy mode state = %q, want 1", got)
+		t.Fatalf("copy mode action state = %q, want 1", got)
 	}
 	if err := reconnected.SendKey(tea.KeyPressMsg{Code: 'q', Text: "q"}); err != nil {
 		t.Fatal(err)

@@ -83,7 +83,7 @@ References: `internal/codexappserver/`, `internal/multicodex/generate.go`, `docs
 Decision: Build the editor as a local TUI over dedicated host-local tmux servers.
 Context: One client must reconnect quickly to many local and SSH project terminals without a daemon, terminal transcript database, or cross-host coordination.
 Rationale: A small Go TUI keeps one warm protocol connection per host, renders only the selected PTY, and polls bounded tmux captures for activity. Deterministic session names and exact environment ownership markers make reconnection and cleanup simple. The outer editor stays outside tmux, and managed servers disable prefix keys and bindings, which removes nested-session ambiguity.
-Trade-offs: Only one terminal is visible at a time. Command-key shortcuts depend on the terminal emulator, mouse scroll is not forwarded, and every remote host needs the same release or clean source revision. Modified development builds cannot connect remotely.
+Trade-offs: Only one terminal is visible at a time. Command-key shortcuts and the modifier for overriding mouse reporting depend on the terminal emulator. Cell mouse mode supports clicks and wheels, not pointer hover or drag gestures. Every remote host needs the same release or clean source revision, and modified development builds cannot connect remotely.
 References: `internal/editor/`, `docs/command-spec.md`, `docs/security-and-privacy.md`
 
 Decision: Give each editor instance a private host registry and two-phase resource lifecycle.

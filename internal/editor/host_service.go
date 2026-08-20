@@ -1217,7 +1217,7 @@ func tmuxGlobalSettings() [][2]string {
 		{"status", "off"},
 		{"history-limit", strconv.Itoa(historyLimit)},
 		{"remain-on-exit", "on"},
-		{"mouse", "off"},
+		{"mouse", "on"},
 		{"focus-events", "on"},
 		{"escape-time", "10"},
 		{"set-clipboard", "off"},

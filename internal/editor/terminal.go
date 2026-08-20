@@ -236,6 +236,72 @@ func (a *Attachment) SendFocus(focused bool) error {
 	return a.enqueueInput(terminalInput{kind: "raw", text: sequence})
 }
 
+func (a *Attachment) SendMouse(event tea.MouseMsg, x, y int) error {
+	sequence, ok := terminalMouseSequence(event, x, y)
+	if !ok {
+		return nil
+	}
+	return a.enqueueInput(terminalInput{kind: "raw", text: sequence})
+}
+
+func terminalMouseSequence(event tea.MouseMsg, x, y int) (string, bool) {
+	if x < 0 || y < 0 {
+		return "", false
+	}
+	mouse := event.Mouse()
+	code, final := 0, 'M'
+	switch event.(type) {
+	case tea.MouseClickMsg:
+		switch mouse.Button {
+		case tea.MouseLeft:
+			code = 0
+		case tea.MouseMiddle:
+			code = 1
+		case tea.MouseRight:
+			code = 2
+		default:
+			return "", false
+		}
+	case tea.MouseReleaseMsg:
+		final = 'm'
+		switch mouse.Button {
+		case tea.MouseLeft:
+			code = 0
+		case tea.MouseMiddle:
+			code = 1
+		case tea.MouseRight:
+			code = 2
+		default:
+			return "", false
+		}
+	case tea.MouseWheelMsg:
+		switch mouse.Button {
+		case tea.MouseWheelUp:
+			code = 64
+		case tea.MouseWheelDown:
+			code = 65
+		case tea.MouseWheelLeft:
+			code = 66
+		case tea.MouseWheelRight:
+			code = 67
+		default:
+			return "", false
+		}
+	default:
+		return "", false
+	}
+	if mouse.Mod&tea.ModShift != 0 {
+		code += 4
+	}
+	if mouse.Mod&(tea.ModAlt|tea.ModMeta) != 0 {
+		code += 8
+	}
+	if mouse.Mod&tea.ModCtrl != 0 {
+		code += 16
+	}
+	return fmt.Sprintf("\x1b[<%d;%d;%d%c", code, x+1, y+1, final), true
+}
+
 func (a *Attachment) enqueueInput(input terminalInput) error {
 	a.inputMu.Lock()
 	defer a.inputMu.Unlock()

@@ -35,6 +35,20 @@ type refreshTickMsg time.Time
 type cleanupTickMsg time.Time
 type usageTickMsg time.Time
 
+type editorMouseMsg struct {
+	event tea.MouseMsg
+}
+
+const (
+	headerTitleText    = " multicodex editor "
+	actionsButtonLabel = "[ Actions ]"
+	helpButtonLabel    = "[ Help ]"
+	cancelButtonLabel  = "[ Cancel ]"
+	saveButtonLabel    = "[ Save ]"
+	deleteButtonLabel  = "[ Delete ]"
+	closeButtonLabel   = "[ Close ]"
+)
+
 type attachResultMsg struct {
 	host       Host
 	window     Window
@@ -339,6 +353,8 @@ func (m tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
+	case editorMouseMsg:
+		return m.handleMouse(msg.event)
 	}
 	return m, nil
 }
@@ -390,7 +406,7 @@ func (m tuiModel) handleKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "tab", "shift+tab", "right":
 		m.openActionMenu()
 	case "f1":
-		m.modal = &modal{kind: "help", title: "Keyboard shortcuts"}
+		m.modal = &modal{kind: "help", title: "Controls"}
 	}
 	return m, nil
 }
@@ -424,10 +440,7 @@ func (m tuiModel) handleModalKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case "end":
 			m.modal.choice = max(0, len(m.modal.choices)-1)
 		case "enter":
-			if m.modal.kind == "actions" {
-				return m.activateEditorAction()
-			}
-			m.acceptChoice()
+			return m.activateModalChoice()
 		}
 	case "confirm":
 		switch key.Keystroke() {
@@ -438,16 +451,7 @@ func (m tuiModel) handleModalKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case "tab":
 			m.modal.choice = 1 - m.modal.choice
 		case "enter":
-			if m.modal.choice == 0 {
-				m.modal = nil
-				return m, nil
-			}
-			if !m.beginAction("deleting owned resources…") {
-				return m, nil
-			}
-			current := *m.modal
-			m.modal = nil
-			return m, m.track(deleteCmd(m.manager, current))
+			return m.activateConfirmation()
 		}
 	case "form":
 		switch key.Keystroke() {
@@ -456,12 +460,7 @@ func (m tuiModel) handleModalKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.modal.field++
 				return m, nil
 			}
-			if !m.beginAction("working…") {
-				return m, nil
-			}
-			current := *m.modal
-			m.modal = nil
-			return m, m.track(submitFormCmd(m.manager, current))
+			return m.submitModalForm()
 		case "tab", "down":
 			m.modal.field = (m.modal.field + 1) % len(m.modal.fields)
 		case "shift+tab", "up":
@@ -484,18 +483,239 @@ func (m tuiModel) handleModalKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m tuiModel) handleMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
+	mouse := event.Mouse()
+	if !m.hasUsableSize() || mouse.X < 0 || mouse.X >= m.width || mouse.Y < 0 || mouse.Y >= m.height {
+		return m, nil
+	}
+	if m.modal != nil {
+		return m.handleModalMouse(event)
+	}
+	if _, ok := event.(tea.MouseWheelMsg); ok {
+		if mouse.Y >= 1 && mouse.Y <= m.bodyHeight() {
+			if mouse.X < m.sidebarWidth() {
+				delta, vertical := verticalWheelDelta(mouse.Button, 3)
+				if !vertical {
+					return m, nil
+				}
+				m.moveSelectionClamped(delta)
+				m.controlMode = true
+				return m, nil
+			}
+			if mouse.X > m.sidebarWidth() {
+				return m.forwardTerminalMouse(event)
+			}
+		}
+		return m, nil
+	}
+	if click, ok := event.(tea.MouseClickMsg); ok {
+		if click.Button != tea.MouseLeft {
+			if m.isTerminalMousePosition(click.X, click.Y) {
+				return m.forwardTerminalMouse(event)
+			}
+			return m, nil
+		}
+		if click.Y == 0 {
+			switch headerButtonAt(click.X) {
+			case "actions":
+				m.openActionMenu()
+			case "help":
+				m.modal = &modal{kind: "help", title: "Controls"}
+			}
+			return m, nil
+		}
+		if click.Y >= 1 && click.Y <= m.bodyHeight() && click.X < m.sidebarWidth() {
+			index := m.sidebarOffset + click.Y - 1
+			if index < 0 || index >= len(m.rows) {
+				return m, nil
+			}
+			m.selectedRow = index
+			m.controlMode = true
+			if m.rows[index].kind == "window" {
+				return m.selectCurrentRow()
+			}
+			return m, nil
+		}
+		if m.isTerminalMousePosition(click.X, click.Y) {
+			return m.forwardTerminalMouse(event)
+		}
+		return m, nil
+	}
+	if release, ok := event.(tea.MouseReleaseMsg); ok && m.isTerminalMousePosition(release.X, release.Y) {
+		return m.forwardTerminalMouse(event)
+	}
+	return m, nil
+}
+
+func (m tuiModel) handleModalMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
+	mouse := event.Mouse()
+	if mouse.X <= m.sidebarWidth() || mouse.X >= m.width || mouse.Y < 1 || mouse.Y > m.bodyHeight() {
+		return m, nil
+	}
+	if _, ok := event.(tea.MouseWheelMsg); ok {
+		delta, vertical := verticalWheelDelta(mouse.Button, 3)
+		if !vertical {
+			return m, nil
+		}
+		switch m.modal.kind {
+		case "choice", "actions":
+			m.modal.choice = max(0, min(len(m.modal.choices)-1, m.modal.choice+delta))
+		case "form":
+			if len(m.modal.fields) > 0 {
+				m.modal.field = max(0, min(len(m.modal.fields)-1, m.modal.field+delta))
+			}
+		}
+		return m, nil
+	}
+	click, ok := event.(tea.MouseClickMsg)
+	if !ok || click.Button != tea.MouseLeft {
+		return m, nil
+	}
+	x, y := click.X-m.sidebarWidth()-1, click.Y-1
+	switch m.modal.kind {
+	case "help":
+		content := helpModalContent()
+		if y == 2+len(content)-1 && hitLabel(content[len(content)-1], closeButtonLabel, x) {
+			m.modal = nil
+		}
+	case "choice", "actions":
+		start, end := modalChoiceWindow(*m.modal, m.bodyHeight())
+		if y >= 2 && y < 2+end-start {
+			m.modal.choice = start + y - 2
+			return m.activateModalChoice()
+		}
+		verb := "continue"
+		if m.modal.kind == "actions" {
+			verb = "run"
+		}
+		if y == 3+end-start && hitLabel(modalChoiceButtonLine(verb), cancelButtonLabel, x) {
+			m.modal = nil
+		}
+	case "form":
+		if y >= 2 && y < 2+len(m.modal.fields) {
+			m.modal.field = y - 2
+			return m, nil
+		}
+		buttons := saveButtonLabel + "   " + cancelButtonLabel
+		if y == 3+len(m.modal.fields) {
+			switch {
+			case hitLabel(buttons, saveButtonLabel, x):
+				return m.submitModalForm()
+			case hitLabel(buttons, cancelButtonLabel, x):
+				m.modal = nil
+			}
+		}
+	case "confirm":
+		buttons := cancelButtonLabel + "   " + deleteButtonLabel
+		if y == 6 {
+			switch {
+			case hitLabel(buttons, cancelButtonLabel, x):
+				m.modal.choice = 0
+				return m.activateConfirmation()
+			case hitLabel(buttons, deleteButtonLabel, x):
+				m.modal.choice = 1
+				return m.activateConfirmation()
+			}
+		}
+	}
+	return m, nil
+}
+
+func (m tuiModel) activateModalChoice() (tea.Model, tea.Cmd) {
+	if m.modal == nil {
+		return m, nil
+	}
+	if m.modal.kind == "actions" {
+		return m.activateEditorAction()
+	}
+	m.acceptChoice()
+	return m, nil
+}
+
+func (m tuiModel) activateConfirmation() (tea.Model, tea.Cmd) {
+	if m.modal == nil || m.modal.kind != "confirm" || m.modal.choice == 0 {
+		m.modal = nil
+		return m, nil
+	}
+	if !m.beginAction("deleting owned resources…") {
+		return m, nil
+	}
+	current := *m.modal
+	m.modal = nil
+	return m, m.track(deleteCmd(m.manager, current))
+}
+
+func (m tuiModel) submitModalForm() (tea.Model, tea.Cmd) {
+	if m.modal == nil || m.modal.kind != "form" || !m.beginAction("working…") {
+		return m, nil
+	}
+	current := *m.modal
+	m.modal = nil
+	return m, m.track(submitFormCmd(m.manager, current))
+}
+
+func (m tuiModel) isTerminalMousePosition(x, y int) bool {
+	return m.attachment != nil && x > m.sidebarWidth() && x < m.width && y >= 1 && y <= m.bodyHeight()
+}
+
+func (m tuiModel) forwardTerminalMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
+	mouse := event.Mouse()
+	x, y := mouse.X-m.sidebarWidth()-1, mouse.Y-1
+	if !m.isTerminalMousePosition(mouse.X, mouse.Y) || x < 0 || x >= m.terminalWidth() || y < 0 || y >= m.bodyHeight() {
+		return m, nil
+	}
+	m.controlMode = false
+	if err := m.attachment.SendMouse(event, x, y); err != nil {
+		m.message = err.Error()
+	}
+	return m, nil
+}
+
+func headerButtonAt(x int) string {
+	actionsStart := lipgloss.Width(headerTitleText) + 1
+	if x >= actionsStart && x < actionsStart+lipgloss.Width(actionsButtonLabel) {
+		return "actions"
+	}
+	helpStart := actionsStart + lipgloss.Width(actionsButtonLabel) + 1
+	if x >= helpStart && x < helpStart+lipgloss.Width(helpButtonLabel) {
+		return "help"
+	}
+	return ""
+}
+
+func hitLabel(line, label string, x int) bool {
+	index := strings.Index(line, label)
+	if index < 0 {
+		return false
+	}
+	start := lipgloss.Width(line[:index])
+	return x >= start && x < start+lipgloss.Width(label)
+}
+
+func verticalWheelDelta(button tea.MouseButton, step int) (int, bool) {
+	switch button {
+	case tea.MouseWheelUp:
+		return -step, true
+	case tea.MouseWheelDown:
+		return step, true
+	default:
+		return 0, false
+	}
+}
+
 func (m tuiModel) View() tea.View {
 	if !m.hasUsableSize() {
 		view := tea.NewView(fmt.Sprintf("multicodex editor needs at least %d×%d; current size is %d×%d", minimumWidth, minimumHeight, m.width, m.height))
 		view.AltScreen = true
 		return view
 	}
-	headerLeft := lipgloss.NewStyle().Bold(true).Render(" multicodex editor ")
+	buttonStyle := lipgloss.NewStyle().Reverse(true)
+	headerLeft := lipgloss.NewStyle().Bold(true).Render(headerTitleText) + " " + buttonStyle.Render(actionsButtonLabel) + " " + buttonStyle.Render(helpButtonLabel)
 	header := joinKeepRight(headerLeft, m.usageText, m.width)
 	sidebar := m.renderSidebar()
 	main := m.renderMain()
 	body := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, "│", main)
-	footerLeft := "Ctrl+G editor controls"
+	footerLeft := "Click windows or Actions · Ctrl+G keyboard controls"
 	if m.controlMode {
 		footerLeft = "↑↓ select · Enter open · Tab actions · F1 help · Esc terminal"
 	}
@@ -503,7 +723,10 @@ func (m tuiModel) View() tea.View {
 	view := tea.NewView(header + "\n" + body + "\n" + footer)
 	view.AltScreen = true
 	view.ReportFocus = true
-	view.MouseMode = tea.MouseModeNone
+	view.MouseMode = tea.MouseModeCellMotion
+	view.OnMouse = func(event tea.MouseMsg) tea.Cmd {
+		return func() tea.Msg { return editorMouseMsg{event: event} }
+	}
 	if m.attachment != nil && !m.controlMode && m.modal == nil {
 		x, y := m.attachment.CursorPosition()
 		view.Cursor = tea.NewCursor(m.sidebarWidth()+1+x, 1+y)
@@ -562,7 +785,7 @@ func (m tuiModel) renderMain() string {
 		return renderModal(*m.modal, width, height)
 	}
 	if m.attachment == nil {
-		text := "No terminal selected.\n\nPress Ctrl+G to focus the editor.\nPress Tab for actions, then use arrows and Enter."
+		text := "No terminal selected.\n\nClick Actions above, or press Ctrl+G then Tab.\nChoose an action with the mouse, arrows, or Tab."
 		return padBlock(text, width, height)
 	}
 	return m.attachment.Render(width, height)
@@ -572,23 +795,9 @@ func renderModal(modal modal, width, height int) string {
 	lines := []string{lipgloss.NewStyle().Bold(true).Render(modal.title), ""}
 	switch modal.kind {
 	case "help":
-		lines = append(lines,
-			"Ctrl+G       Focus the editor sidebar",
-			"↑/↓, Enter   Select and open a window",
-			"Home/End     Move to the first/last sidebar item",
-			"Tab / →      Open the editor action menu",
-			"Alt/⌘+1–9   Select a window slot (⌘ when supported)",
-			"F1           Show or close this help",
-			"Esc          Return to terminal input",
-			"Ctrl+C       Quit while editor controls are active",
-			"", "Actions include create, add, attach, scrollback,",
-			"delete, cleanup, send Ctrl+G, and quit.",
-			"", "Esc or Enter closes help")
+		lines = append(lines, helpModalContent()...)
 	case "choice", "actions":
-		visible := max(1, height-4)
-		start := max(0, modal.choice-visible/2)
-		start = min(start, max(0, len(modal.choices)-visible))
-		end := min(len(modal.choices), start+visible)
+		start, end := modalChoiceWindow(modal, height)
 		for i := start; i < end; i++ {
 			item := modal.choices[i]
 			line := "  " + item.label
@@ -601,7 +810,7 @@ func renderModal(modal modal, width, height int) string {
 		if modal.kind == "actions" {
 			verb = "run"
 		}
-		lines = append(lines, "", "↑/↓ or Tab choose · Enter "+verb+" · Esc cancel")
+		lines = append(lines, "", modalChoiceButtonLine(verb), "↑/↓ or Tab choose · Esc cancel")
 	case "form":
 		for i, field := range modal.fields {
 			marker := "  "
@@ -610,9 +819,9 @@ func renderModal(modal modal, width, height int) string {
 			}
 			lines = append(lines, marker+plainDisplayText(field.label)+": "+plainDisplayText(field.value))
 		}
-		lines = append(lines, "", "Enter next/save · Tab change field · Esc cancel")
+		lines = append(lines, "", saveButtonLabel+"   "+cancelButtonLabel, "Enter next/save · Tab change field · Esc cancel")
 	case "confirm":
-		cancel, remove := "[ Cancel ]", "[ Delete ]"
+		cancel, remove := cancelButtonLabel, deleteButtonLabel
 		if modal.choice == 0 {
 			cancel = lipgloss.NewStyle().Reverse(true).Render(cancel)
 		} else {
@@ -621,6 +830,35 @@ func renderModal(modal modal, width, height int) string {
 		lines = append(lines, modal.reason, "", "This action cannot be undone.", "", cancel+"   "+remove, "←/→ or Tab choose · Enter continue · Esc cancel")
 	}
 	return padBlock(strings.Join(lines, "\n"), width, height)
+}
+
+func helpModalContent() []string {
+	return []string{
+		"Mouse         Click windows, buttons, fields, and menus",
+		"Wheel         Scroll lists and terminal history",
+		"Click terminal Return keyboard focus to the terminal",
+		"Ctrl+G        Focus the editor sidebar",
+		"↑/↓, Enter    Select and open a window",
+		"Home/End      Move to the first/last sidebar item",
+		"Tab / →       Open the editor action menu",
+		"Alt/⌘+1–9    Select a window slot (⌘ when supported)",
+		"F1            Show or close this help",
+		"Esc           Return to terminal input",
+		"Ctrl+C        Quit while editor controls are active",
+		"", "Actions include create, attach, delete, and cleanup.",
+		"", closeButtonLabel + " · Esc or Enter",
+	}
+}
+
+func modalChoiceWindow(current modal, height int) (int, int) {
+	visible := max(1, height-5)
+	start := max(0, current.choice-visible/2)
+	start = min(start, max(0, len(current.choices)-visible))
+	return start, min(len(current.choices), start+visible)
+}
+
+func modalChoiceButtonLine(verb string) string {
+	return cancelButtonLabel + " · Click or Enter to " + verb
 }
 
 func (m *tuiModel) rebuildRows() {
@@ -761,6 +999,18 @@ func (m *tuiModel) moveSelection(delta int) {
 	m.ensureSelectionVisible()
 }
 
+func (m *tuiModel) moveSelectionClamped(delta int) {
+	if len(m.rows) == 0 {
+		return
+	}
+	if m.selectedRow < 0 {
+		m.selectedRow = 0
+	} else {
+		m.selectedRow = max(0, min(len(m.rows)-1, m.selectedRow+delta))
+	}
+	m.ensureSelectionVisible()
+}
+
 func (m *tuiModel) moveSelectionPage(direction int) {
 	if len(m.rows) == 0 {
 		return
@@ -811,7 +1061,7 @@ func (m *tuiModel) openActionMenu() {
 		{label: "Delete selected window or workspace", action: "delete"},
 		{label: "Run safe cleanup", action: "cleanup"},
 		{label: "Send Ctrl+G to the terminal", action: "send_control_g"},
-		{label: "Keyboard help", action: "help"},
+		{label: "Help and controls", action: "help"},
 		{label: "Quit multicodex editor", action: "quit"},
 	}}
 }
@@ -873,7 +1123,7 @@ func (m tuiModel) activateEditorAction() (tea.Model, tea.Cmd) {
 		m.controlMode = false
 		m.message = "sent Ctrl+G to terminal"
 	case "help":
-		m.modal = &modal{kind: "help", title: "Keyboard shortcuts"}
+		m.modal = &modal{kind: "help", title: "Controls"}
 	case "quit":
 		return m, tea.Quit
 	}

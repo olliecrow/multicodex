@@ -117,13 +117,13 @@ func TestEditorControlsUseNavigationAndAVisibleActionMenu(t *testing.T) {
 		t.Fatalf("Tab did not open the action menu: %+v", got)
 	}
 	rendered := ansi.Strip(renderModal(*got.modal, 60, 24))
-	for _, want := range []string{"Editor actions", "New window", "Add SSH host", "Run safe cleanup", "↑/↓ or Tab choose · Enter run"} {
+	for _, want := range []string{"Editor actions", "New window", "Add SSH host", "Run safe cleanup", "[ Cancel ] · Click or Enter to run"} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("action menu is missing %q:\n%s", want, rendered)
 		}
 	}
-	help := ansi.Strip(renderModal(modal{kind: "help", title: "Keyboard shortcuts"}, 55, 22))
-	for _, want := range []string{"Actions include create, add, attach, scrollback,", "delete, cleanup, send Ctrl+G, and quit."} {
+	help := ansi.Strip(renderModal(modal{kind: "help", title: "Controls"}, minimumWidth-24-1, minimumHeight-2))
+	for _, want := range []string{"Click windows, buttons, fields, and menus", "Scroll lists and terminal history", "Actions include create, attach, delete, and cleanup.", "[ Close ]"} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("minimum-width help truncated %q:\n%s", want, help)
 		}
@@ -180,7 +180,7 @@ func TestMinimumViewportShowsTitleUsageSidebarAndFooter(t *testing.T) {
 	state := ClientState{Version: stateVersion, InstanceID: testInstanceID, Hosts: []Host{{ID: localHostID, Name: localHostName}}}
 	model := tuiModel{manager: &Manager{state: state}, width: minimumWidth, height: minimumHeight, usageText: "usage alpha 42%", message: "ready"}
 	view := ansi.Strip(model.View().Content)
-	for _, want := range []string{"multicodex editor", "usage alpha 42%", "No workspaces", "Ctrl+G editor controls", "ready"} {
+	for _, want := range []string{"multicodex editor", "[ Actions ]", "[ Help ]", "usage alpha 42%", "No workspaces", "Ctrl+G keyboard controls", "ready"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("missing %q in view:\n%s", want, view)
 		}
@@ -193,6 +193,112 @@ func TestMinimumViewportShowsTitleUsageSidebarAndFooter(t *testing.T) {
 		if width := lipgloss.Width(line); width != minimumWidth {
 			t.Fatalf("line %d width = %d, want %d: %q", i, width, minimumWidth, line)
 		}
+	}
+}
+
+func TestMouseModeRoutesClicksToVisibleEditorControls(t *testing.T) {
+	model := tuiModel{width: 100, height: 30, selectedRow: -1}
+	view := model.View()
+	if view.MouseMode != tea.MouseModeCellMotion || view.OnMouse == nil {
+		t.Fatalf("mouse view configuration = %+v", view)
+	}
+	message := view.OnMouse(tea.MouseClickMsg{X: 1, Y: 1, Button: tea.MouseLeft})()
+	if _, ok := message.(editorMouseMsg); !ok {
+		t.Fatalf("mouse callback returned %T", message)
+	}
+
+	actionsX := lipgloss.Width(headerTitleText) + 2
+	updated, cmd := model.handleMouse(tea.MouseClickMsg{X: actionsX, Y: 0, Button: tea.MouseLeft})
+	got := updated.(tuiModel)
+	if cmd != nil || got.modal == nil || got.modal.kind != "actions" {
+		t.Fatalf("Actions click = %+v", got)
+	}
+
+	helpIndex := -1
+	for i, item := range got.modal.choices {
+		if item.action == "help" {
+			helpIndex = i
+			break
+		}
+	}
+	if helpIndex < 0 {
+		t.Fatal("help action is missing")
+	}
+	mainX := got.sidebarWidth() + 3
+	updated, cmd = got.handleMouse(tea.MouseClickMsg{X: mainX, Y: 3 + helpIndex, Button: tea.MouseLeft})
+	got = updated.(tuiModel)
+	if cmd != nil || got.modal == nil || got.modal.kind != "help" {
+		t.Fatalf("Help menu click = %+v", got)
+	}
+	closeY := 1 + 2 + len(helpModalContent()) - 1
+	updated, cmd = got.handleMouse(tea.MouseClickMsg{X: got.sidebarWidth() + 1, Y: closeY, Button: tea.MouseLeft})
+	got = updated.(tuiModel)
+	if cmd != nil || got.modal != nil {
+		t.Fatalf("Close button click = %+v", got)
+	}
+}
+
+func TestMouseSelectsSidebarRowsAndForwardsTerminalEvents(t *testing.T) {
+	windowID := "111111111111111111111111"
+	rows := []sidebarRow{
+		{kind: "workspace", workspace: Workspace{ID: "222222222222222222222222", Name: "Work"}},
+		{kind: "window", window: Window{ID: windowID, Name: "Terminal"}},
+		{kind: "workspace", workspace: Workspace{ID: "333333333333333333333333", Name: "Other"}},
+		{kind: "workspace", workspace: Workspace{ID: "444444444444444444444444", Name: "More"}},
+		{kind: "workspace", workspace: Workspace{ID: "555555555555555555555555", Name: "Last"}},
+	}
+	attachment := &Attachment{inputQueue: make(chan terminalInput, 4)}
+	model := tuiModel{width: 100, height: 30, rows: rows, selectedRow: 0, attachedID: windowID, attachment: attachment, controlMode: true}
+	updated, cmd := model.handleMouse(tea.MouseClickMsg{X: 2, Y: 2, Button: tea.MouseLeft})
+	got := updated.(tuiModel)
+	if cmd != nil || got.selectedRow != 1 || got.controlMode {
+		t.Fatalf("window row click = %+v", got)
+	}
+	updated, _ = got.handleMouse(tea.MouseWheelMsg{X: 2, Y: 2, Button: tea.MouseWheelDown})
+	got = updated.(tuiModel)
+	if got.selectedRow != 4 || !got.controlMode {
+		t.Fatalf("sidebar wheel = %+v", got)
+	}
+
+	terminalX, terminalY := got.sidebarWidth()+5, 4
+	updated, cmd = got.handleMouse(tea.MouseClickMsg{X: terminalX, Y: terminalY, Button: tea.MouseLeft})
+	got = updated.(tuiModel)
+	if cmd != nil || got.controlMode {
+		t.Fatalf("terminal click focus = %+v", got)
+	}
+	input := <-attachment.inputQueue
+	if input.kind != "raw" || input.text != "\x1b[<0;5;4M" {
+		t.Fatalf("forwarded terminal click = %+v", input)
+	}
+}
+
+func TestMouseUsesFormAndConfirmationButtons(t *testing.T) {
+	model := tuiModel{manager: &Manager{}, width: 100, height: 30, modal: &modal{kind: "form", action: "add_host", title: "Add", fields: []formField{{label: "Name"}, {label: "SSH alias"}}}}
+	mainX := model.sidebarWidth() + 2
+	updated, cmd := model.handleMouse(tea.MouseClickMsg{X: mainX, Y: 4, Button: tea.MouseLeft})
+	got := updated.(tuiModel)
+	if cmd != nil || got.modal.field != 1 {
+		t.Fatalf("form field click = %+v", got)
+	}
+	updated, cmd = got.handleMouse(tea.MouseClickMsg{X: mainX, Y: 6, Button: tea.MouseLeft})
+	got = updated.(tuiModel)
+	if cmd == nil || got.modal != nil || !got.actionBusy {
+		t.Fatalf("Save button click = %+v", got)
+	}
+
+	model = tuiModel{manager: &Manager{}, width: 100, height: 30, modal: &modal{kind: "confirm", action: "delete_window", delete: DeleteRequest{ID: testInstanceID}}}
+	updated, cmd = model.handleMouse(tea.MouseClickMsg{X: model.sidebarWidth() + 1, Y: 7, Button: tea.MouseLeft})
+	got = updated.(tuiModel)
+	if cmd != nil || got.modal != nil || got.actionBusy {
+		t.Fatalf("Cancel button click = %+v", got)
+	}
+
+	model.modal = &modal{kind: "confirm", action: "delete_window", delete: DeleteRequest{ID: testInstanceID}}
+	deleteX := model.sidebarWidth() + 1 + lipgloss.Width(cancelButtonLabel) + 4
+	updated, cmd = model.handleMouse(tea.MouseClickMsg{X: deleteX, Y: 7, Button: tea.MouseLeft})
+	got = updated.(tuiModel)
+	if cmd == nil || got.modal != nil || !got.actionBusy {
+		t.Fatalf("Delete button click = %+v", got)
 	}
 }
 
