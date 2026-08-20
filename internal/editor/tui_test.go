@@ -12,6 +12,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/vt"
+	"github.com/creack/pty"
 	"github.com/olliecrow/multicodex/internal/monitor/usage"
 )
 
@@ -128,8 +130,8 @@ func TestEditorControlsUseNavigationAndAVisibleActionMenu(t *testing.T) {
 			t.Fatalf("minimum-width help line is clipped: %q", line)
 		}
 	}
-	help := ansi.Strip(renderModal(modal{kind: "help", title: "Controls"}, helpWidth, minimumHeight-7))
-	for _, want := range []string{"Click windows, actions, fields, choices, buttons", "scroll terminal history", "Need terminal Ctrl+G?", "[ Close ]"} {
+	help := ansi.Strip(renderModal(modal{kind: "help", title: "Controls"}, helpWidth, (tuiModel{width: minimumWidth, height: minimumHeight}).bodyHeight()))
+	for _, want := range []string{"Click windows, actions, fields, choices, buttons", "scroll terminal history", "In the sidebar, Ctrl+C: quit", "● running · ○ stopped", "Need terminal Ctrl+G?", "[ Close ]"} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("minimum-width help truncated %q:\n%s", want, help)
 		}
@@ -169,7 +171,7 @@ func TestWindowCreationUsesAChoiceInsteadOfFreeTextLaunchInput(t *testing.T) {
 		if strings.Contains(rendered, "shell or codex") {
 			t.Fatalf("%s window form kept the free-text launch field", test.launch)
 		}
-		if !strings.Contains(rendered, "Enter: save") || strings.Contains(rendered, "Tab: next field") {
+		if !strings.Contains(rendered, "Enter: create window") || !strings.Contains(rendered, "Ctrl+U: clear this field") || strings.Contains(rendered, "Tab/↑/↓: next field") {
 			t.Fatalf("%s single-field form has unclear guidance: %q", test.launch, rendered)
 		}
 	}
@@ -206,12 +208,12 @@ func TestAccountUsageShowsEveryAccountAndFailureState(t *testing.T) {
 	}
 	model := tuiModel{usage: accountUsageState{accounts: rows}}
 	got := strings.Join(model.usageLines(38), "\n")
-	for _, want := range []string{"alpha 10%", "bravo 20%", "charlie unavailable", "delta 40%"} {
+	for _, want := range []string{"alpha", "10% used", "bravo", "20% used", "charlie", "unavailable", "delta", "40% used"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("usage is missing %q: %q", want, got)
 		}
 	}
-	if strings.Contains(got, "+") || strings.Contains(got, "charlie 0%") {
+	if strings.Contains(got, "+") || strings.Contains(got, "charlie 0%") || len(strings.Split(got, "\n")) != 4 {
 		t.Fatalf("usage collapsed or misreported a failed account: %q", got)
 	}
 }
@@ -232,7 +234,7 @@ func TestAccountUsageRetainsLastResultAfterRefreshFailure(t *testing.T) {
 	model := tuiModel{usage: accountUsageState{accounts: []accountUsage{{label: "alpha", usedPercent: 42, available: true}}}}
 	model.applyUsage(usageMsg{accounts: []accountUsage{{label: "alpha"}, {label: "bravo"}}, err: "usage refresh failed"})
 	got := strings.Join(model.usageLines(78), "\n")
-	for _, want := range []string{"alpha 42% (stale)", "bravo unavailable"} {
+	for _, want := range []string{"alpha", "42% stale", "bravo", "unavailable"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("stale usage is missing %q: %q", want, got)
 		}
@@ -249,25 +251,30 @@ func TestAccountUsageRetainsOnlyFailedRowsAfterPartialRefresh(t *testing.T) {
 		{label: "bravo"},
 	}})
 	got := strings.Join(model.usageLines(78), "\n")
-	for _, want := range []string{"alpha 50%", "bravo 15% (stale)"} {
+	for _, want := range []string{"alpha", "50% used", "bravo", "15% stale"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("partial usage refresh is missing %q: %q", want, got)
 		}
 	}
-	if strings.Contains(got, "alpha 42%") || strings.Contains(got, "bravo unavailable") {
+	if strings.Contains(got, "42% used") || strings.Contains(got, "bravo unavailable") {
 		t.Fatalf("partial usage refresh kept the wrong rows: %q", got)
 	}
 }
 
-func TestAccountUsageWrapsWithoutHidingLongLabels(t *testing.T) {
-	label := strings.Repeat("wide-account-", 8)
+func TestAccountUsageKeepsOneIdentifiableRowPerLongLabel(t *testing.T) {
+	label := strings.Repeat("wide-account-", 8) + "one"
 	model := tuiModel{usage: accountUsageState{accounts: []accountUsage{
 		{label: label, usedPercent: 10, available: true},
-		{label: "second", usedPercent: 20, available: true},
+		{label: strings.Repeat("wide-account-", 8) + "two", usedPercent: 20, available: true},
 	}}}
-	got := strings.Join(model.usageLines(24), "")
-	if !strings.Contains(got, label) || !strings.Contains(got, "second 20%") || strings.Contains(got, "+") {
-		t.Fatalf("wrapped usage hid an account: %q", got)
+	lines := model.usageLines(22)
+	if len(lines) != 2 || lines[0] == lines[1] || !strings.Contains(lines[0], "one") || !strings.Contains(lines[1], "two") {
+		t.Fatalf("long usage labels are not identifiable: %q", lines)
+	}
+	for _, line := range lines {
+		if lipgloss.Width(line) != 22 || !strings.Contains(line, "% used") {
+			t.Fatalf("usage row is not compact: %q", line)
+		}
 	}
 }
 
@@ -278,14 +285,14 @@ func TestAccountUsageOverflowAsksForMoreHeightInsteadOfHidingRows(t *testing.T) 
 	}
 	model := tuiModel{width: minimumWidth, height: minimumHeight, usage: accountUsageState{accounts: accounts}}
 	view := ansi.Strip(model.View().Content)
-	for _, want := range []string{"too small to show every account usage", "Enlarge the terminal", "never hidden or collapsed", "Ctrl+C quits"} {
+	for _, want := range []string{"too small to show every account", "Enlarge the terminal", "never hidden or collapsed", "Ctrl+C quits"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("size blocker is missing %q:\n%s", want, view)
 		}
 	}
 }
 
-func TestMultilineUsageGeometryKeepsSidebarMouseMappingExact(t *testing.T) {
+func TestSidebarUsageGeometryKeepsTerminalSizeAndMouseMappingExact(t *testing.T) {
 	accounts := make([]accountUsage, 10)
 	for i := range accounts {
 		accounts[i] = accountUsage{label: fmt.Sprintf("account-%02d", i), usedPercent: i, available: true}
@@ -294,18 +301,109 @@ func TestMultilineUsageGeometryKeepsSidebarMouseMappingExact(t *testing.T) {
 		width: 100, height: 30, usage: accountUsageState{accounts: accounts}, selectedRow: 0,
 		rows: []sidebarRow{{kind: "workspace"}, {kind: "workspace"}, {kind: "workspace"}},
 	}
-	usageLines := model.usageLines(model.width - 2)
-	if len(usageLines) < 2 {
-		t.Fatalf("fixture did not create multiline usage: %q", usageLines)
-	}
 	layout := model.layout()
-	if layout.bodyContent != 4+len(usageLines) || layout.bodyHeight != model.height-len(usageLines)-6 {
-		t.Fatalf("multiline layout = %+v, usage lines = %d", layout, len(usageLines))
+	if layout.bodyContent != 2 || layout.bodyHeight != model.height-4 || layout.usageHeight != len(accounts) || layout.sidebarHeight != layout.bodyHeight-layout.usageHeight-1 {
+		t.Fatalf("sidebar usage layout = %+v", layout)
 	}
 	updated, cmd := model.handleMouse(tea.MouseClickMsg{X: 2, Y: layout.bodyContent + 1, Button: tea.MouseLeft})
 	got := updated.(tuiModel)
 	if cmd != nil || got.selectedRow != 1 {
-		t.Fatalf("multiline usage shifted sidebar mouse mapping: %+v", got)
+		t.Fatalf("sidebar usage shifted mouse mapping: %+v", got)
+	}
+	updated, cmd = got.handleMouse(tea.MouseClickMsg{X: 2, Y: layout.bodyContent + layout.sidebarHeight + 1, Button: tea.MouseLeft})
+	got = updated.(tuiModel)
+	if cmd != nil || got.selectedRow != 1 {
+		t.Fatalf("usage row click changed sidebar selection: %+v", got)
+	}
+	updated, cmd = got.handleMouse(tea.MouseWheelMsg{X: 2, Y: layout.bodyContent + layout.sidebarHeight + 1, Button: tea.MouseWheelDown})
+	got = updated.(tuiModel)
+	if cmd != nil || got.selectedRow != 1 {
+		t.Fatalf("usage row wheel changed sidebar selection: %+v", got)
+	}
+}
+
+func TestAccountCountNeverChangesTerminalDimensions(t *testing.T) {
+	base := tuiModel{width: minimumWidth, height: minimumHeight}.layout()
+	for _, count := range []int{1, 5, 15} {
+		accounts := make([]accountUsage, count)
+		for index := range accounts {
+			accounts[index] = accountUsage{label: fmt.Sprintf("account-%02d", index), usedPercent: index, available: true}
+		}
+		layout := (tuiModel{width: minimumWidth, height: minimumHeight, usage: accountUsageState{accounts: accounts}}).layout()
+		if !layout.fits() || layout.terminalWidth != base.terminalWidth || layout.bodyHeight != base.bodyHeight || layout.bodyContent != base.bodyContent {
+			t.Fatalf("%d accounts changed terminal geometry: base=%+v current=%+v", count, base, layout)
+		}
+	}
+}
+
+func TestAttachmentResizesAfterAccountBlockerClears(t *testing.T) {
+	master, slave, err := pty.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer master.Close()
+	defer slave.Close()
+	accounts := make([]accountUsage, 17)
+	for index := range accounts {
+		accounts[index] = accountUsage{label: fmt.Sprintf("account-%02d", index), loading: true}
+	}
+	attachment := &Attachment{pty: master, terminal: vt.NewSafeEmulator(10, 10)}
+	model := tuiModel{width: minimumWidth, height: minimumHeight, attachment: attachment, usage: accountUsageState{accounts: accounts}}
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: minimumWidth, Height: minimumHeight})
+	got := updated.(tuiModel)
+	if !got.resizePending {
+		t.Fatal("blocked resize was not retained")
+	}
+	updated, _ = got.Update(usageMsg{accounts: accounts[:16]})
+	got = updated.(tuiModel)
+	if got.resizePending || attachment.terminal.Width() != got.terminalWidth() || attachment.terminal.Height() != got.bodyHeight() {
+		t.Fatalf("attachment was not resized after blocker cleared: pending=%v terminal=%dx%d layout=%dx%d", got.resizePending, attachment.terminal.Width(), attachment.terminal.Height(), got.terminalWidth(), got.bodyHeight())
+	}
+}
+
+func TestUnfocusedSidebarSelectionHasANonColorMarker(t *testing.T) {
+	model := tuiModel{width: minimumWidth, height: minimumHeight, selectedRow: 0, rows: []sidebarRow{{kind: "project", project: Project{Name: "Project"}, host: Host{Name: "Host"}}}}
+	line := strings.Split(ansi.Strip(model.renderSidebar()), "\n")[0]
+	if !strings.HasPrefix(line, "›Project · Host") {
+		t.Fatalf("unfocused selection has no text marker: %q", line)
+	}
+}
+
+func TestUsageBoxStaysAtTheBottomOfTheSidebar(t *testing.T) {
+	accounts := []accountUsage{
+		{label: "alpha", usedPercent: 10, available: true},
+		{label: "bravo", loading: true},
+		{label: "charlie", available: false},
+	}
+	model := tuiModel{width: minimumWidth, height: minimumHeight, usage: accountUsageState{accounts: accounts}}
+	lines := strings.Split(ansi.Strip(model.View().Content), "\n")
+	layout := model.layout()
+	bottomBorder := len(lines) - 2
+	firstUsage := bottomBorder - layout.usageHeight
+	separator := firstUsage - 1
+	if !strings.HasPrefix(lines[separator], "├") || !strings.Contains(lines[separator], "Codex weekly use") || !strings.HasPrefix(lines[bottomBorder], "└") {
+		t.Fatalf("usage box boundaries are misplaced:\n%s", strings.Join(lines, "\n"))
+	}
+	for index, account := range accounts {
+		if !strings.Contains(lines[firstUsage+index], fitMiddlePlain(account.label, max(1, layout.sidebarWidth-2-lipgloss.Width(accountUsageStateText(account))-1))) {
+			t.Fatalf("account %q is not in its bottom-sidebar row: %q", account.label, lines[firstUsage+index])
+		}
+	}
+}
+
+func TestMinimumHeightFitsSixteenAccountsAndBlocksSeventeen(t *testing.T) {
+	for _, test := range []struct {
+		count int
+		fits  bool
+	}{{16, true}, {17, false}} {
+		accounts := make([]accountUsage, test.count)
+		for index := range accounts {
+			accounts[index] = accountUsage{label: fmt.Sprintf("a-%02d", index), usedPercent: index, available: true}
+		}
+		layout := (tuiModel{width: minimumWidth, height: minimumHeight, usage: accountUsageState{accounts: accounts}}).layout()
+		if layout.fits() != test.fits {
+			t.Fatalf("%d-account minimum-height fit = %v, want %v: %+v", test.count, layout.fits(), test.fits, layout)
+		}
 	}
 }
 
@@ -322,7 +420,7 @@ func TestMinimumViewportShowsTitleUsageSidebarAndFooter(t *testing.T) {
 	state := ClientState{Version: stateVersion, InstanceID: testInstanceID, Hosts: []Host{{ID: localHostID, Name: localHostName}}}
 	model := tuiModel{manager: &Manager{state: state}, width: minimumWidth, height: minimumHeight, usage: accountUsageState{accounts: []accountUsage{{label: "alpha", usedPercent: 42, available: true}}}, message: "ready"}
 	view := ansi.Strip(model.View().Content)
-	for _, want := range []string{"multicodex editor", "[ Actions ]", "[ Help ]", "Weekly account usage", "alpha 42%", "Workspaces", "No workspaces", "Use Actions to create or open a window", "ready", "┌", "┬", "┴"} {
+	for _, want := range []string{"multicodex editor", "[ Actions ]", "[ Help ]", "Codex weekly use", "alpha", "42% used", "Workspaces", "No workspaces", "Set up your first terminal", "ready", "┌", "┬", "├", "┤", "┴"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("missing %q in view:\n%s", want, view)
 		}
@@ -438,15 +536,15 @@ func TestMouseModeRoutesClicksToVisibleEditorControls(t *testing.T) {
 		t.Fatal("help action is missing")
 	}
 	layout := got.layout()
-	mainX := layout.terminalX
-	updated, cmd = got.handleMouse(tea.MouseClickMsg{X: mainX, Y: layout.bodyContent + 2 + helpIndex, Button: tea.MouseLeft})
+	mainX := layout.terminalX + modalInsetX
+	updated, cmd = got.handleMouse(tea.MouseClickMsg{X: mainX, Y: layout.bodyContent + modalInsetY + 2 + helpIndex, Button: tea.MouseLeft})
 	got = updated.(tuiModel)
 	if cmd != nil || got.modal == nil || got.modal.kind != "help" {
 		t.Fatalf("Help menu click = %+v", got)
 	}
 	layout = got.layout()
-	closeY := layout.bodyContent + 2 + len(helpModalContent()) - 1
-	updated, cmd = got.handleMouse(tea.MouseClickMsg{X: layout.terminalX, Y: closeY, Button: tea.MouseLeft})
+	closeY := layout.bodyContent + modalInsetY + 2 + len(helpModalContent()) - 1
+	updated, cmd = got.handleMouse(tea.MouseClickMsg{X: layout.terminalX + modalInsetX, Y: closeY, Button: tea.MouseLeft})
 	got = updated.(tuiModel)
 	if cmd != nil || got.modal != nil {
 		t.Fatalf("Close button click = %+v", got)
@@ -507,19 +605,36 @@ func TestMouseSelectsSidebarRowsAndForwardsTerminalEvents(t *testing.T) {
 	if input.kind != "raw" || input.text != "\x1b[<0;5;4M" {
 		t.Fatalf("forwarded terminal click = %+v", input)
 	}
+	bottomY := layout.bodyContent + layout.bodyHeight - 1
+	updated, cmd = got.handleMouse(tea.MouseClickMsg{X: terminalX, Y: bottomY, Button: tea.MouseLeft})
+	got = updated.(tuiModel)
+	if cmd != nil {
+		t.Fatal("bottom terminal click returned an asynchronous command")
+	}
+	input = <-attachment.inputQueue
+	want := fmt.Sprintf("\x1b[<0;5;%dM", layout.bodyHeight)
+	if input.kind != "raw" || input.text != want {
+		t.Fatalf("bottom terminal click = %+v, want %q", input, want)
+	}
 }
 
 func TestMouseUsesFormAndConfirmationButtons(t *testing.T) {
 	model := tuiModel{manager: &Manager{}, width: 100, height: 30, modal: &modal{kind: "form", action: "add_host", title: "Add", fields: []formField{{label: "Name"}, {label: "SSH alias"}}}}
+	form := ansi.Strip(renderModal(*model.modal, model.terminalWidth(), model.bodyHeight()))
+	for _, want := range []string{"Type values", "Tab/↑/↓: next field", "last field: add host", "Ctrl+U: clear this field", "Esc: cancel"} {
+		if !strings.Contains(form, want) {
+			t.Fatalf("form is missing %q:\n%s", want, form)
+		}
+	}
 	layout := model.layout()
-	mainX := layout.terminalX
-	updated, cmd := model.handleMouse(tea.MouseClickMsg{X: mainX, Y: layout.bodyContent + 3, Button: tea.MouseLeft})
+	mainX := layout.terminalX + modalInsetX
+	updated, cmd := model.handleMouse(tea.MouseClickMsg{X: mainX, Y: layout.bodyContent + modalInsetY + 3, Button: tea.MouseLeft})
 	got := updated.(tuiModel)
 	if cmd != nil || got.modal.field != 1 {
 		t.Fatalf("form field click = %+v", got)
 	}
 	layout = got.layout()
-	updated, cmd = got.handleMouse(tea.MouseClickMsg{X: mainX, Y: layout.bodyContent + 5, Button: tea.MouseLeft})
+	updated, cmd = got.handleMouse(tea.MouseClickMsg{X: mainX, Y: layout.bodyContent + modalInsetY + 5, Button: tea.MouseLeft})
 	got = updated.(tuiModel)
 	if cmd == nil || got.modal != nil || !got.actionBusy {
 		t.Fatalf("Save button click = %+v", got)
@@ -527,7 +642,8 @@ func TestMouseUsesFormAndConfirmationButtons(t *testing.T) {
 
 	model = tuiModel{manager: &Manager{}, width: 100, height: 30, modal: &modal{kind: "confirm", action: "delete_window", delete: DeleteRequest{ID: testInstanceID}}}
 	layout = model.layout()
-	updated, cmd = model.handleMouse(tea.MouseClickMsg{X: layout.terminalX, Y: layout.bodyContent + 6, Button: tea.MouseLeft})
+	buttonY := layout.bodyContent + modalInsetY + confirmButtonRow(*model.modal, model.terminalWidth()-modalInsetX)
+	updated, cmd = model.handleMouse(tea.MouseClickMsg{X: layout.terminalX + modalInsetX, Y: buttonY, Button: tea.MouseLeft})
 	got = updated.(tuiModel)
 	if cmd != nil || got.modal != nil || got.actionBusy {
 		t.Fatalf("Cancel button click = %+v", got)
@@ -535,8 +651,9 @@ func TestMouseUsesFormAndConfirmationButtons(t *testing.T) {
 
 	model.modal = &modal{kind: "confirm", action: "delete_window", delete: DeleteRequest{ID: testInstanceID}}
 	layout = model.layout()
-	deleteX := layout.terminalX + lipgloss.Width(cancelButtonLabel) + 3
-	updated, cmd = model.handleMouse(tea.MouseClickMsg{X: deleteX, Y: layout.bodyContent + 6, Button: tea.MouseLeft})
+	buttonY = layout.bodyContent + modalInsetY + confirmButtonRow(*model.modal, model.terminalWidth()-modalInsetX)
+	deleteX := layout.terminalX + modalInsetX + lipgloss.Width(cancelButtonLabel) + 3
+	updated, cmd = model.handleMouse(tea.MouseClickMsg{X: deleteX, Y: buttonY, Button: tea.MouseLeft})
 	got = updated.(tuiModel)
 	if cmd == nil || got.modal != nil || !got.actionBusy {
 		t.Fatalf("Delete button click = %+v", got)
@@ -611,11 +728,11 @@ func TestSidebarScrollKeepsSelectionVisible(t *testing.T) {
 	}
 	model := tuiModel{width: 100, height: 24, rows: rows, selectedRow: 35}
 	model.ensureSelectionVisible()
-	if model.sidebarOffset == 0 || model.selectedRow < model.sidebarOffset || model.selectedRow >= model.sidebarOffset+model.bodyHeight() {
-		t.Fatalf("selection %d is outside offset %d and height %d", model.selectedRow, model.sidebarOffset, model.bodyHeight())
+	if model.sidebarOffset == 0 || model.selectedRow < model.sidebarOffset || model.selectedRow >= model.sidebarOffset+model.sidebarHeight() {
+		t.Fatalf("selection %d is outside offset %d and height %d", model.selectedRow, model.sidebarOffset, model.sidebarHeight())
 	}
 	view := ansi.Strip(model.renderSidebar())
-	if strings.Count(view, "\n")+1 != model.bodyHeight() {
+	if strings.Count(view, "\n")+1 != model.sidebarHeight() {
 		t.Fatalf("sidebar has the wrong visible height")
 	}
 }
@@ -626,6 +743,51 @@ func TestJoinKeepRightNeverExceedsWidth(t *testing.T) {
 		if width := lipgloss.Width(got); width != 20 {
 			t.Fatalf("join width = %d, want 20: %q", width, got)
 		}
+	}
+	got := joinKeepRight("Sidebar · ↑/↓ · Enter open · Tab Actions · Esc back", strings.Repeat("status", 20), 80)
+	if !strings.HasPrefix(got, "Sidebar · ↑/↓ · Enter open · Tab Actions · Esc back") || !strings.Contains(got, "…") {
+		t.Fatalf("long status hid footer instructions: %q", got)
+	}
+}
+
+func TestConfirmationWrapsReasonAndKeepsMouseButtonAligned(t *testing.T) {
+	reason := "Delete workspace “feature-with-a-very-long-identifiable-name” and its owned Git worktree and branch?"
+	model := tuiModel{manager: &Manager{}, width: minimumWidth, height: minimumHeight, modal: &modal{
+		kind: "confirm", action: "delete_workspace", title: "Delete workspace?", reason: reason, delete: DeleteRequest{ID: testInstanceID},
+	}}
+	rendered := ansi.Strip(renderModal(*model.modal, model.terminalWidth(), model.bodyHeight()))
+	for _, want := range []string{"Git worktree and", "branch?", "This cannot be undone.", "default.", deleteButtonLabel, "Esc: cancel"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("confirmation is missing %q:\n%s", want, rendered)
+		}
+	}
+	for _, line := range strings.Split(rendered, "\n") {
+		if lipgloss.Width(line) != model.terminalWidth() {
+			t.Fatalf("confirmation line width = %d, want %d: %q", lipgloss.Width(line), model.terminalWidth(), line)
+		}
+	}
+	layout := model.layout()
+	deleteX := layout.terminalX + modalInsetX + lipgloss.Width(cancelButtonLabel) + 3
+	buttonY := layout.bodyContent + modalInsetY + confirmButtonRow(*model.modal, model.terminalWidth()-modalInsetX)
+	updated, cmd := model.handleMouse(tea.MouseClickMsg{X: deleteX, Y: buttonY, Button: tea.MouseLeft})
+	got := updated.(tuiModel)
+	if cmd == nil || got.modal != nil || !got.actionBusy {
+		t.Fatalf("wrapped confirmation Delete click = %+v", got)
+	}
+}
+
+func TestFormFieldKeepsTheEditableTailVisible(t *testing.T) {
+	field := formField{label: "Project path", value: "/a/very/long/path/to/the/project-directory"}
+	got := ansi.Strip(renderFormField(field, "› ", 30))
+	if lipgloss.Width(got) > 30 || !strings.HasSuffix(got, "ect-directory") || !strings.Contains(got, "…") {
+		t.Fatalf("long form value did not show its editable end: %q", got)
+	}
+}
+
+func TestMiddleEllipsisPreservesUnicodeLabelEnds(t *testing.T) {
+	got := fitMiddlePlain("账户-primary-long-label-αω", 16)
+	if lipgloss.Width(got) != 16 || !strings.HasPrefix(got, "账户") || !strings.HasSuffix(got, "αω") || !strings.Contains(got, "…") {
+		t.Fatalf("Unicode middle ellipsis = %q (%d cells)", got, lipgloss.Width(got))
 	}
 }
 
@@ -702,7 +864,7 @@ func TestDeleteResultOnlyConfirmsForceableRisk(t *testing.T) {
 }
 
 func TestBackgroundCleanupDoesNotBlockOrClearUserAction(t *testing.T) {
-	model := tuiModel{cleanupBusy: true}
+	model := tuiModel{cleanupBusy: true, message: "ready"}
 	if !model.beginAction("creating workspace…") || !model.actionBusy {
 		t.Fatal("background cleanup blocked an independent user action")
 	}
@@ -710,7 +872,7 @@ func TestBackgroundCleanupDoesNotBlockOrClearUserAction(t *testing.T) {
 		action: "background_cleanup", value: map[string]CleanupResult{},
 	})
 	got := updated.(tuiModel)
-	if got.cleanupBusy || !got.actionBusy {
+	if got.cleanupBusy || !got.actionBusy || got.message != "creating workspace…" {
 		t.Fatalf("background cleanup changed user-action state: %+v", got)
 	}
 }
@@ -792,6 +954,9 @@ func TestCleanupSummaryReportsSkippedResources(t *testing.T) {
 	got := cleanupSummary(results)
 	if got != "cleanup: 1 windows, 2 workspaces, 3 attachments removed · 2 skipped: busy" {
 		t.Fatalf("cleanup summary = %q", got)
+	}
+	if !cleanupResultHasNews(results) || cleanupResultHasNews(map[string]CleanupResult{"local": {}}) {
+		t.Fatal("cleanup result news detection is incorrect")
 	}
 }
 
