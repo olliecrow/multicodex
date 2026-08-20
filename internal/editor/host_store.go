@@ -20,6 +20,7 @@ type hostRegistry struct {
 
 type hostStore struct {
 	base         string
+	editorRoot   string
 	root         string
 	registryPath string
 	lockPath     string
@@ -31,9 +32,11 @@ func newHostStore(multicodexHome, instanceID string) (*hostStore, error) {
 	if err := validateID(instanceID, "editor instance identifier"); err != nil {
 		return nil, err
 	}
-	root := filepath.Join(multicodexHome, "editor", "host")
+	editorRoot := filepath.Join(multicodexHome, "editor")
+	root := filepath.Join(editorRoot, "host")
 	return &hostStore{
 		base:         multicodexHome,
+		editorRoot:   editorRoot,
 		root:         root,
 		registryPath: filepath.Join(root, instanceID+".json"),
 		lockPath:     filepath.Join(root, instanceID+".lock"),
@@ -44,6 +47,9 @@ func newHostStore(multicodexHome, instanceID string) (*hostStore, error) {
 
 func (s *hostStore) withLock(fn func(*hostRegistry) error) error {
 	if err := ensurePrivateDir(s.base); err != nil {
+		return err
+	}
+	if err := ensurePrivateDir(s.editorRoot); err != nil {
 		return err
 	}
 	if err := ensurePrivateDir(s.root); err != nil {
@@ -77,6 +83,9 @@ func (s *hostStore) withLock(fn func(*hostRegistry) error) error {
 
 func (s *hostStore) withReadLock(fn func(hostRegistry) error) error {
 	if err := ensurePrivateDir(s.base); err != nil {
+		return err
+	}
+	if err := ensurePrivateDir(s.editorRoot); err != nil {
 		return err
 	}
 	if err := ensurePrivateDir(s.root); err != nil {

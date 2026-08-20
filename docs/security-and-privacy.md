@@ -18,9 +18,9 @@
 - Profile-scoped Codex subprocesses must scrub inherited Codex/OpenAI account override environment variables before setting the selected profile `CODEX_HOME`.
 - Profile resource settings may name local directories outside the default Codex home. The user owns the trust decision for those sources; multicodex only creates symlinks and does not execute or copy source contents.
 - Explicit resource reconciliation validates all configured sources before profile mutation. It removes or retargets only symlinks at documented managed positions and preserves regular profile guidance and skill entries.
-- Editor SSH input is restricted to an alias-shaped name and is passed as one argument with batch mode. Remote protocol errors, metadata, and pasted terminal text are bounded and stripped of terminal control characters before use.
-- Editor Git commands disable interactive credential prompts but retain configured noninteractive SSH agents and credential helpers. Connection loss cancels transient host command process groups; owned tmux servers remain outside that cancellation scope.
-- Editor state, locks, sockets, worktrees, and attachments use private directories. State writes are atomic and directory-synced. Symlinked or permissive state paths are rejected.
+- Editor SSH input is restricted to an alias-shaped name and is passed as one argument with batch mode. Agent, X11, local, remote, dynamic, and tunnel forwarding are disabled, and configured local commands do not run. Remote protocol errors, metadata, and pasted terminal text are bounded and stripped of terminal control characters before use.
+- Editor Git commands run without a controlling terminal, disable interactive credential and askpass prompts, and retain configured SSH transports, agents, and credential helpers. Connection loss cancels transient host command process groups; owned tmux servers remain outside that cancellation scope.
+- Editor state, locks, worktrees, and attachments use private directories below `MULTICODEX_HOME`. Short-lived SSH control sockets use an exact user-owned 0700 directory below `/tmp`. State writes are atomic and directory-synced. Symlinked or permissive state paths, and symlinked, foreign-owned, or permissive SSH runtime paths, are rejected.
 - Editor terminal output is memory-only. Persistent activity contains only a SHA-256 hash and timestamp for the last 100 captured rows. The client never stores remote terminal content or copies Codex auth between hosts.
 - Host deletion requires deterministic paths or names plus exact instance, workspace, and window ownership metadata. Tmux, Git, filesystem, or registry uncertainty stops deletion. Two-phase workspace, window, and attachment intent records make interrupted operations recoverable without expanding ownership. Force confirmation is never persisted or replayed after interruption.
 - Attachments are bounded to 16 MiB, opened without following symlinks, copied to private host-local files, and deleted with their workspace or after seven days. Image input is validated as PNG or JPEG with bounded dimensions. The editor pastes a path but never submits a terminal draft.
@@ -34,7 +34,7 @@
 - CI should run secret scanning before merge.
 - `multicodex doctor` should be used before release to verify leak-guard checks.
 - Committed tests, examples, logs, and review artifacts must use temporary or dummy resource paths and must not include private resource contents or machine-specific paths.
-- Public editor tests must use synthetic repositories and temporary homes. System SSH configuration, installed binaries, user projects, and resources outside the selected multicodex home are never test targets.
+- Public editor tests must use synthetic repositories and temporary homes. Tmux integration tests use only exact random `mce-*` sockets under the system tmux temporary directory and remove them after each test. System SSH configuration, installed binaries, user projects, and all other resources outside the selected multicodex home are never test targets.
 
 ## Global auth boundary
 - Multicodex must not change, restore, back up, symlink, lock, or otherwise manage the shared default Codex auth account.

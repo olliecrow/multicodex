@@ -95,14 +95,16 @@ func TestSSHControlPathRejectsFilesAndCleansExactSockets(t *testing.T) {
 		t.Fatal(err)
 	}
 	hostID := mustID(t)
-	path, err := prepareSSHControlPath(home, testInstanceID, hostID)
+	instanceID := mustID(t)
+	t.Cleanup(func() { _ = cleanupSSHControlPaths(home, instanceID) })
+	path, err := prepareSSHControlPath(home, instanceID, hostID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, []byte("not a socket"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := prepareSSHControlPath(home, testInstanceID, hostID); err == nil {
+	if _, err := prepareSSHControlPath(home, instanceID, hostID); err == nil {
 		t.Fatal("expected a non-socket SSH control path to be rejected")
 	}
 	if err := os.Remove(path); err != nil {
@@ -117,7 +119,7 @@ func TestSSHControlPathRejectsFilesAndCleansExactSockets(t *testing.T) {
 	if err := listener.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := cleanupSSHControlPath(home, testInstanceID, hostID); err != nil {
+	if err := cleanupSSHControlPath(home, instanceID, hostID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
@@ -125,19 +127,33 @@ func TestSSHControlPathRejectsFilesAndCleansExactSockets(t *testing.T) {
 	}
 }
 
+func TestSSHRuntimeDirectoryRejectsSymlinkAndPrunesEmptyRoot(t *testing.T) {
+	parent := t.TempDir()
+	target := filepath.Join(parent, "target")
+	link := filepath.Join(parent, "link")
+	if err := os.Mkdir(target, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := secureOwnedPrivateRuntimeDir(link); err == nil {
+		t.Fatal("accepted a symlinked SSH runtime directory")
+	}
+	empty := filepath.Join(parent, "empty")
+	if err := os.Mkdir(empty, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeEmptySSHRuntimeRoot(empty); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(empty); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("empty SSH runtime root remains: %v", err)
+	}
+}
+
 func TestSSHControlPathEscapesOpenSSHPercentTokens(t *testing.T) {
-	home, err := os.MkdirTemp("/tmp", "mce-%h-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(home) })
-	if err := os.Chmod(home, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	path, err := prepareSSHControlPath(home, testInstanceID, mustID(t))
-	if err != nil {
-		t.Fatal(err)
-	}
+	path := "/tmp/mce-%h-%C.sock"
 	option := sshControlPathOption(path)
 	if strings.Contains(strings.ReplaceAll(option, "%%", ""), "%") {
 		t.Fatalf("SSH control option contains an unescaped percent token: %q", option)
@@ -147,14 +163,68 @@ func TestSSHControlPathEscapesOpenSSHPercentTokens(t *testing.T) {
 	}
 }
 
+func TestSSHControlPathSupportsADeepDefaultStyleHome(t *testing.T) {
+	root, err := os.MkdirTemp("/tmp", "mce-long-home-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	componentLength := 50 - len(root) - 1
+	if componentLength < 1 {
+		t.Fatalf("temporary root is too long for this boundary test: %q", root)
+	}
+	home := filepath.Join(root, strings.Repeat("h", componentLength))
+	if err := os.Mkdir(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	hostID := mustID(t)
+	instanceID := mustID(t)
+	t.Cleanup(func() { _ = cleanupSSHControlPaths(home, instanceID) })
+	oldPath := filepath.Join(home, "editor", "ssh", instanceID, hostID+".sock")
+	if len(oldPath) <= 100 {
+		t.Fatalf("test path does not exercise the old socket limit: %d", len(oldPath))
+	}
+	path, err := prepareSSHControlPath(home, instanceID, hostID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(path) > 80 {
+		t.Fatalf("runtime SSH control path is still too long: %d", len(path))
+	}
+	if strings.HasPrefix(path, home+string(filepath.Separator)) {
+		t.Fatalf("control socket still depends on the long home: %q", path)
+	}
+	if got := filepath.Base(filepath.Dir(path)); got != instanceID[:12] {
+		t.Fatalf("control directory = %q", got)
+	}
+	if got := strings.TrimSuffix(filepath.Base(path), ".sock"); got != hostID[:12] {
+		t.Fatalf("control socket = %q", got)
+	}
+}
+
 func TestSSHConnectionOptionsBoundDeadConnections(t *testing.T) {
 	options := strings.Join(sshConnectionOptions("auto", "no", "/tmp/editor-%h.sock"), " ")
 	for _, required := range []string{
-		"BatchMode=yes", "ConnectTimeout=8", "ServerAliveInterval=5", "ServerAliveCountMax=3",
+		"BatchMode=yes", "ClearAllForwardings=yes", "ForwardAgent=no", "ForwardX11=no",
+		"Tunnel=no", "PermitLocalCommand=no",
+		"ConnectTimeout=8", "ServerAliveInterval=5", "ServerAliveCountMax=3",
 		"ControlMaster=auto", "ControlPersist=no", "ControlPath=/tmp/editor-%%h.sock",
 	} {
 		if !strings.Contains(options, required) {
 			t.Errorf("SSH options omit %q: %s", required, options)
+		}
+	}
+}
+
+func TestHostRequestTimeoutsFinishBeforeClientDeadlines(t *testing.T) {
+	for method, want := range map[string]time.Duration{
+		"hello": 8 * time.Second, "snapshot": 8 * time.Second, "touch_window": 8 * time.Second,
+		"copy_mode": 8 * time.Second, "doctor": 8 * time.Second,
+		"delete_window": 25 * time.Second, "delete_workspace": 25 * time.Second,
+		"create_workspace": 2 * time.Minute, "put_attachment": 30 * time.Second,
+	} {
+		if got := hostRequestTimeout(method); got != want {
+			t.Errorf("%s timeout = %s, want %s", method, got, want)
 		}
 	}
 }

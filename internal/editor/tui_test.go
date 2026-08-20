@@ -266,6 +266,42 @@ func TestCreatedWindowBecomesSidebarSelectionAfterRefresh(t *testing.T) {
 	}
 }
 
+func TestDeleteResultOnlyConfirmsForceableRisk(t *testing.T) {
+	manager := &Manager{state: ClientState{Hosts: []Host{{ID: localHostID, Name: localHostName}}}}
+	model := tuiModel{manager: manager, actionBusy: true}
+	updated, _ := model.handleActionResult(actionResultMsg{
+		action: "delete_workspace", hostID: localHostID, targetID: "111111111111111111111111",
+		value: DeleteResult{Reason: "delete the workspace windows first"},
+	})
+	got := updated.(tuiModel)
+	if got.modal != nil || got.message != "delete the workspace windows first" {
+		t.Fatalf("non-forceable refusal opened confirmation: %+v", got)
+	}
+	got.actionBusy = true
+	updated, _ = got.handleActionResult(actionResultMsg{
+		action: "delete_workspace", hostID: localHostID, targetID: "111111111111111111111111",
+		value: DeleteResult{Reason: "worktree has uncommitted changes", Forceable: true},
+	})
+	got = updated.(tuiModel)
+	if got.modal == nil || !got.modal.delete.Force {
+		t.Fatalf("forceable risk did not open confirmation: %+v", got)
+	}
+}
+
+func TestBackgroundCleanupDoesNotBlockOrClearUserAction(t *testing.T) {
+	model := tuiModel{cleanupBusy: true}
+	if !model.beginAction("creating workspace…") || !model.actionBusy {
+		t.Fatal("background cleanup blocked an independent user action")
+	}
+	updated, _ := model.handleActionResult(actionResultMsg{
+		action: "background_cleanup", value: map[string]CleanupResult{},
+	})
+	got := updated.(tuiModel)
+	if got.cleanupBusy || !got.actionBusy {
+		t.Fatalf("background cleanup changed user-action state: %+v", got)
+	}
+}
+
 func TestAttachmentPasteWaitsForItsTargetAndRetriesBusyInput(t *testing.T) {
 	targetID := "111111111111111111111111"
 	model := tuiModel{refreshing: true, actionBusy: true}
@@ -341,8 +377,18 @@ func TestCleanupSummaryReportsSkippedResources(t *testing.T) {
 		"local": {WindowsDeleted: 1, WorkspacesDeleted: 2, AttachmentsDeleted: 3, Skipped: []string{"busy", "offline"}},
 	}
 	got := cleanupSummary(results)
-	if got != "cleanup: 1 windows, 2 workspaces, 3 attachments removed · 2 skipped" {
+	if got != "cleanup: 1 windows, 2 workspaces, 3 attachments removed · 2 skipped: busy" {
 		t.Fatalf("cleanup summary = %q", got)
+	}
+}
+
+func TestBusyRefreshKeepsTheLastReachableHostState(t *testing.T) {
+	host := Host{ID: localHostID, Name: localHostName}
+	workspace := Workspace{ID: "111111111111111111111111"}
+	model := tuiModel{statuses: []HostStatus{{Host: host, Snapshot: HostSnapshot{Workspaces: []Workspace{workspace}}}}}
+	model.mergeStatuses([]HostStatus{{Host: host, Error: "request timed out", Busy: true}})
+	if len(model.statuses) != 1 || model.statuses[0].Error != "" || len(model.statuses[0].Snapshot.Workspaces) != 1 {
+		t.Fatalf("busy refresh replaced reachable state: %+v", model.statuses)
 	}
 }
 

@@ -91,6 +91,33 @@ func TestManagerUsesLongLivedLocalProtocolAndRecoversSnapshot(t *testing.T) {
 	}
 }
 
+func TestBackgroundCleanupDoesNotQueueBehindInteractiveHostConnection(t *testing.T) {
+	requireCommands(t, "git", "tmux")
+	home := privateTestHome(t)
+	t.Setenv("MULTICODEX_HOME", home)
+	manager, err := NewManager(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := manager.CheckLocal(ctx); err != nil {
+		t.Fatal(err)
+	}
+	interactive := manager.clients[localHostID]
+	<-interactive.callGate
+	defer func() { interactive.callGate <- struct{}{} }()
+
+	result := manager.cleanupHost(ctx, manager.State().Hosts[0])
+	if len(result.Skipped) != 0 {
+		t.Fatalf("isolated cleanup was blocked by the interactive connection: %+v", result)
+	}
+	if manager.clients[localHostID] != interactive {
+		t.Fatal("isolated cleanup replaced the interactive host connection")
+	}
+}
+
 func TestManagerCloseStopsConcurrentRefreshAndReleasesState(t *testing.T) {
 	requireCommands(t, "git", "tmux")
 	home := privateTestHome(t)

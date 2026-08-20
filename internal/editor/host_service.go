@@ -37,7 +37,9 @@ func (execRunner) run(ctx context.Context, name string, args ...string) ([]byte,
 	cmd := exec.CommandContext(ctx, name, args...)
 	killGroup := filepath.Base(name) != "tmux"
 	if killGroup {
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		// A new session removes the controlling terminal, so Git credential and
+		// SSH helpers cannot open a hidden prompt behind the raw-screen UI.
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 		cmd.Cancel = func() error {
 			if cmd.Process == nil {
 				return os.ErrProcessDone
@@ -48,6 +50,7 @@ func (execRunner) run(ctx context.Context, name string, args ...string) ([]byte,
 			}
 			return err
 		}
+		cmd.WaitDelay = 2 * time.Second
 	}
 	cmd.Env = sanitizedCommandEnvironment(os.Environ(), name)
 	var stdout bytes.Buffer
@@ -84,6 +87,9 @@ func sanitizedCommandEnvironment(environment []string, command string) []string 
 	if command == "git" {
 		result = replaceEnvironment(result, "GIT_TERMINAL_PROMPT", "0")
 		result = replaceEnvironment(result, "GCM_INTERACTIVE", "Never")
+		result = replaceEnvironment(result, "GIT_ASKPASS", "")
+		result = replaceEnvironment(result, "SSH_ASKPASS", "")
+		result = replaceEnvironment(result, "SSH_ASKPASS_REQUIRE", "never")
 	}
 	return result
 }
@@ -93,7 +99,8 @@ func unsafeGitEnvironmentKey(key string) bool {
 	case "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
 		"GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE", "GIT_CEILING_DIRECTORIES",
 		"GIT_DISCOVERY_ACROSS_FILESYSTEM", "GIT_EXEC_PATH", "GIT_TEMPLATE_DIR", "GIT_CONFIG_COUNT",
-		"GIT_CONFIG_PARAMETERS", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM":
+		"GIT_CONFIG_PARAMETERS", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_ASKPASS",
+		"SSH_ASKPASS", "SSH_ASKPASS_REQUIRE":
 		return true
 	default:
 		return strings.HasPrefix(key, "GIT_CONFIG_KEY_") || strings.HasPrefix(key, "GIT_CONFIG_VALUE_")
@@ -269,7 +276,7 @@ func (s *HostService) CreateWorkspace(ctx context.Context, request CreateWorkspa
 	}
 	if workspace.Git {
 		if err := s.addGitWorktree(ctx, workspace); err != nil {
-			s.rollbackWorkspaceCreation(workspace)
+			s.rollbackWorkspaceCreation(workspace, false)
 			return Workspace{}, err
 		}
 		if err := s.store.withLock(func(registry *hostRegistry) error {
@@ -281,7 +288,7 @@ func (s *HostService) CreateWorkspace(ctx context.Context, request CreateWorkspa
 			}
 			return errors.New("workspace creation record disappeared")
 		}); err != nil {
-			s.rollbackWorkspaceCreation(workspace)
+			s.rollbackWorkspaceCreation(workspace, true)
 			return Workspace{}, err
 		}
 		workspace.CreatePending = false
@@ -289,12 +296,23 @@ func (s *HostService) CreateWorkspace(ctx context.Context, request CreateWorkspa
 	return workspace, nil
 }
 
-func (s *HostService) rollbackWorkspaceCreation(workspace Workspace) {
+func (s *HostService) rollbackWorkspaceCreation(workspace Workspace, branchOwned bool) {
 	clean := true
 	if workspace.Git {
 		rollbackContext, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		clean = s.removeGitWorktree(rollbackContext, workspace, true) == nil
+		if branchOwned {
+			clean = s.removeGitWorktree(rollbackContext, workspace, true) == nil
+		} else if _, err := os.Lstat(workspace.Path); err == nil {
+			// An exact worktree on the recorded branch proves that the failed Git
+			// invocation created the resource. Otherwise preserve all state.
+			clean = s.verifyGitWorktree(rollbackContext, workspace) == nil && s.removeGitWorktree(rollbackContext, workspace, true) == nil
+		} else if errors.Is(err, os.ErrNotExist) {
+			exists, branchErr := s.gitBranchExists(rollbackContext, workspace.ProjectPath, workspace.Branch)
+			clean = branchErr == nil && !exists
+		} else {
+			clean = false
+		}
 	}
 	if !clean {
 		return
@@ -629,6 +647,10 @@ func (s *HostService) CopyMode(ctx context.Context, id string) error {
 }
 
 func (s *HostService) DeleteWindow(ctx context.Context, request DeleteRequest) (DeleteResult, error) {
+	return s.deleteWindow(ctx, request, false)
+}
+
+func (s *HostService) deleteWindow(ctx context.Context, request DeleteRequest, recovering bool) (DeleteResult, error) {
 	if err := validateID(request.ID, "window identifier"); err != nil {
 		return DeleteResult{}, err
 	}
@@ -658,7 +680,12 @@ func (s *HostService) DeleteWindow(ctx context.Context, request DeleteRequest) (
 	}
 	if state == sessionOwned && !effectiveForce {
 		if alive {
-			return DeleteResult{Reason: "window still has a live process; confirm permanent deletion"}, nil
+			if !recovering {
+				if err := s.clearWindowDeletePending(window.ID); err != nil {
+					return DeleteResult{}, err
+				}
+			}
+			return DeleteResult{Reason: "window still has a live process; confirm permanent deletion", Forceable: true}, nil
 		}
 	}
 	if err := s.store.withLock(func(registry *hostRegistry) error {
@@ -681,10 +708,12 @@ func (s *HostService) DeleteWindow(ctx context.Context, request DeleteRequest) (
 	}
 	if state == sessionOwned && !effectiveForce {
 		if alive {
-			if err := s.clearWindowDeletePending(window.ID); err != nil {
-				return DeleteResult{}, err
+			if !recovering {
+				if err := s.clearWindowDeletePending(window.ID); err != nil {
+					return DeleteResult{}, err
+				}
 			}
-			return DeleteResult{Reason: "window became active; confirm permanent deletion"}, nil
+			return DeleteResult{Reason: "window became active; confirm permanent deletion", Forceable: true}, nil
 		}
 	}
 	if state == sessionOwned {
@@ -709,6 +738,10 @@ func (s *HostService) DeleteWindow(ctx context.Context, request DeleteRequest) (
 }
 
 func (s *HostService) DeleteWorkspace(ctx context.Context, request DeleteRequest) (DeleteResult, error) {
+	return s.deleteWorkspace(ctx, request, false)
+}
+
+func (s *HostService) deleteWorkspace(ctx context.Context, request DeleteRequest, recovering bool) (DeleteResult, error) {
 	if err := validateID(request.ID, "workspace identifier"); err != nil {
 		return DeleteResult{}, err
 	}
@@ -733,6 +766,11 @@ func (s *HostService) DeleteWorkspace(ctx context.Context, request DeleteRequest
 		return DeleteResult{}, err
 	}
 	if hasWindows {
+		if found && !recovering {
+			if err := s.clearWorkspaceDeletePending(workspace.ID); err != nil {
+				return DeleteResult{}, err
+			}
+		}
 		return DeleteResult{Reason: "delete the workspace windows first"}, nil
 	}
 	if !found {
@@ -741,10 +779,29 @@ func (s *HostService) DeleteWorkspace(ctx context.Context, request DeleteRequest
 	effectiveForce := request.Force
 	if workspace.Git && !effectiveForce {
 		if _, err := os.Lstat(workspace.Path); err == nil {
-			if reason := s.gitWorkspaceDeletionRisk(ctx, workspace); reason != "" {
-				return DeleteResult{Reason: reason}, nil
+			if reason, forceable := s.gitWorkspaceDeletionRisk(ctx, workspace); reason != "" {
+				if !recovering {
+					if err := s.clearWorkspaceDeletePending(workspace.ID); err != nil {
+						return DeleteResult{}, err
+					}
+				}
+				return DeleteResult{Reason: reason, Forceable: forceable}, nil
+			}
+		} else if errors.Is(err, os.ErrNotExist) {
+			if reason, forceable := s.gitBranchDeletionRisk(ctx, workspace); reason != "" {
+				if !recovering {
+					if err := s.clearWorkspaceDeletePending(workspace.ID); err != nil {
+						return DeleteResult{}, err
+					}
+				}
+				return DeleteResult{Reason: reason, Forceable: forceable}, nil
 			}
 		} else if !errors.Is(err, os.ErrNotExist) {
+			if !recovering {
+				if clearErr := s.clearWorkspaceDeletePending(workspace.ID); clearErr != nil {
+					return DeleteResult{}, clearErr
+				}
+			}
 			return DeleteResult{Reason: "worktree state is uncertain; no deletion was performed"}, nil
 		}
 	}
@@ -820,6 +877,18 @@ func (s *HostService) clearWindowDeletePending(windowID string) error {
 	})
 }
 
+func (s *HostService) clearWorkspaceDeletePending(workspaceID string) error {
+	return s.store.withLock(func(registry *hostRegistry) error {
+		for i := range registry.Workspaces {
+			if registry.Workspaces[i].ID == workspaceID {
+				registry.Workspaces[i].DeletePending = false
+				return nil
+			}
+		}
+		return errors.New("workspace no longer exists")
+	})
+}
+
 func (s *HostService) Cleanup(ctx context.Context) (CleanupResult, error) {
 	result := CleanupResult{}
 	cutoff := s.now().UTC().Add(-cleanupAfter)
@@ -853,7 +922,7 @@ func (s *HostService) Cleanup(ctx context.Context) (CleanupResult, error) {
 				}
 			}
 		}
-		deleted, err := s.DeleteWindow(ctx, DeleteRequest{ID: window.ID})
+		deleted, err := s.deleteWindow(ctx, DeleteRequest{ID: window.ID}, true)
 		if err != nil || !deleted.Deleted {
 			result.Skipped = append(result.Skipped, window.Name+": safe deletion did not complete")
 			continue
@@ -876,7 +945,7 @@ func (s *HostService) Cleanup(ctx context.Context) (CleanupResult, error) {
 				continue
 			}
 		}
-		deleted, err := s.DeleteWorkspace(ctx, DeleteRequest{ID: workspace.ID})
+		deleted, err := s.deleteWorkspace(ctx, DeleteRequest{ID: workspace.ID}, true)
 		if err != nil || !deleted.Deleted {
 			reason := deleted.Reason
 			if reason == "" {
@@ -974,14 +1043,10 @@ func (s *HostService) reconcilePendingCreates(ctx context.Context) ([]string, er
 				prunedProjects = append(prunedProjects, workspace.ProjectID)
 				continue
 			}
-			out, countErr := s.runner.run(ctx, "git", "-C", workspace.ProjectPath, "rev-list", "--count", workspace.BaseRef+".."+workspace.Branch)
-			count, parseErr := strconv.Atoi(strings.TrimSpace(string(out)))
-			if countErr != nil || parseErr != nil || count != 0 || s.removeGitWorktree(ctx, workspace, false) != nil {
-				notes = append(notes, workspace.Name+": pending branch has work or is uncertain")
-				keptWorkspaces = append(keptWorkspaces, workspace)
-			} else {
-				prunedProjects = append(prunedProjects, workspace.ProjectID)
-			}
+			// A branch without its exact worktree does not prove ownership. It can
+			// predate a failed `git worktree add -b`, so never delete it.
+			notes = append(notes, workspace.Name+": pending branch ownership is uncertain")
+			keptWorkspaces = append(keptWorkspaces, workspace)
 		}
 		registry.Workspaces = keptWorkspaces
 
@@ -1084,6 +1149,9 @@ func (s *HostService) Doctor(ctx context.Context) DoctorResult {
 	if err := secureExistingDir(s.store.base); err != nil {
 		result.OK = false
 		result.Issues = append(result.Issues, "multicodex home is not a private regular directory")
+	} else if err := secureExistingDir(s.store.editorRoot); err != nil {
+		result.OK = false
+		result.Issues = append(result.Issues, "editor directory is not private")
 	} else if err := secureExistingDir(s.store.root); err != nil {
 		result.OK = false
 		result.Issues = append(result.Issues, "editor host state is not private")
@@ -1152,7 +1220,7 @@ func tmuxGlobalSettings() [][2]string {
 		{"mouse", "off"},
 		{"focus-events", "on"},
 		{"escape-time", "10"},
-		{"set-clipboard", "on"},
+		{"set-clipboard", "off"},
 		{"allow-rename", "off"},
 	}
 }
@@ -1365,6 +1433,13 @@ func (s *HostService) prepareGitWorktree(ctx context.Context, request CreateWork
 		baseRef = "refs/remotes/" + remote + "/" + branchName
 	}
 	branch := "multicodex/" + slug(request.Name) + "-" + id[:8]
+	exists, err := s.gitBranchExists(ctx, request.ProjectPath, branch)
+	if err != nil {
+		return "", "", "", err
+	}
+	if exists {
+		return "", "", "", errors.New("generated workspace branch already exists; retry workspace creation")
+	}
 	paths := []string{
 		filepath.Join(s.store.base, "editor"),
 		filepath.Join(s.store.base, "editor", "worktrees"),
@@ -1394,29 +1469,58 @@ func (s *HostService) addGitWorktree(ctx context.Context, workspace Workspace) e
 	return nil
 }
 
-func (s *HostService) gitWorkspaceDeletionRisk(ctx context.Context, workspace Workspace) string {
+func (s *HostService) gitWorkspaceDeletionRisk(ctx context.Context, workspace Workspace) (string, bool) {
 	if s.verifyGitProject(ctx, workspace) != nil {
-		return "Git project identity changed or is uncertain"
+		return "Git project identity changed or is uncertain", false
 	}
 	if err := s.verifyGitWorktree(ctx, workspace); err != nil {
-		return "worktree path is unavailable; run Git worktree repair manually"
+		return "worktree path is unavailable; run Git worktree repair manually", false
 	}
 	out, err := s.runner.run(ctx, "git", "-C", workspace.Path, "status", "--porcelain=v1", "--untracked-files=all")
 	if err != nil {
-		return "worktree status is uncertain"
+		return "worktree status is uncertain", false
 	}
-	if len(bytes.TrimSpace(out)) > 0 {
-		return "worktree has uncommitted or untracked changes; confirm permanent deletion"
+	dirty := len(bytes.TrimSpace(out)) > 0
+	branchReason, branchForceable := s.gitBranchDeletionRisk(ctx, workspace)
+	if branchReason != "" && !branchForceable {
+		return branchReason, false
 	}
-	out, err = s.runner.run(ctx, "git", "-C", workspace.ProjectPath, "rev-list", "--count", workspace.BaseRef+".."+workspace.Branch)
+	if dirty && branchReason != "" {
+		return "worktree has uncommitted or untracked changes and branch has commits not present in its base; confirm permanent deletion", true
+	}
+	if dirty {
+		return "worktree has uncommitted or untracked changes; confirm permanent deletion", true
+	}
+	return branchReason, branchForceable
+}
+
+func (s *HostService) gitBranchDeletionRisk(ctx context.Context, workspace Workspace) (string, bool) {
+	if s.verifyGitProject(ctx, workspace) != nil {
+		return "Git project identity changed or is uncertain", false
+	}
+	exists, err := s.gitBranchExists(ctx, workspace.ProjectPath, workspace.Branch)
 	if err != nil {
-		return "branch integration state is uncertain"
+		return "branch integration state is uncertain", false
+	}
+	if !exists {
+		return "", false
+	}
+	oid, err := s.runner.run(ctx, "git", "-C", workspace.ProjectPath, "rev-parse", "--verify", "refs/heads/"+workspace.Branch)
+	if err != nil || !gitOIDPattern.MatchString(strings.TrimSpace(string(oid))) {
+		return "branch integration state is uncertain", false
+	}
+	out, err := s.runner.run(ctx, "git", "-C", workspace.ProjectPath, "rev-list", "--count", workspace.BaseRef+".."+strings.TrimSpace(string(oid)))
+	if err != nil {
+		return "branch integration state is uncertain", false
 	}
 	count, err := strconv.Atoi(strings.TrimSpace(string(out)))
-	if err != nil || count > 0 {
-		return "branch has commits not present in its base; confirm permanent deletion"
+	if err != nil {
+		return "branch integration state is uncertain", false
 	}
-	return ""
+	if count > 0 {
+		return "branch has commits not present in its base; confirm permanent deletion", true
+	}
+	return "", false
 }
 
 func (s *HostService) removeGitWorktree(ctx context.Context, workspace Workspace, force bool) error {
@@ -1523,11 +1627,24 @@ func canonicalMissingPath(path string) (string, error) {
 	if validateAbsolutePath(path, "Git worktree path") != nil {
 		return "", errors.New("invalid Git worktree path")
 	}
-	parent, err := filepath.EvalSymlinks(filepath.Dir(path))
-	if err != nil {
-		return "", err
+	current := filepath.Clean(path)
+	var missing []string
+	for {
+		resolved, err := filepath.EvalSymlinks(current)
+		if err == nil {
+			parts := append([]string{resolved}, missing...)
+			return filepath.Join(parts...), nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return "", err
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return "", err
+		}
+		missing = append([]string{filepath.Base(current)}, missing...)
+		current = parent
 	}
-	return filepath.Join(parent, filepath.Base(path)), nil
 }
 
 func (s *HostService) gitCommonDir(ctx context.Context, path string) (string, error) {

@@ -118,8 +118,9 @@ type DeleteRequest struct {
 }
 
 type DeleteResult struct {
-	Deleted bool   `json:"deleted"`
-	Reason  string `json:"reason,omitempty"`
+	Deleted   bool   `json:"deleted"`
+	Reason    string `json:"reason,omitempty"`
+	Forceable bool   `json:"forceable,omitempty"`
 }
 
 type CleanupResult struct {

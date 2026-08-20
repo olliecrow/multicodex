@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -14,6 +15,7 @@ type HostStatus struct {
 	Host     Host
 	Snapshot HostSnapshot
 	Error    string
+	Busy     bool
 }
 
 type Manager struct {
@@ -68,8 +70,14 @@ func (m *Manager) CheckLocal(ctx context.Context) error {
 		return errors.New("start local editor host")
 	}
 	var doctor DoctorResult
-	if err := client.Call(ctx, "doctor", nil, &doctor); err != nil || !doctor.OK {
-		return errors.New("local host is not ready: install tmux 3.2 or newer and Git")
+	if err := client.Call(ctx, "doctor", nil, &doctor); err != nil {
+		return errors.New("local host readiness check failed")
+	}
+	if err := validateDoctorResult(doctor); err != nil {
+		return err
+	}
+	if !doctor.OK {
+		return fmt.Errorf("local host is not ready: %s", doctorIssueSummary(doctor))
 	}
 	return nil
 }
@@ -102,6 +110,7 @@ func (m *Manager) Refresh(ctx context.Context) []HostStatus {
 		}
 		if err != nil {
 			status.Error = err.Error()
+			status.Busy = errors.Is(err, errHostRequestCanceled)
 			if errors.Is(err, errHostTransport) {
 				m.dropClient(host.ID, client)
 			}
@@ -169,10 +178,20 @@ func (m *Manager) AddHost(ctx context.Context, name, alias string) (Host, error)
 		return Host{}, err
 	}
 	var doctor DoctorResult
-	if err := client.Call(ctx, "doctor", nil, &doctor); err != nil || !doctor.OK {
+	if err := client.Call(ctx, "doctor", nil, &doctor); err != nil {
 		client.Close()
 		_ = cleanupSSHControlPath(m.store.base, instanceID, host.ID)
-		return Host{}, fmt.Errorf("SSH host %q is not ready: install tmux, Git, and the same multicodex release or clean source revision", name)
+		return Host{}, fmt.Errorf("SSH host %q readiness check failed", name)
+	}
+	if err := validateDoctorResult(doctor); err != nil {
+		client.Close()
+		_ = cleanupSSHControlPath(m.store.base, instanceID, host.ID)
+		return Host{}, fmt.Errorf("SSH host %q returned unsafe readiness metadata", name)
+	}
+	if !doctor.OK {
+		client.Close()
+		_ = cleanupSSHControlPath(m.store.base, instanceID, host.ID)
+		return Host{}, fmt.Errorf("SSH host %q is not ready: %s", name, doctorIssueSummary(doctor))
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -197,6 +216,22 @@ func (m *Manager) AddHost(ctx context.Context, name, alias string) (Host, error)
 	}
 	m.clients[host.ID] = client
 	return host, nil
+}
+
+func validateDoctorResult(doctor DoctorResult) error {
+	if len(doctor.Checks) > 8 || len(doctor.Issues) > 8 || doctor.OK && len(doctor.Issues) != 0 || !doctor.OK && len(doctor.Issues) == 0 {
+		return errors.New("editor host returned unsafe readiness metadata")
+	}
+	for _, value := range append(append([]string(nil), doctor.Checks...), doctor.Issues...) {
+		if safeClientText(value, 200) != value {
+			return errors.New("editor host returned unsafe readiness metadata")
+		}
+	}
+	return nil
+}
+
+func doctorIssueSummary(doctor DoctorResult) string {
+	return safeClientText(strings.Join(doctor.Issues, "; "), 300)
 }
 
 func (m *Manager) AddProject(ctx context.Context, hostID, name, path string) (Project, error) {
@@ -347,6 +382,9 @@ func (m *Manager) AttachWindow(ctx context.Context, hostID string, window Window
 		return nil, errors.New("host no longer exists")
 	}
 	if err := m.TouchWindow(ctx, hostID, window.ID); err != nil {
+		if errors.Is(err, errHostRequestCanceled) {
+			return nil, errors.New("host is busy; retry the window")
+		}
 		return nil, errors.New("refuse to attach without exact tmux ownership")
 	}
 	m.mu.Lock()
@@ -501,15 +539,25 @@ func (m *Manager) CleanupAll(ctx context.Context) map[string]CleanupResult {
 }
 
 func (m *Manager) cleanupHost(ctx context.Context, host Host) CleanupResult {
-	client, err := m.client(ctx, host)
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return CleanupResult{Skipped: []string{"host cleanup unavailable"}}
+	}
+	instanceID := m.state.InstanceID
+	executable := m.executable
+	home := m.store.base
+	m.startWG.Add(1)
+	m.mu.Unlock()
+	defer m.startWG.Done()
+
+	client, err := startIsolatedHostClient(ctx, executable, home, instanceID, host)
 	if err != nil {
 		return CleanupResult{Skipped: []string{"host cleanup unavailable"}}
 	}
+	defer client.Close()
 	var result CleanupResult
 	if err := client.Call(ctx, "cleanup", nil, &result); err != nil {
-		if errors.Is(err, errHostTransport) {
-			m.dropClient(host.ID, client)
-		}
 		return CleanupResult{Skipped: []string{"host cleanup unavailable"}}
 	}
 	if err := validateCleanupResult(result); err != nil {

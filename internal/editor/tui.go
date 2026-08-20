@@ -113,6 +113,7 @@ type tuiModel struct {
 	controlMode       bool
 	refreshing        bool
 	actionBusy        bool
+	cleanupBusy       bool
 	modal             *modal
 	attachment        *Attachment
 	attachedHost      string
@@ -206,7 +207,7 @@ func Run(opts Options) (runErr error) {
 	fetcher = usage.NewDefaultFetcherWithAccountOptions(usage.MonitorAccountOptions{IncludeDefault: true})
 	workers = newUIWorkers(manager.Context())
 
-	model := tuiModel{manager: manager, usageFetcher: fetcher, workers: workers, usageText: "usage …", selectedRow: -1, refreshing: true, actionBusy: true}
+	model := tuiModel{manager: manager, usageFetcher: fetcher, workers: workers, usageText: "usage …", selectedRow: -1, refreshing: true, cleanupBusy: true}
 	final, err := tea.NewProgram(model).Run()
 	if finished, ok := final.(tuiModel); ok && finished.attachment != nil {
 		_ = finished.attachment.Close()
@@ -217,7 +218,7 @@ func Run(opts Options) (runErr error) {
 func (m tuiModel) Init() tea.Cmd {
 	return tea.Batch(
 		m.track(refreshCmd(m.manager)), m.track(usageCmd(m.usageFetcher.Fetch, m.workerContext())),
-		m.refreshTick(), m.track(cleanupCmd(m.manager)), m.cleanupTick(), m.usageTick(),
+		m.refreshTick(), m.track(cleanupCmd(m.manager, "background_cleanup")), m.cleanupTick(), m.usageTick(),
 	)
 }
 
@@ -245,11 +246,11 @@ func (m tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case refreshTickMsg:
 		return m, tea.Batch(m.startRefresh(), m.refreshTick())
 	case cleanupTickMsg:
-		if m.actionBusy {
+		if m.cleanupBusy {
 			return m, m.cleanupTick()
 		}
-		m.actionBusy = true
-		return m, tea.Batch(m.track(cleanupCmd(m.manager)), m.cleanupTick())
+		m.cleanupBusy = true
+		return m, tea.Batch(m.track(cleanupCmd(m.manager, "background_cleanup")), m.cleanupTick())
 	case usageTickMsg:
 		return m, tea.Batch(m.track(usageCmd(m.usageFetcher.Fetch, m.workerContext())), m.usageTick())
 	case attachResultMsg:
@@ -410,7 +411,7 @@ func (m tuiModel) handleKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if !m.beginAction("running safe cleanup…") {
 			return m, nil
 		}
-		return m, m.track(cleanupCmd(m.manager))
+		return m, m.track(cleanupCmd(m.manager, "cleanup"))
 	case "i":
 		return m.startClipboardAttachment()
 	case "a":
@@ -679,6 +680,13 @@ func (m *tuiModel) mergeStatuses(incoming []HostStatus) {
 		previous[status.Host.ID] = status
 	}
 	for i := range incoming {
+		if incoming[i].Busy {
+			if old, ok := previous[incoming[i].Host.ID]; ok {
+				incoming[i].Snapshot = old.Snapshot
+				incoming[i].Error = old.Error
+			}
+			continue
+		}
 		if incoming[i].Error != "" && len(incoming[i].Snapshot.Workspaces) == 0 {
 			if old, ok := previous[incoming[i].Host.ID]; ok {
 				incoming[i].Snapshot = old.Snapshot
@@ -861,7 +869,11 @@ func (m *tuiModel) openDeleteConfirmation() {
 }
 
 func (m tuiModel) handleActionResult(msg actionResultMsg) (tea.Model, tea.Cmd) {
-	m.actionBusy = false
+	if msg.action == "background_cleanup" {
+		m.cleanupBusy = false
+	} else {
+		m.actionBusy = false
+	}
 	if msg.err != nil {
 		if value, ok := msg.value.(DeleteResult); ok && value.Deleted {
 			if msg.action == "delete_window" && msg.targetID == m.attachedID && m.attachment != nil {
@@ -898,9 +910,11 @@ func (m tuiModel) handleActionResult(msg actionResultMsg) (tea.Model, tea.Cmd) {
 				_ = m.attachment.Close()
 				m.attachment, m.attachedID, m.attachedHost = nil, "", ""
 			}
-		} else if value.Reason != "" {
+		} else if value.Reason != "" && value.Forceable {
 			m.modal = &modal{kind: "confirm", action: msg.action, title: "Confirm permanent deletion", host: hostForID(m.manager.State(), msg.hostID), delete: DeleteRequest{ID: msg.targetID, Force: true}, reason: value.Reason}
 			return m, nil
+		} else if value.Reason != "" {
+			m.message = value.Reason
 		}
 	case AttachmentFile:
 		prefix := "Please inspect this attachment: "
@@ -922,15 +936,19 @@ func (m tuiModel) handleActionResult(msg actionResultMsg) (tea.Model, tea.Cmd) {
 
 func cleanupSummary(results map[string]CleanupResult) string {
 	windows, workspaces, attachments, skipped := 0, 0, 0, 0
+	var notes []string
 	for _, result := range results {
 		windows += result.WindowsDeleted
 		workspaces += result.WorkspacesDeleted
 		attachments += result.AttachmentsDeleted
 		skipped += len(result.Skipped)
+		notes = append(notes, result.Skipped...)
 	}
 	message := fmt.Sprintf("cleanup: %d windows, %d workspaces, %d attachments removed", windows, workspaces, attachments)
 	if skipped != 0 {
 		message += fmt.Sprintf(" · %d skipped", skipped)
+		sort.Strings(notes)
+		message += ": " + safeClientText(notes[0], 120)
 	}
 	return message
 }
@@ -1164,9 +1182,9 @@ func (m tuiModel) usageTick() tea.Cmd {
 	return m.after(time.Minute, func(t time.Time) tea.Msg { return usageTickMsg(t) })
 }
 
-func cleanupCmd(manager *Manager) tea.Cmd {
+func cleanupCmd(manager *Manager, action string) tea.Cmd {
 	return func() tea.Msg {
-		return actionResultMsg{action: "cleanup", value: manager.CleanupAll(manager.Context())}
+		return actionResultMsg{action: action, value: manager.CleanupAll(manager.Context())}
 	}
 }
 
@@ -1189,7 +1207,7 @@ func copyModeCmd(manager *Manager, hostID, windowID string) tea.Cmd {
 
 func submitFormCmd(manager *Manager, form modal) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(manager.Context(), 2*time.Minute)
+		ctx, cancel := context.WithTimeout(manager.Context(), 2*time.Minute+15*time.Second)
 		defer cancel()
 		result := actionResultMsg{action: form.action, hostID: form.host.ID}
 		switch form.action {
@@ -1216,12 +1234,14 @@ func submitFormCmd(manager *Manager, form modal) tea.Cmd {
 
 func clipboardAttachmentCmd(manager *Manager, hostID, workspaceID, windowID string) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(manager.Context(), 30*time.Second)
-		defer cancel()
-		data, extension, err := CaptureClipboardImage(ctx)
+		captureContext, cancelCapture := context.WithTimeout(manager.Context(), 30*time.Second)
+		data, extension, err := CaptureClipboardImage(captureContext)
+		cancelCapture()
 		result := actionResultMsg{action: "put_clipboard", hostID: hostID, targetID: windowID, err: err}
 		if err == nil {
-			result.value, result.err = manager.PutAttachment(ctx, hostID, PutAttachmentRequest{WorkspaceID: workspaceID, Extension: extension, Data: data, Image: true})
+			uploadContext, cancelUpload := context.WithTimeout(manager.Context(), 35*time.Second)
+			result.value, result.err = manager.PutAttachment(uploadContext, hostID, PutAttachmentRequest{WorkspaceID: workspaceID, Extension: extension, Data: data, Image: true})
+			cancelUpload()
 		}
 		return result
 	}

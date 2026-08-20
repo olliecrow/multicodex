@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -45,6 +46,35 @@ func TestStateStoreRoundTripCreatesPrivateState(t *testing.T) {
 				t.Fatalf("%s mode = %o, want %o", path, info.Mode().Perm(), want)
 			}
 		}
+	}
+}
+
+func TestHostStoreRejectsIntermediateEditorSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink behavior differs on Windows")
+	}
+	base := filepath.Join(t.TempDir(), "multicodex")
+	target := filepath.Join(t.TempDir(), "target")
+	for _, path := range []string{base, target} {
+		if err := os.Mkdir(path, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(target, filepath.Join(base, "editor")); err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewHostService(base, testInstanceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Snapshot(context.Background()); err == nil {
+		t.Fatal("expected intermediate editor symlink rejection")
+	}
+	if doctor := service.Doctor(context.Background()); doctor.OK {
+		t.Fatal("doctor accepted an intermediate editor symlink")
+	}
+	if entries, err := os.ReadDir(target); err != nil || len(entries) != 0 {
+		t.Fatalf("host state escaped through editor symlink: entries=%v err=%v", entries, err)
 	}
 }
 
