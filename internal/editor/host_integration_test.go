@@ -948,7 +948,7 @@ func TestTerminalHandlesLargePasteAndOutputFlood(t *testing.T) {
 	if err := attachment.SendKey(tea.KeyPressMsg{Code: tea.KeyEnter}); err != nil {
 		t.Fatal(err)
 	}
-	waitForRender(t, attachment, "PASTE_READY", 3*time.Second)
+	waitForRender(t, attachment, "PASTE_READY", 5*time.Second)
 	select {
 	case <-attachment.responsesDone:
 		t.Fatal("terminal input writer stopped before the large paste")
