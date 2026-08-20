@@ -199,16 +199,12 @@ func TestMinimumViewportShowsTitleUsageSidebarAndFooter(t *testing.T) {
 func TestMouseModeRoutesClicksToVisibleEditorControls(t *testing.T) {
 	model := tuiModel{width: 100, height: 30, selectedRow: -1}
 	view := model.View()
-	if view.MouseMode != tea.MouseModeCellMotion || view.OnMouse == nil {
+	if view.MouseMode != tea.MouseModeCellMotion || view.OnMouse != nil {
 		t.Fatalf("mouse view configuration = %+v", view)
-	}
-	message := view.OnMouse(tea.MouseClickMsg{X: 1, Y: 1, Button: tea.MouseLeft})()
-	if _, ok := message.(editorMouseMsg); !ok {
-		t.Fatalf("mouse callback returned %T", message)
 	}
 
 	actionsX := lipgloss.Width(headerTitleText) + 2
-	updated, cmd := model.handleMouse(tea.MouseClickMsg{X: actionsX, Y: 0, Button: tea.MouseLeft})
+	updated, cmd := model.Update(tea.MouseClickMsg{X: actionsX, Y: 0, Button: tea.MouseLeft})
 	got := updated.(tuiModel)
 	if cmd != nil || got.modal == nil || got.modal.kind != "actions" {
 		t.Fatalf("Actions click = %+v", got)
@@ -235,6 +231,25 @@ func TestMouseModeRoutesClicksToVisibleEditorControls(t *testing.T) {
 	got = updated.(tuiModel)
 	if cmd != nil || got.modal != nil {
 		t.Fatalf("Close button click = %+v", got)
+	}
+}
+
+func TestDirectMouseUpdatePreservesInputOrder(t *testing.T) {
+	model := tuiModel{width: 100, height: 30, selectedRow: -1}
+	updated, cmd := model.Update(tea.MouseClickMsg{X: lipgloss.Width(headerTitleText) + 2, Y: 0, Button: tea.MouseLeft})
+	if cmd != nil {
+		t.Fatal("header mouse update returned an asynchronous command")
+	}
+	current := updated.(tuiModel)
+	updated, cmd = current.Update(tea.MouseWheelMsg{X: current.sidebarWidth() + 2, Y: 5, Button: tea.MouseWheelDown})
+	if cmd != nil {
+		t.Fatal("wheel update returned an asynchronous command")
+	}
+	current = updated.(tuiModel)
+	updated, cmd = current.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	current = updated.(tuiModel)
+	if cmd != nil || current.modal == nil || current.modal.kind != "form" || current.modal.action != "add_host" {
+		t.Fatalf("wheel then Enter chose the wrong action: %+v", current)
 	}
 }
 

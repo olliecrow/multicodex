@@ -35,10 +35,6 @@ type refreshTickMsg time.Time
 type cleanupTickMsg time.Time
 type usageTickMsg time.Time
 
-type editorMouseMsg struct {
-	event tea.MouseMsg
-}
-
 const (
 	headerTitleText    = " multicodex editor "
 	actionsButtonLabel = "[ Actions ]"
@@ -353,8 +349,9 @@ func (m tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
-	case editorMouseMsg:
-		return m.handleMouse(msg.event)
+	case tea.MouseMsg:
+		// Direct dispatch preserves mouse and keyboard input order. View.OnMouse commands run asynchronously.
+		return m.handleMouse(msg)
 	}
 	return m, nil
 }
@@ -724,9 +721,6 @@ func (m tuiModel) View() tea.View {
 	view.AltScreen = true
 	view.ReportFocus = true
 	view.MouseMode = tea.MouseModeCellMotion
-	view.OnMouse = func(event tea.MouseMsg) tea.Cmd {
-		return func() tea.Msg { return editorMouseMsg{event: event} }
-	}
 	if m.attachment != nil && !m.controlMode && m.modal == nil {
 		x, y := m.attachment.CursorPosition()
 		view.Cursor = tea.NewCursor(m.sidebarWidth()+1+x, 1+y)
