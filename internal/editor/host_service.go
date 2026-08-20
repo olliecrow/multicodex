@@ -1427,10 +1427,12 @@ func (s *HostService) prepareGitWorktree(ctx context.Context, request CreateWork
 	}
 	baseRef := "HEAD"
 	if branchName != "" {
-		if _, err := s.runner.run(ctx, "git", "-C", request.ProjectPath, "fetch", "--no-tags", remote, branchName); err != nil {
-			return "", "", "", errors.New("fetch the selected base branch before worktree creation")
-		}
 		baseRef = "refs/remotes/" + remote + "/" + branchName
+		if _, err := s.runner.run(ctx, "git", "-C", request.ProjectPath, "fetch", "--no-tags", remote, branchName); err != nil {
+			if _, cachedErr := s.runner.run(ctx, "git", "-C", request.ProjectPath, "show-ref", "--verify", "--quiet", baseRef); cachedErr != nil {
+				return "", "", "", errors.New("fetch the selected base branch before worktree creation")
+			}
+		}
 	}
 	branch := "multicodex/" + slug(request.Name) + "-" + id[:8]
 	exists, err := s.gitBranchExists(ctx, request.ProjectPath, branch)
@@ -1476,7 +1478,7 @@ func (s *HostService) gitWorkspaceDeletionRisk(ctx context.Context, workspace Wo
 	if err := s.verifyGitWorktree(ctx, workspace); err != nil {
 		return "worktree path is unavailable; run Git worktree repair manually", false
 	}
-	out, err := s.runner.run(ctx, "git", "-C", workspace.Path, "status", "--porcelain=v1", "--untracked-files=all")
+	out, err := s.runner.run(ctx, "git", "-C", workspace.Path, "status", "--porcelain=v1", "--untracked-files=all", "--ignored=matching")
 	if err != nil {
 		return "worktree status is uncertain", false
 	}
@@ -1486,10 +1488,10 @@ func (s *HostService) gitWorkspaceDeletionRisk(ctx context.Context, workspace Wo
 		return branchReason, false
 	}
 	if dirty && branchReason != "" {
-		return "worktree has uncommitted or untracked changes and branch has commits not present in its base; confirm permanent deletion", true
+		return "worktree has uncommitted, untracked, or ignored files and branch has commits not present in its base; confirm permanent deletion", true
 	}
 	if dirty {
-		return "worktree has uncommitted or untracked changes; confirm permanent deletion", true
+		return "worktree has uncommitted, untracked, or ignored files; confirm permanent deletion", true
 	}
 	return branchReason, branchForceable
 }

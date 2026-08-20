@@ -204,6 +204,94 @@ func TestHostServiceGitWindowReconnectAndSafeDeletion(t *testing.T) {
 	}
 }
 
+func TestGitWorkspaceUsesCachedRemoteBranchWhenFetchIsUnavailable(t *testing.T) {
+	requireCommands(t, "git")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	project := syntheticGitProject(t)
+	runTestCommand(t, "git", "-C", project, "remote", "set-url", "origin", filepath.Join(t.TempDir(), "offline.git"))
+	service, err := NewHostService(privateTestHome(t), mustID(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace, err := service.CreateWorkspace(ctx, CreateWorkspaceRequest{
+		ProjectID: mustID(t), ProjectPath: project, Name: "Offline work",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workspace.BaseRef != "refs/remotes/origin/main" {
+		t.Fatalf("base ref = %q, want cached origin/main", workspace.BaseRef)
+	}
+	if result, err := service.DeleteWorkspace(ctx, DeleteRequest{ID: workspace.ID}); err != nil || !result.Deleted {
+		t.Fatalf("delete offline workspace = %+v, %v", result, err)
+	}
+	if _, err := service.CreateWorkspace(ctx, CreateWorkspaceRequest{
+		ProjectID: mustID(t), ProjectPath: project, Name: "Uncached work", BaseBranch: "uncached",
+	}); err == nil {
+		t.Fatal("workspace used an unavailable uncached remote branch")
+	}
+	snapshot, err := service.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Workspaces) != 0 {
+		t.Fatalf("failed uncached workspace retained state: %+v", snapshot.Workspaces)
+	}
+}
+
+func TestCleanupPreservesIgnoredWorkspaceFiles(t *testing.T) {
+	requireCommands(t, "git")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	project := syntheticGitProject(t)
+	service, err := NewHostService(privateTestHome(t), mustID(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace, err := service.CreateWorkspace(ctx, CreateWorkspaceRequest{
+		ProjectID: mustID(t), ProjectPath: project, Name: "Ignored data",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	excludePath := commandOutput(t, "git", "-C", workspace.Path, "rev-parse", "--git-path", "info/exclude")
+	if !filepath.IsAbs(excludePath) {
+		excludePath = filepath.Join(workspace.Path, excludePath)
+	}
+	existing, err := os.ReadFile(excludePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(excludePath, append(existing, []byte("\n.local-data\n")...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ignoredPath := filepath.Join(workspace.Path, ".local-data")
+	if err := os.WriteFile(ignoredPath, []byte("must survive automatic cleanup\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runTestCommand(t, "git", "-C", workspace.Path, "check-ignore", ".local-data")
+	if err := service.store.withLock(func(registry *hostRegistry) error {
+		registry.Workspaces[0].LastUsedAt = service.now().UTC().Add(-cleanupAfter - time.Hour)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.Cleanup(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.WorkspacesDeleted != 0 || !strings.Contains(strings.Join(result.Skipped, " "), "ignored files") {
+		t.Fatalf("cleanup result = %+v", result)
+	}
+	if _, err := os.Stat(ignoredPath); err != nil {
+		t.Fatalf("ignored file was removed: %v", err)
+	}
+	if deleted, err := service.DeleteWorkspace(ctx, DeleteRequest{ID: workspace.ID, Force: true}); err != nil || !deleted.Deleted {
+		t.Fatalf("force cleanup workspace = %+v, %v", deleted, err)
+	}
+}
+
 func TestTerminalPassesRequestedExtendedKeyThroughTmux(t *testing.T) {
 	requireCommands(t, "git", "tmux", "od")
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -937,7 +1025,7 @@ func TestClearWindowDeletePendingRestoresNormalCleanupGuard(t *testing.T) {
 
 func TestTerminalHandlesLargePasteAndOutputFlood(t *testing.T) {
 	requireCommands(t, "git", "tmux", "dd", "tr")
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	home := privateTestHome(t)
 	project := syntheticGitProject(t)
@@ -967,10 +1055,15 @@ func TestTerminalHandlesLargePasteAndOutputFlood(t *testing.T) {
 	if err := attachment.SendKey(tea.KeyPressMsg{Code: tea.KeyEnter}); err != nil {
 		t.Fatal(err)
 	}
-	// Race instrumentation and a busy public CI host can delay the initial tmux
-	// render without changing the terminal contract. Keep this below the test's
-	// 30-second lifecycle deadline while allowing the shell to become ready.
-	waitForRender(t, attachment, "PASTE_READY", 10*time.Second)
+	// Race instrumentation and concurrent public CI packages can delay the
+	// initial tmux render without changing the terminal contract.
+	readyDeadline := time.Now().Add(20 * time.Second)
+	for !strings.Contains(attachment.Render(100, 24), "PASTE_READY") && time.Now().Before(readyDeadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if rendered := attachment.Render(100, 24); !strings.Contains(rendered, "PASTE_READY") {
+		t.Fatalf("terminal did not become ready: input=%v render=%q", attachment.inputError(), rendered)
+	}
 	select {
 	case <-attachment.responsesDone:
 		t.Fatal("terminal input writer stopped before the large paste")

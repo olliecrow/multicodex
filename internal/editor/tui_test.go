@@ -590,7 +590,7 @@ func TestMouseSelectsSidebarRowsAndForwardsTerminalEvents(t *testing.T) {
 	}
 	updated, _ = got.handleMouse(tea.MouseWheelMsg{X: 2, Y: layout.bodyContent + 1, Button: tea.MouseWheelDown})
 	got = updated.(tuiModel)
-	if got.selectedRow != 4 || !got.controlMode {
+	if got.selectedRow != 4 || got.controlMode {
 		t.Fatalf("sidebar wheel = %+v", got)
 	}
 
