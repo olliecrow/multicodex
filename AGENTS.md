@@ -3,6 +3,7 @@
 ## Purpose and layout
 
 - `multicodex` is a local-first Go CLI for isolated Codex subscription profiles, automatic `codex exec` routing, heartbeat checks, and usage monitoring.
+- This is a public, open-source repository. Treat every committed or pushed artifact as public.
 - `cmd/multicodex/` contains the entry point. Product code and tests live under `internal/`.
 - `README.md` is the user guide. `docs/command-spec.md` is the command contract, `docs/security-and-privacy.md` is the security contract, and `docs/decisions.md` records durable cross-cutting rationale.
 
@@ -20,4 +21,5 @@
 - Format Go changes with `gofmt`.
 - Run focused tests while iterating, then `go test ./...`, `go test -race ./...`, and `go vet ./...` for material changes.
 - Update `README.md` and `docs/command-spec.md` together when user-visible commands, flags, output, or routing behavior changes.
+- Before each push, inspect the exact outgoing range for secrets, private or proprietary material, personal or machine-specific details, temporary artifacts, unsuitable messages, and third-party licence or attribution problems.
 - Keep temporary plans and artifacts in ignored `plan/`; do not commit them.
