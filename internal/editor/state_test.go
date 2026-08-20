@@ -123,6 +123,26 @@ func TestSlugIsPortableAndBounded(t *testing.T) {
 	}
 }
 
+func TestAutomaticWindowNamesAndRenamedWorkspaceBranchIdentity(t *testing.T) {
+	existing := map[string]bool{"Terminal": true, "Terminal 2": true}
+	if got := nextDefaultName("Terminal", existing); got != "Terminal 3" {
+		t.Fatalf("next automatic window name = %q", got)
+	}
+	workspaceID := "0123456789abcdef01234567"
+	if !validOwnedBranch("multicodex/initial-name-"+workspaceID[:8], workspaceID) {
+		t.Fatal("valid owned branch was rejected after a display rename")
+	}
+	for _, value := range []string{
+		"multicodex/initial-name-deadbeef",
+		"other/initial-name-" + workspaceID[:8],
+		"multicodex/../initial-name-" + workspaceID[:8],
+	} {
+		if validOwnedBranch(value, workspaceID) {
+			t.Fatalf("unsafe branch identity accepted: %q", value)
+		}
+	}
+}
+
 func TestStateStoreAllowsOnlyOneActiveEditorClient(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "multicodex")
 	store := NewStateStore(home)

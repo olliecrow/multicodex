@@ -144,6 +144,18 @@ func dispatchHostRequest(parent context.Context, service *HostService, request p
 			return nil, err
 		}
 		return service.CreateWindow(ctx, params)
+	case "rename_workspace":
+		var params RenameRequest
+		if err := decodeParams(request.Params, &params); err != nil {
+			return nil, err
+		}
+		return nil, service.RenameWorkspace(ctx, params)
+	case "rename_window":
+		var params RenameRequest
+		if err := decodeParams(request.Params, &params); err != nil {
+			return nil, err
+		}
+		return nil, service.RenameWindow(ctx, params)
 	case "put_attachment":
 		var params PutAttachmentRequest
 		if err := decodeParams(request.Params, &params); err != nil {

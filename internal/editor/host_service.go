@@ -125,10 +125,9 @@ func (w *limitedWriter) Write(p []byte) (int, error) {
 }
 
 type HostService struct {
-	store      *hostStore
-	runner     commandRunner
-	executable string
-	now        func() time.Time
+	store  *hostStore
+	runner commandRunner
+	now    func() time.Time
 }
 
 func NewHostService(multicodexHome, instanceID string) (*HostService, error) {
@@ -136,11 +135,7 @@ func NewHostService(multicodexHome, instanceID string) (*HostService, error) {
 	if err != nil {
 		return nil, err
 	}
-	executable, err := os.Executable()
-	if err != nil {
-		return nil, fmt.Errorf("resolve multicodex executable: %w", err)
-	}
-	return &HostService{store: store, runner: execRunner{}, executable: executable, now: time.Now}, nil
+	return &HostService{store: store, runner: execRunner{}, now: time.Now}, nil
 }
 
 func (s *HostService) socketName() string {
@@ -353,25 +348,12 @@ func (s *HostService) CreateWindow(ctx context.Context, request CreateWindowRequ
 	if err := validateID(request.WorkspaceID, "workspace identifier"); err != nil {
 		return Window{}, err
 	}
-	if err := validateName(request.Name, "window name"); err != nil {
-		return Window{}, err
-	}
-	if request.Launch == "" {
-		request.Launch = "shell"
-	}
-	if request.Launch != "shell" && request.Launch != "codex" {
-		return Window{}, errors.New("window launch must be shell or codex")
-	}
 	id, err := newID()
 	if err != nil {
 		return Window{}, err
 	}
 	now := s.now().UTC()
-	window := Window{
-		ID: id, WorkspaceID: request.WorkspaceID, Name: request.Name,
-		Session: s.sessionName(id), Launch: request.Launch, CreatedAt: now, LastUsedAt: now, Alive: true,
-		CreatePending: true,
-	}
+	var window Window
 	var workspacePath string
 	if err := s.store.withLock(func(registry *hostRegistry) error {
 		var workspace *Workspace
@@ -387,13 +369,18 @@ func (s *HostService) CreateWindow(ctx context.Context, request CreateWindowRequ
 		if workspace.CreatePending || workspace.DeletePending {
 			return errors.New("workspace recovery or deletion is pending; retry cleanup before creating a window")
 		}
-		for _, existing := range registry.Windows {
-			if existing.WorkspaceID == request.WorkspaceID && existing.Name == request.Name {
-				return errors.New("a window with this name already exists in the workspace")
-			}
-		}
 		if info, err := os.Stat(workspace.Path); err != nil || !info.IsDir() {
 			return errors.New("workspace directory is unavailable")
+		}
+		names := make(map[string]bool)
+		for _, existing := range registry.Windows {
+			if existing.WorkspaceID == request.WorkspaceID {
+				names[existing.Name] = true
+			}
+		}
+		window = Window{
+			ID: id, WorkspaceID: request.WorkspaceID, Name: nextDefaultName(defaultWindowName, names),
+			Session: s.sessionName(id), CreatedAt: now, LastUsedAt: now, Alive: true, CreatePending: true,
 		}
 		workspacePath = workspace.Path
 		registry.Windows = append(registry.Windows, window)
@@ -407,9 +394,6 @@ func (s *HostService) CreateWindow(ctx context.Context, request CreateWindowRequ
 	}
 	args = append(args, ";", "new-session", "-d", "-s", window.Session, "-c", workspacePath, "-x", "100", "-y", "30",
 		"-e", "MCE_INSTANCE="+s.store.instanceID, "-e", "MCE_WINDOW="+window.ID, "-e", "MCE_WORKSPACE="+window.WorkspaceID)
-	if request.Launch == "codex" {
-		args = append(args, "exec "+quotePOSIX(s.executable)+" cli")
-	}
 	if _, err := s.runner.run(ctx, "tmux", args...); err != nil {
 		s.rollbackWindowCreation(window)
 		return Window{}, errors.New("create tmux session: tmux is unavailable or rejected the session")
@@ -442,6 +426,72 @@ func (s *HostService) CreateWindow(ctx context.Context, request CreateWindowRequ
 	}
 	window.CreatePending = false
 	return window, nil
+}
+
+func (s *HostService) RenameWorkspace(_ context.Context, request RenameRequest) error {
+	if err := validateID(request.ID, "workspace identifier"); err != nil {
+		return err
+	}
+	if err := validateName(request.Name, "workspace name"); err != nil {
+		return err
+	}
+	return s.store.withLock(func(registry *hostRegistry) error {
+		index := -1
+		for i := range registry.Workspaces {
+			if registry.Workspaces[i].ID == request.ID {
+				index = i
+				break
+			}
+		}
+		if index < 0 {
+			return errors.New("workspace no longer exists")
+		}
+		workspace := &registry.Workspaces[index]
+		if workspace.CreatePending || workspace.DeletePending {
+			return errors.New("workspace recovery or deletion is pending; retry cleanup before renaming it")
+		}
+		for i, existing := range registry.Workspaces {
+			if i != index && existing.ProjectID == workspace.ProjectID && existing.Name == request.Name {
+				return errors.New("a workspace with this name already exists in the project")
+			}
+		}
+		workspace.Name = request.Name
+		workspace.LastUsedAt = s.now().UTC()
+		return nil
+	})
+}
+
+func (s *HostService) RenameWindow(_ context.Context, request RenameRequest) error {
+	if err := validateID(request.ID, "window identifier"); err != nil {
+		return err
+	}
+	if err := validateName(request.Name, "window name"); err != nil {
+		return err
+	}
+	return s.store.withLock(func(registry *hostRegistry) error {
+		index := -1
+		for i := range registry.Windows {
+			if registry.Windows[i].ID == request.ID {
+				index = i
+				break
+			}
+		}
+		if index < 0 {
+			return errors.New("window no longer exists")
+		}
+		window := &registry.Windows[index]
+		if window.CreatePending || window.DeletePending {
+			return errors.New("window recovery or deletion is pending; retry cleanup before renaming it")
+		}
+		for i, existing := range registry.Windows {
+			if i != index && existing.WorkspaceID == window.WorkspaceID && existing.Name == request.Name {
+				return errors.New("a window with this name already exists in the workspace")
+			}
+		}
+		window.Name = request.Name
+		window.LastUsedAt = s.now().UTC()
+		return nil
+	})
 }
 
 func (s *HostService) rollbackWindowCreation(window Window) {
@@ -1719,10 +1769,6 @@ func safeGitRefPart(value string) bool {
 		}
 	}
 	return true
-}
-
-func quotePOSIX(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
 
 func normalizeExtension(value string) string {

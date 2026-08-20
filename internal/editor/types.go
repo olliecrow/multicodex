@@ -14,17 +14,17 @@ import (
 )
 
 const (
-	stateVersion    = 1
-	hostProtocol    = 1
-	historyLimit    = 50000
-	activityRows    = 100
-	cleanupAfter    = 7 * 24 * time.Hour
-	maxAttachment   = 16 << 20
-	minimumWidth    = 80
-	minimumHeight   = 24
-	localHostID     = "local"
-	localHostName   = "Local"
-	defaultShellWin = "Terminal"
+	stateVersion      = 1
+	hostProtocol      = 1
+	historyLimit      = 50000
+	activityRows      = 100
+	cleanupAfter      = 7 * 24 * time.Hour
+	maxAttachment     = 16 << 20
+	minimumWidth      = 80
+	minimumHeight     = 24
+	localHostID       = "local"
+	localHostName     = "Local"
+	defaultWindowName = "Terminal"
 )
 
 var (
@@ -89,7 +89,6 @@ type Window struct {
 	WorkspaceID   string    `json:"workspace_id"`
 	Name          string    `json:"name"`
 	Session       string    `json:"session"`
-	Launch        string    `json:"launch"`
 	CreatedAt     time.Time `json:"created_at"`
 	LastUsedAt    time.Time `json:"last_used_at"`
 	PaneHash      string    `json:"pane_hash,omitempty"`
@@ -108,8 +107,11 @@ type CreateWorkspaceRequest struct {
 
 type CreateWindowRequest struct {
 	WorkspaceID string `json:"workspace_id"`
-	Name        string `json:"name"`
-	Launch      string `json:"launch"`
+}
+
+type RenameRequest struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 type DeleteRequest struct {
@@ -222,6 +224,31 @@ func validateAbsolutePath(value, field string) error {
 
 func validateRemotePath(value string) error {
 	return validateAbsolutePath(value, "remote path")
+}
+
+func nextDefaultName(base string, existing map[string]bool) string {
+	if !existing[base] {
+		return base
+	}
+	for index := 2; ; index++ {
+		candidate := fmt.Sprintf("%s %d", base, index)
+		if !existing[candidate] {
+			return candidate
+		}
+	}
+}
+
+func validOwnedBranch(value, workspaceID string) bool {
+	if validateID(workspaceID, "workspace identifier") != nil || !strings.HasPrefix(value, "multicodex/") {
+		return false
+	}
+	remainder := strings.TrimPrefix(value, "multicodex/")
+	suffix := "-" + workspaceID[:8]
+	if !strings.HasSuffix(remainder, suffix) || !safeGitRefPart(remainder) {
+		return false
+	}
+	name := strings.TrimSuffix(remainder, suffix)
+	return name != "" && slug(name) == name
 }
 
 func slug(value string) string {

@@ -95,7 +95,7 @@ func TestSnapshotValidationRejectsHostControlData(t *testing.T) {
 			ID: workspaceID, ProjectID: projectID, ProjectPath: "/tmp/project", Name: "Work", Path: "/tmp/project",
 		}},
 		Windows: []Window{{
-			ID: windowID, WorkspaceID: workspaceID, Name: "Terminal", Session: "mce-" + windowID, Launch: "shell", PaneHash: strings.Repeat("a", 64),
+			ID: windowID, WorkspaceID: workspaceID, Name: "Terminal", Session: "mce-" + windowID, PaneHash: strings.Repeat("a", 64),
 		}},
 	}
 	if err := validateHostSnapshot(host, snapshot); err != nil {

@@ -329,6 +329,60 @@ func (m *Manager) CreateWindow(ctx context.Context, hostID string, request Creat
 	return window, nil
 }
 
+func (m *Manager) CreateWorkspaceWithWindow(ctx context.Context, hostID string, request CreateWorkspaceRequest) (Workspace, Window, error) {
+	workspace, err := m.CreateWorkspace(ctx, hostID, request)
+	if err != nil {
+		return Workspace{}, Window{}, err
+	}
+	window, err := m.CreateWindow(ctx, hostID, CreateWindowRequest{WorkspaceID: workspace.ID})
+	if err == nil {
+		return workspace, window, nil
+	}
+	rollbackContext, cancel := context.WithTimeout(m.Context(), 30*time.Second)
+	defer cancel()
+	result, rollbackErr := m.DeleteWorkspace(rollbackContext, hostID, DeleteRequest{ID: workspace.ID})
+	if rollbackErr == nil && result.Deleted {
+		return Workspace{}, Window{}, fmt.Errorf("create first terminal: %w; workspace creation was rolled back", err)
+	}
+	return workspace, Window{}, fmt.Errorf("workspace was created, but its first terminal failed: %v; select the workspace and press Enter to retry", err)
+}
+
+func (m *Manager) RenameWorkspace(ctx context.Context, hostID string, request RenameRequest) error {
+	if err := validateID(request.ID, "workspace identifier"); err != nil {
+		return err
+	}
+	if err := validateName(request.Name, "workspace name"); err != nil {
+		return err
+	}
+	host, ok := m.findHost(hostID)
+	if !ok {
+		return errors.New("host no longer exists")
+	}
+	client, err := m.client(ctx, host)
+	if err != nil {
+		return err
+	}
+	return client.Call(ctx, "rename_workspace", request, nil)
+}
+
+func (m *Manager) RenameWindow(ctx context.Context, hostID string, request RenameRequest) error {
+	if err := validateID(request.ID, "window identifier"); err != nil {
+		return err
+	}
+	if err := validateName(request.Name, "window name"); err != nil {
+		return err
+	}
+	host, ok := m.findHost(hostID)
+	if !ok {
+		return errors.New("host no longer exists")
+	}
+	client, err := m.client(ctx, host)
+	if err != nil {
+		return err
+	}
+	return client.Call(ctx, "rename_window", request, nil)
+}
+
 func (m *Manager) PutAttachment(ctx context.Context, hostID string, request PutAttachmentRequest) (AttachmentFile, error) {
 	host, ok := m.findHost(hostID)
 	if !ok {
@@ -458,7 +512,7 @@ func validateHostSnapshot(host Host, snapshot HostSnapshot) error {
 			return errors.New("editor host returned unsafe workspace metadata")
 		}
 		if workspace.Git {
-			if validateRemotePath(workspace.GitCommonDir) != nil || workspace.Branch != "multicodex/"+slug(workspace.Name)+"-"+workspace.ID[:8] || !safeStoredBaseRef(workspace.BaseRef) {
+			if validateRemotePath(workspace.GitCommonDir) != nil || !validOwnedBranch(workspace.Branch, workspace.ID) || !safeStoredBaseRef(workspace.BaseRef) {
 				return errors.New("editor host returned unsafe Git workspace metadata")
 			}
 		} else if workspace.Path != workspace.ProjectPath || workspace.GitCommonDir != "" || workspace.Branch != "" || workspace.BaseRef != "" {
@@ -468,7 +522,7 @@ func validateHostSnapshot(host Host, snapshot HostSnapshot) error {
 	}
 	windowIDs := make(map[string]bool, len(snapshot.Windows))
 	for _, window := range snapshot.Windows {
-		if validateID(window.ID, "window identifier") != nil || windowIDs[window.ID] || !workspaceIDs[window.WorkspaceID] || validateName(window.Name, "window name") != nil || window.Session != "mce-"+window.ID || window.Launch != "shell" && window.Launch != "codex" || window.CreatePending || window.PaneHash != "" && !paneHashPattern.MatchString(window.PaneHash) {
+		if validateID(window.ID, "window identifier") != nil || windowIDs[window.ID] || !workspaceIDs[window.WorkspaceID] || validateName(window.Name, "window name") != nil || window.Session != "mce-"+window.ID || window.CreatePending || window.PaneHash != "" && !paneHashPattern.MatchString(window.PaneHash) {
 			return errors.New("editor host returned unsafe window metadata")
 		}
 		windowIDs[window.ID] = true
@@ -491,11 +545,7 @@ func validateCreatedWorkspace(request CreateWorkspaceRequest, workspace Workspac
 }
 
 func validateCreatedWindow(request CreateWindowRequest, window Window) error {
-	launch := request.Launch
-	if launch == "" {
-		launch = "shell"
-	}
-	if validateID(window.ID, "window identifier") != nil || window.WorkspaceID != request.WorkspaceID || window.Name != request.Name || window.Launch != launch || window.Session != "mce-"+window.ID || window.CreatePending || window.DeletePending {
+	if validateID(window.ID, "window identifier") != nil || window.WorkspaceID != request.WorkspaceID || validateName(window.Name, "window name") != nil || window.Session != "mce-"+window.ID || window.CreatePending || window.DeletePending {
 		return errors.New("editor host returned unsafe window metadata")
 	}
 	return nil
@@ -799,9 +849,6 @@ func sortedProjectsByActivity(state ClientState, statuses []HostStatus) []Projec
 		}
 		for _, project := range status.Host.Projects {
 			workspaces := workspaceByProject[project.ID]
-			if len(workspaces) == 0 {
-				continue
-			}
 			location := ProjectLocation{Host: status.Host, Project: project, Workspaces: workspaces, HostError: status.Error}
 			workspaceIDs := map[string]bool{}
 			for _, workspace := range workspaces {
