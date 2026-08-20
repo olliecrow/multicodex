@@ -37,12 +37,22 @@ type cleanupTickMsg time.Time
 type usageTickMsg time.Time
 
 const (
-	headerTitleText    = " multicodex editor "
-	actionsButtonLabel = "[ Actions ]"
-	helpButtonLabel    = "[ Help ]"
-	cancelButtonLabel  = "[ Cancel ]"
-	deleteButtonLabel  = "[ Delete ]"
-	closeButtonLabel   = "[ Close ]"
+	headerTitleText     = " multicodex editor "
+	actionsButtonLabel  = "[ Actions ]"
+	helpButtonLabel     = "[ Help ]"
+	cancelButtonLabel   = "[ Cancel ]"
+	deleteButtonLabel   = "[ Delete ]"
+	closeButtonLabel    = "[ Close ]"
+	confirmationWarning = "This cannot be undone. Cancel is selected by default."
+	modalInsetX         = 1
+	modalInsetY         = 1
+)
+
+var (
+	infoStyle    = lipgloss.NewStyle().Foreground(lipgloss.Cyan)
+	accentStyle  = infoStyle.Bold(true)
+	borderStyle  = lipgloss.NewStyle().Foreground(lipgloss.BrightBlack)
+	warningStyle = lipgloss.NewStyle().Foreground(lipgloss.Yellow)
 )
 
 type attachResultMsg struct {
@@ -107,6 +117,8 @@ type screenLayout struct {
 	sidebarWidth             int
 	terminalX, terminalWidth int
 	bodyHeight               int
+	sidebarHeight            int
+	usageHeight              int
 	requiredHeight           int
 }
 
@@ -157,6 +169,7 @@ type tuiModel struct {
 	attachingID       string
 	queuedAttach      *sidebarRow
 	selectOnRefreshID string
+	resizePending     bool
 	pendingPastes     map[string]string
 	message           string
 	usage             accountUsageState
@@ -267,8 +280,11 @@ func (m tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.ensureSelectionVisible()
-		if m.attachment != nil && m.layout().fits() {
-			_ = m.attachment.Resize(m.terminalWidth(), m.bodyHeight())
+		if m.attachment != nil {
+			m.resizePending = !m.layout().fits()
+			if !m.resizePending {
+				_ = m.attachment.Resize(m.terminalWidth(), m.bodyHeight())
+			}
 		}
 	case refreshMsg:
 		m.refreshing = false
@@ -285,8 +301,9 @@ func (m tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.usageBusy = false
 		m.applyUsage(msg)
 		m.ensureSelectionVisible()
-		if m.attachment != nil && m.layout().fits() {
+		if m.attachment != nil && m.resizePending && m.layout().fits() {
 			_ = m.attachment.Resize(m.terminalWidth(), m.bodyHeight())
+			m.resizePending = false
 		}
 	case refreshTickMsg:
 		return m, tea.Batch(m.startRefresh(), m.refreshTick())
@@ -333,9 +350,12 @@ func (m tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.attachedHost, m.attachedID = msg.host.ID, msg.window.ID
 		if m.layout().fits() {
 			_ = m.attachment.Resize(m.terminalWidth(), m.bodyHeight())
+			m.resizePending = false
+		} else {
+			m.resizePending = true
 		}
 		m.controlMode = false
-		m.message = "connected to " + msg.window.Name
+		m.message = ""
 		if err := m.manager.SetSelectedWindow(msg.window.ID); err != nil {
 			m.message = "connected, but reconnect selection was not saved: " + err.Error()
 		}
@@ -356,6 +376,7 @@ func (m tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		_ = m.attachment.Close()
 		m.attachment = nil
+		m.resizePending = false
 		m.attachedHost = ""
 		m.attachedID = ""
 		m.message = "terminal disconnected; reconnecting…"
@@ -420,7 +441,7 @@ func (m tuiModel) handleKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if !m.controlMode {
 		if key.Keystroke() == "ctrl+g" {
 			m.controlMode = true
-			m.message = "editor controls active"
+			m.message = ""
 			return m, nil
 		}
 		if m.attachment != nil {
@@ -434,7 +455,7 @@ func (m tuiModel) handleKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch key.Keystroke() {
 	case "ctrl+g", "esc":
 		m.controlMode = false
-		m.message = "terminal input active"
+		m.message = ""
 	case "ctrl+c":
 		return m, tea.Quit
 	case "up":
@@ -540,7 +561,7 @@ func (m tuiModel) handleMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	if _, ok := event.(tea.MouseWheelMsg); ok {
 		if mouse.Y >= layout.bodyContent && mouse.Y < layout.bodyContent+layout.bodyHeight {
-			if mouse.X > 0 && mouse.X <= layout.sidebarWidth {
+			if mouse.X > 0 && mouse.X <= layout.sidebarWidth && mouse.Y < layout.bodyContent+layout.sidebarHeight {
 				delta, vertical := verticalWheelDelta(mouse.Button, 3)
 				if !vertical {
 					return m, nil
@@ -571,7 +592,7 @@ func (m tuiModel) handleMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		if click.Y >= layout.bodyContent && click.Y < layout.bodyContent+layout.bodyHeight && click.X > 0 && click.X <= layout.sidebarWidth {
+		if click.Y >= layout.bodyContent && click.Y < layout.bodyContent+layout.sidebarHeight && click.X > 0 && click.X <= layout.sidebarWidth {
 			index := m.sidebarOffset + click.Y - layout.bodyContent
 			if index < 0 || index >= len(m.rows) {
 				return m, nil
@@ -619,7 +640,10 @@ func (m tuiModel) handleModalMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if !ok || click.Button != tea.MouseLeft {
 		return m, nil
 	}
-	x, y := click.X-layout.terminalX, click.Y-layout.bodyContent
+	x, y := click.X-layout.terminalX-modalInsetX, click.Y-layout.bodyContent-modalInsetY
+	if x < 0 || y < 0 {
+		return m, nil
+	}
 	switch m.modal.kind {
 	case "help":
 		content := helpModalContent()
@@ -627,7 +651,7 @@ func (m tuiModel) handleModalMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
 			m.modal = nil
 		}
 	case "choice", "actions":
-		start, end := modalChoiceWindow(*m.modal, m.bodyHeight())
+		start, end := modalChoiceWindow(*m.modal, modalContentHeight(m.bodyHeight()))
 		if y >= 2 && y < 2+end-start {
 			m.modal.choice = start + y - 2
 			return m.activateModalChoice()
@@ -652,7 +676,7 @@ func (m tuiModel) handleModalMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 	case "confirm":
 		buttons := cancelButtonLabel + "   " + deleteButtonLabel
-		if y == 6 {
+		if y == confirmButtonRow(*m.modal, max(1, m.terminalWidth()-modalInsetX)) {
 			switch {
 			case hitLabel(buttons, cancelButtonLabel, x):
 				m.modal.choice = 0
@@ -759,44 +783,42 @@ func (m tuiModel) View() tea.View {
 	layout := m.layout()
 	if !layout.fits() {
 		message := fmt.Sprintf(
-			"This terminal is too small to show every account usage.\n\nCurrent size: %d×%d\nRequired height at this width: %d\n\nEnlarge the terminal to continue.\nAccount usage is never hidden or collapsed.\nCtrl+C quits the editor.",
+			"This terminal is too small to show every account.\n\nCurrent size: %d×%d\nRequired height: %d\n\nEnlarge the terminal to continue.\nAccount usage is never hidden or collapsed.\nCtrl+C quits the editor.",
 			m.width, m.height, layout.requiredHeight,
 		)
 		view := tea.NewView(padBlock(message, m.width, m.height))
 		view.AltScreen = true
 		return view
 	}
-	buttonStyle := lipgloss.NewStyle().Reverse(true)
-	headerLeft := lipgloss.NewStyle().Bold(true).Render(headerTitleText) + " " + buttonStyle.Render(actionsButtonLabel) + " " + buttonStyle.Render(helpButtonLabel)
-	header := joinKeepLeft(headerLeft, m.focusLabel(), m.width)
-	usageLines := m.usageLines(m.width - 2)
-	usageTitle := "Weekly account usage"
-	if m.usage.err != "" {
-		usageTitle += " · refresh failed"
-	}
-	usageBlock := []string{titledRule("┌", "┐", usageTitle, m.width-2)}
-	for _, line := range usageLines {
-		usageBlock = append(usageBlock, "│"+fitPlain(line, m.width-2)+"│")
-	}
-	usageBlock = append(usageBlock, "└"+strings.Repeat("─", m.width-2)+"┘")
+	buttonStyle := lipgloss.NewStyle().Reverse(true).Bold(true).Foreground(lipgloss.Cyan)
+	headerLeft := accentStyle.Render(headerTitleText) + " " + buttonStyle.Render(actionsButtonLabel) + " " + buttonStyle.Render(helpButtonLabel)
+	header := joinKeepLeft(headerLeft, accentStyle.Render(m.focusLabel()), m.width)
 	sidebar := m.renderSidebar()
 	main := m.renderMain()
-	leftTitle := "Workspaces"
-	rightTitle := m.mainTitle()
-	bodyLines := []string{"┌" + titledSegment(leftTitle, layout.sidebarWidth) + "┬" + titledSegment(rightTitle, layout.terminalWidth) + "┐"}
 	sidebarLines, mainLines := strings.Split(sidebar, "\n"), strings.Split(main, "\n")
-	for i := 0; i < layout.bodyHeight; i++ {
-		bodyLines = append(bodyLines, "│"+sidebarLines[i]+"│"+mainLines[i]+"│")
+	usageLines := m.renderUsageLines(layout.sidebarWidth)
+	bodyLines := []string{
+		frame("┌") + styledTitledSegment("Workspaces", layout.sidebarWidth) + frame("┬") + styledTitledSegment(m.mainTitle(), layout.terminalWidth) + frame("┐"),
 	}
-	bodyLines = append(bodyLines, "└"+strings.Repeat("─", layout.sidebarWidth)+"┴"+strings.Repeat("─", layout.terminalWidth)+"┘")
-	footerLeft := "Terminal input · Ctrl+G: editor controls · F1: help"
+	for i := 0; i < layout.bodyHeight; i++ {
+		switch {
+		case i < layout.sidebarHeight:
+			bodyLines = append(bodyLines, frame("│")+sidebarLines[i]+frame("│")+mainLines[i]+frame("│"))
+		case i == layout.sidebarHeight:
+			bodyLines = append(bodyLines, frame("├")+styledTitledSegment(m.usageTitle(), layout.sidebarWidth)+frame("┤")+mainLines[i]+frame("│"))
+		default:
+			bodyLines = append(bodyLines, frame("│")+usageLines[i-layout.sidebarHeight-1]+frame("│")+mainLines[i]+frame("│"))
+		}
+	}
+	bodyLines = append(bodyLines, frame("└"+strings.Repeat("─", layout.sidebarWidth)+"┴"+strings.Repeat("─", layout.terminalWidth)+"┘"))
+	footerLeft := "Terminal · Ctrl+G: sidebar · F1 Help"
 	if m.controlMode {
-		footerLeft = "Editor controls · ↑/↓ select · Enter open · Tab: actions · Esc: terminal"
+		footerLeft = "Sidebar · ↑/↓ · Enter open · Tab Actions · Esc back"
 	} else if m.attachment == nil {
-		footerLeft = "No terminal open · Use Actions to create or open a window · F1: help"
+		footerLeft = "No terminal · Click window · Actions: New window · F1 Help"
 	}
 	footer := joinKeepRight(footerLeft, m.message, m.width)
-	content := header + "\n" + strings.Join(usageBlock, "\n") + "\n" + strings.Join(bodyLines, "\n") + "\n" + footer
+	content := header + "\n" + strings.Join(bodyLines, "\n") + "\n" + footer
 	view := tea.NewView(content)
 	view.AltScreen = true
 	view.ReportFocus = true
@@ -809,7 +831,7 @@ func (m tuiModel) View() tea.View {
 }
 
 func (m tuiModel) renderSidebar() string {
-	width, height := m.sidebarWidth(), m.bodyHeight()
+	width, height := m.sidebarWidth(), m.sidebarHeight()
 	lines := []string{}
 	for index, row := range m.rows {
 		var label string
@@ -832,17 +854,26 @@ func (m tuiModel) renderSidebar() string {
 			}
 			label = "    " + slot + marker + " " + row.window.Name
 		}
-		label = fitPlain(label, width)
+		prefix := " "
+		if index == m.selectedRow && !m.controlMode {
+			prefix = "›"
+		}
+		label = fitPlain(prefix+label, width)
 		style := lipgloss.NewStyle().Width(width)
-		if index == m.selectedRow {
-			style = style.Reverse(true)
+		if index == m.selectedRow && m.controlMode {
+			style = style.Reverse(true).Bold(true)
+		} else if index == m.selectedRow {
+			style = style.Foreground(lipgloss.Cyan).Bold(true)
 		} else if row.kind == "project" {
-			style = style.Bold(true)
+			style = style.Foreground(lipgloss.Cyan).Bold(true)
+			if row.offline {
+				style = style.Foreground(lipgloss.Yellow)
+			}
 		}
 		lines = append(lines, style.Render(label))
 	}
 	if len(lines) == 0 {
-		lines = append(lines, fitPlain("No workspaces", width), fitPlain("Ctrl+G · Tab actions", width))
+		lines = append(lines, fitPlain(" No workspaces", width), fitPlain(" Ctrl+G → Tab: Actions", width))
 	}
 	start := min(m.sidebarOffset, len(lines))
 	end := min(len(lines), start+height)
@@ -859,11 +890,11 @@ func (m tuiModel) renderMain() string {
 		return renderModal(*m.modal, width, height)
 	}
 	if m.attachment == nil {
-		text := "Set up your first terminal\n\n1. Open Actions.\n2. Add a project, if needed.\n3. Create a workspace.\n4. Create a window.\n\nMouse: click Actions\nKeyboard: press Ctrl+G, then Tab"
+		text := "Set up your first terminal\n\n1. Open Actions: click [ Actions ].\n   Keyboard: Ctrl+G, then Tab.\n2. Add a project.\n3. Create a workspace.\n4. Create a window."
 		if len(m.rows) > 0 {
-			text = "No terminal is open\n\nClick a window in Workspaces, or choose Actions → New window.\n\nKeyboard: Ctrl+G, ↑/↓, Enter"
+			text = "No terminal is open\n\nClick a window in Workspaces.\nOr choose Actions → New window.\n\nKeyboard: Ctrl+G, select with ↑/↓, then Enter."
 		}
-		return padBlock(text, width, height)
+		return padInsetBlock(text, width, height, 1, 1)
 	}
 	return m.attachment.Render(width, height)
 }
@@ -892,12 +923,14 @@ func (m tuiModel) mainTitle() string {
 }
 
 func renderModal(modal modal, width, height int) string {
+	contentWidth := max(1, width-modalInsetX)
+	contentHeight := modalContentHeight(height)
 	lines := []string{lipgloss.NewStyle().Bold(true).Render(modal.title), ""}
 	switch modal.kind {
 	case "help":
 		lines = append(lines, helpModalContent()...)
 	case "choice", "actions":
-		start, end := modalChoiceWindow(modal, height)
+		start, end := modalChoiceWindow(modal, contentHeight)
 		for i := start; i < end; i++ {
 			item := modal.choices[i]
 			line := "  " + item.label
@@ -917,13 +950,17 @@ func renderModal(modal modal, width, height int) string {
 			if i == modal.field {
 				marker = "› "
 			}
-			lines = append(lines, marker+plainDisplayText(field.label)+": "+plainDisplayText(field.value))
+			lines = append(lines, renderFormField(field, marker, contentWidth))
 		}
-		help := "Enter: save · Ctrl+U: clear · Esc: cancel"
+		help := "Type a value · Enter: " + strings.ToLower(modalPrimaryLabel(modal))
 		if len(modal.fields) > 1 {
-			help = "Tab: next field · Enter: next/save · Ctrl+U: clear · Esc: cancel"
+			help = "Type values · Tab/↑/↓: next field"
 		}
 		lines = append(lines, "", modalPrimaryButton(modal)+"   "+cancelButtonLabel, help)
+		if len(modal.fields) > 1 {
+			lines = append(lines, "Enter: next; last field: "+strings.ToLower(modalPrimaryLabel(modal)))
+		}
+		lines = append(lines, "Ctrl+U: clear this field · Esc: cancel")
 	case "confirm":
 		cancel, remove := cancelButtonLabel, deleteButtonLabel
 		if modal.choice == 0 {
@@ -931,9 +968,13 @@ func renderModal(modal modal, width, height int) string {
 		} else {
 			remove = lipgloss.NewStyle().Reverse(true).Render(remove)
 		}
-		lines = append(lines, modal.reason, "", "This cannot be undone. Cancel is selected by default.", "", cancel+"   "+remove, "←/→ or Tab: choose · Enter: confirm · Esc: cancel")
+		lines = append(lines, wrappedPlainLines(modal.reason, contentWidth)...)
+		lines = append(lines, "")
+		lines = append(lines, wrappedPlainLines(confirmationWarning, contentWidth)...)
+		lines = append(lines, "", cancel+"   "+remove)
+		lines = append(lines, wrappedPlainLines("←/→ or Tab: choose · Enter: confirm · Esc: cancel", contentWidth)...)
 	}
-	return padBlock(strings.Join(lines, "\n"), width, height)
+	return padInsetBlock(strings.Join(lines, "\n"), width, height, modalInsetX, modalInsetY)
 }
 
 func helpModalContent() []string {
@@ -943,17 +984,27 @@ func helpModalContent() []string {
 		"  Wheel: move lists or scroll terminal history",
 		"  Click terminal: return input to the terminal",
 		"Keyboard",
-		"  Ctrl+G: focus editor controls",
-		"  ↑/↓: select · Enter: open · Tab: actions",
-		"  F1: help · Esc: terminal · Ctrl+C: quit",
+		"  Ctrl+G: focus the sidebar",
+		"  ↑/↓: select · Enter: open · Tab: Actions",
+		"  F1: Help · Esc: return to terminal",
+		"  In the sidebar, Ctrl+C: quit",
 		"  Home/End/Page Up/Page Down: move through list",
-		"  Alt/⌘+1–9: open a window slot",
+		"  Alt/⌘+1–9: open the numbered window",
+		"Status: ● running · ○ stopped",
 		"Need terminal Ctrl+G? Use Actions → Send Ctrl+G.",
 		closeButtonLabel + " · Enter, F1, or Esc: close",
 	}
 }
 
+func modalContentHeight(height int) int {
+	return max(1, height-modalInsetY)
+}
+
 func modalPrimaryButton(current modal) string {
+	return "[ " + modalPrimaryLabel(current) + " ]"
+}
+
+func modalPrimaryLabel(current modal) string {
 	label := "Save"
 	switch current.action {
 	case "add_host":
@@ -967,7 +1018,7 @@ func modalPrimaryButton(current modal) string {
 	case "put_file":
 		label = "Attach file"
 	}
-	return "[ " + label + " ]"
+	return label
 }
 
 func modalChoiceWindow(current modal, height int) (int, int) {
@@ -1073,7 +1124,7 @@ func (m tuiModel) selectWindowSlot(slot int) (tea.Model, tea.Cmd) {
 			return m.selectCurrentRow()
 		}
 	}
-	m.message = fmt.Sprintf("window slot %d is not visible", slot)
+	m.message = fmt.Sprintf("numbered window %d is not visible", slot)
 	return m, nil
 }
 
@@ -1138,7 +1189,7 @@ func (m *tuiModel) moveSelectionPage(direction int) {
 	if m.selectedRow < 0 {
 		m.selectedRow = 0
 	} else {
-		m.selectedRow = max(0, min(len(m.rows)-1, m.selectedRow+direction*max(1, m.bodyHeight()-1)))
+		m.selectedRow = max(0, min(len(m.rows)-1, m.selectedRow+direction*max(1, m.sidebarHeight()-1)))
 	}
 	m.ensureSelectionVisible()
 }
@@ -1155,7 +1206,7 @@ func (m *tuiModel) selectSidebarEdge(last bool) {
 }
 
 func (m *tuiModel) ensureSelectionVisible() {
-	height := m.bodyHeight()
+	height := m.sidebarHeight()
 	if len(m.rows) <= height {
 		m.sidebarOffset = 0
 		return
@@ -1412,7 +1463,9 @@ func (m tuiModel) handleActionResult(msg actionResultMsg) (tea.Model, tea.Cmd) {
 			m.message = "attachment uploaded; it will paste when its window opens"
 		}
 	case map[string]CleanupResult:
-		m.message = cleanupSummary(value)
+		if msg.action != "background_cleanup" || cleanupResultHasNews(value) {
+			m.message = cleanupSummary(value)
+		}
 	}
 	return m, m.startRefresh()
 }
@@ -1434,6 +1487,15 @@ func cleanupSummary(results map[string]CleanupResult) string {
 		message += ": " + safeClientText(notes[0], 120)
 	}
 	return message
+}
+
+func cleanupResultHasNews(results map[string]CleanupResult) bool {
+	for _, result := range results {
+		if result.WindowsDeleted != 0 || result.WorkspacesDeleted != 0 || result.AttachmentsDeleted != 0 || len(result.Skipped) != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func hostForID(state ClientState, id string) Host {
@@ -1507,20 +1569,28 @@ func (m tuiModel) hasUsableSize() bool { return m.width >= minimumWidth && m.hei
 func (m tuiModel) sidebarWidth() int   { return min(34, max(24, m.width/4)) }
 func (m tuiModel) terminalWidth() int  { return m.layout().terminalWidth }
 func (m tuiModel) bodyHeight() int     { return m.layout().bodyHeight }
+func (m tuiModel) sidebarHeight() int  { return m.layout().sidebarHeight }
 
 func (m tuiModel) layout() screenLayout {
-	const minimumBodyHeight = 14
-	usageLineCount := max(1, len(m.usageLines(max(1, m.width-2))))
+	const minimumSidebarHeight = 3
 	sidebarWidth := m.sidebarWidth()
-	bodyHeight := max(1, m.height-usageLineCount-6)
+	usageHeight := max(1, len(m.usage.accounts))
+	bodyHeight := max(1, m.height-4)
+	sidebarHeight := max(1, bodyHeight-usageHeight-1)
 	return screenLayout{
-		width:        m.width,
-		height:       m.height,
-		bodyContent:  4 + usageLineCount,
-		sidebarWidth: sidebarWidth,
-		terminalX:    sidebarWidth + 2, terminalWidth: max(1, m.width-sidebarWidth-3),
-		bodyHeight:     bodyHeight,
-		requiredHeight: max(minimumHeight, usageLineCount+6+minimumBodyHeight),
+		width:         m.width,
+		height:        m.height,
+		bodyContent:   2,
+		sidebarWidth:  sidebarWidth,
+		terminalX:     sidebarWidth + 2,
+		terminalWidth: max(1, m.width-sidebarWidth-3),
+		bodyHeight:    bodyHeight,
+		sidebarHeight: sidebarHeight,
+		usageHeight:   usageHeight,
+		requiredHeight: max(
+			minimumHeight,
+			4+usageHeight+1+minimumSidebarHeight,
+		),
 	}
 }
 
@@ -1714,59 +1784,71 @@ func mergeAccountUsage(previous, incoming []accountUsage) []accountUsage {
 func (m tuiModel) usageLines(width int) []string {
 	if len(m.usage.accounts) == 0 {
 		if m.usage.err != "" {
-			return []string{"Usage unavailable · run multicodex monitor doctor"}
+			return []string{"Usage unavailable"}
 		}
-		return []string{"No local Codex accounts configured"}
+		return []string{"No accounts configured"}
 	}
-	items := make([]string, 0, len(m.usage.accounts))
+	lines := make([]string, 0, len(m.usage.accounts))
 	for _, account := range m.usage.accounts {
-		item := account.label + " "
-		switch {
-		case account.loading:
-			item += "loading…"
-		case account.available:
-			item += fmt.Sprintf("%d%%", account.usedPercent)
-			if account.stale {
-				item += " (stale)"
-			}
-		default:
-			item += "unavailable"
-		}
-		items = append(items, item)
+		lines = append(lines, accountUsageLine(account, width))
 	}
-	return packPlainItems(items, max(1, width))
+	return lines
 }
 
-func packPlainItems(items []string, width int) []string {
-	const separator = "  │  "
-	lines := []string{}
-	current := ""
-	for _, item := range items {
-		item = plainDisplayText(item)
-		if lipgloss.Width(item) > width {
-			if current != "" {
-				lines = append(lines, current)
-				current = ""
+func accountUsageLine(account accountUsage, width int) string {
+	width = max(1, width)
+	state := accountUsageStateText(account)
+	stateWidth := lipgloss.Width(state)
+	if stateWidth >= width {
+		return ansi.Truncate(state, width, "…")
+	}
+	labelWidth := width - stateWidth - 1
+	label := fitMiddlePlain(account.label, labelWidth)
+	return label + " " + state
+}
+
+func accountUsageStateText(account accountUsage) string {
+	switch {
+	case account.loading:
+		return "loading…"
+	case account.available && account.stale:
+		return fmt.Sprintf("%d%% stale", account.usedPercent)
+	case account.available:
+		return fmt.Sprintf("%d%% used", account.usedPercent)
+	default:
+		return "unavailable"
+	}
+}
+
+func (m tuiModel) usageTitle() string {
+	if m.usage.err != "" {
+		if hasAvailableAccountUsage(m.usage.accounts) {
+			return "Codex use · stale"
+		}
+		return "Codex use · error"
+	}
+	return "Codex weekly use"
+
+}
+
+func (m tuiModel) renderUsageLines(width int) []string {
+	innerWidth := max(1, width-2)
+	plain := m.usageLines(innerWidth)
+	lines := make([]string, 0, len(plain))
+	for index, line := range plain {
+		content := fitPlain(line, innerWidth)
+		if len(m.usage.accounts) > index {
+			account := m.usage.accounts[index]
+			switch {
+			case account.stale || !account.available && !account.loading:
+				content = warningStyle.Render(content)
+			case account.available:
+				content = infoStyle.Render(content)
 			}
-			lines = append(lines, strings.Split(ansi.Hardwrap(item, width, true), "\n")...)
-			continue
+		} else if m.usage.err != "" {
+			content = warningStyle.Render(content)
 		}
-		candidate := item
-		if current != "" {
-			candidate = current + separator + item
-		}
-		if lipgloss.Width(candidate) <= width {
-			current = candidate
-			continue
-		}
-		lines = append(lines, current)
-		current = item
-	}
-	if current != "" {
-		lines = append(lines, current)
-	}
-	if len(lines) == 0 {
-		return []string{"No local Codex accounts configured"}
+		lines = append(lines, " "+content+" ")
 	}
 	return lines
 }
@@ -1897,13 +1979,18 @@ func joinKeepRight(left, right string, width int) string {
 	if width <= 0 {
 		return ""
 	}
-	right = ansi.Truncate(right, width, "")
+	if right != "" && left != "" {
+		rightLimit := max(width/3, width-lipgloss.Width(left)-1)
+		right = ansi.Truncate(right, max(1, rightLimit), "…")
+	} else {
+		right = ansi.Truncate(right, width, "…")
+	}
 	rightWidth := lipgloss.Width(right)
 	leftLimit := width - rightWidth
 	if left != "" && right != "" && leftLimit > 0 {
 		leftLimit--
 	}
-	left = ansi.Truncate(left, max(0, leftLimit), "")
+	left = ansi.Truncate(left, max(0, leftLimit), "…")
 	padding := max(0, width-lipgloss.Width(left)-rightWidth)
 	return left + strings.Repeat(" ", padding) + right
 }
@@ -1923,21 +2010,21 @@ func joinKeepLeft(left, right string, width int) string {
 	return left + strings.Repeat(" ", padding) + right
 }
 
-func titledRule(left, right, title string, innerWidth int) string {
-	return left + titledSegment(title, innerWidth) + right
-}
-
-func titledSegment(title string, width int) string {
+func styledTitledSegment(title string, width int) string {
 	if width <= 0 {
 		return ""
 	}
 	title = strings.TrimSpace(plainDisplayText(title))
 	if title == "" || width < 4 {
-		return strings.Repeat("─", width)
+		return frame(strings.Repeat("─", width))
 	}
 	label := " " + ansi.Truncate(title, max(1, width-3), "…") + " "
 	label = ansi.Truncate(label, width, "")
-	return "─" + label + strings.Repeat("─", max(0, width-1-lipgloss.Width(label)))
+	return frame("─") + accentStyle.Render(label) + frame(strings.Repeat("─", max(0, width-1-lipgloss.Width(label))))
+}
+
+func frame(value string) string {
+	return borderStyle.Render(value)
 }
 
 func fitPlain(value string, width int) string {
@@ -1946,6 +2033,39 @@ func fitPlain(value string, width int) string {
 	}
 	value = ansi.Truncate(value, width, "")
 	return value + strings.Repeat(" ", max(0, width-lipgloss.Width(value)))
+}
+
+func fitMiddlePlain(value string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	value = plainDisplayText(value)
+	valueWidth := lipgloss.Width(value)
+	if valueWidth <= width {
+		return fitPlain(value, width)
+	}
+	if width == 1 {
+		return "…"
+	}
+	remaining := width - 1
+	leftWidth := (remaining + 1) / 2
+	rightWidth := remaining - leftWidth
+	result := ansi.Cut(value, 0, leftWidth) + "…"
+	if rightWidth > 0 {
+		result += ansi.Cut(value, valueWidth-rightWidth, valueWidth)
+	}
+	return fitPlain(result, width)
+}
+
+func renderFormField(field formField, marker string, width int) string {
+	prefix := marker + plainDisplayText(field.label) + ": "
+	valueWidth := max(1, width-lipgloss.Width(prefix))
+	value := plainDisplayText(field.value)
+	if lipgloss.Width(value) > valueWidth {
+		total := lipgloss.Width(value)
+		value = "…" + ansi.Cut(value, total-valueWidth+1, total)
+	}
+	return ansi.Truncate(prefix, max(0, width-valueWidth), "…") + value
 }
 
 func plainDisplayText(value string) string {
@@ -1957,6 +2077,23 @@ func plainDisplayText(value string) string {
 	}, value)
 }
 
+func wrappedPlainLines(value string, width int) []string {
+	width = max(1, width)
+	wrapped := ansi.Wordwrap(plainDisplayText(value), width, " ")
+	lines := []string{}
+	for _, line := range strings.Split(wrapped, "\n") {
+		lines = append(lines, strings.Split(ansi.Hardwrap(line, width, false), "\n")...)
+	}
+	if len(lines) == 0 {
+		return []string{""}
+	}
+	return lines
+}
+
+func confirmButtonRow(current modal, width int) int {
+	return 4 + len(wrappedPlainLines(current.reason, width)) + len(wrappedPlainLines(confirmationWarning, width))
+}
+
 func padBlock(value string, width, height int) string {
 	lines := strings.Split(value, "\n")
 	for i := range lines {
@@ -1966,4 +2103,18 @@ func padBlock(value string, width, height int) string {
 		lines = append(lines, strings.Repeat(" ", width))
 	}
 	return strings.Join(lines[:height], "\n")
+}
+
+func padInsetBlock(value string, width, height, left, top int) string {
+	left = max(0, min(left, max(0, width-1)))
+	top = max(0, min(top, max(0, height-1)))
+	prefix := strings.Repeat(" ", left)
+	lines := strings.Split(value, "\n")
+	for index := range lines {
+		lines[index] = prefix + lines[index]
+	}
+	if top > 0 {
+		lines = append(make([]string, top), lines...)
+	}
+	return padBlock(strings.Join(lines, "\n"), width, height)
 }
