@@ -84,7 +84,9 @@ func TestWindowSlotShortcutsAreDynamicAndDoNotStealPlainTerminalDigits(t *testin
 func TestControlModeCanSendLiteralControlG(t *testing.T) {
 	attachment := &Attachment{inputQueue: make(chan terminalInput, 1)}
 	model := tuiModel{attachment: attachment, controlMode: true}
-	updated, cmd := model.handleKey(tea.KeyPressMsg{Code: 'g', Text: "g"})
+	model.openActionMenu()
+	selectEditorAction(t, &model, "send_control_g")
+	updated, cmd := model.handleModalKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	got := updated.(tuiModel)
 	if cmd != nil || got.controlMode || !strings.Contains(got.message, "Ctrl+G") {
 		t.Fatalf("literal Ctrl+G result = %+v", got)
@@ -92,6 +94,50 @@ func TestControlModeCanSendLiteralControlG(t *testing.T) {
 	input := <-attachment.inputQueue
 	if input.kind != "key" || input.key.Code != 'g' || input.key.Mod != tea.ModCtrl {
 		t.Fatalf("literal Ctrl+G input = %+v", input)
+	}
+}
+
+func TestEditorControlsUseNavigationAndAVisibleActionMenu(t *testing.T) {
+	model := tuiModel{controlMode: true}
+	updated, cmd := model.handleKey(tea.KeyPressMsg{Code: 'h', Text: "h"})
+	got := updated.(tuiModel)
+	if cmd != nil || got.modal != nil {
+		t.Fatalf("legacy mnemonic key opened an action: %+v", got)
+	}
+	updated, cmd = got.handleKey(tea.KeyPressMsg{Code: tea.KeyTab})
+	got = updated.(tuiModel)
+	if cmd != nil || got.modal == nil || got.modal.kind != "actions" {
+		t.Fatalf("Tab did not open the action menu: %+v", got)
+	}
+	rendered := ansi.Strip(renderModal(*got.modal, 60, 24))
+	for _, want := range []string{"Editor actions", "New window", "Add SSH host", "Run safe cleanup", "↑/↓ or Tab choose · Enter run"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("action menu is missing %q:\n%s", want, rendered)
+		}
+	}
+	help := ansi.Strip(renderModal(modal{kind: "help", title: "Keyboard shortcuts"}, 55, 22))
+	for _, want := range []string{"Actions include create, add, attach, scrollback,", "delete, cleanup, send Ctrl+G, and quit."} {
+		if !strings.Contains(help, want) {
+			t.Fatalf("minimum-width help truncated %q:\n%s", want, help)
+		}
+	}
+}
+
+func TestDeleteConfirmationDefaultsToCancelAndUsesDialogControls(t *testing.T) {
+	model := tuiModel{manager: &Manager{}, controlMode: true, modal: &modal{kind: "confirm", action: "delete_window", delete: DeleteRequest{ID: testInstanceID}}}
+	updated, cmd := model.handleModalKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	got := updated.(tuiModel)
+	if cmd != nil || got.modal != nil || got.actionBusy {
+		t.Fatalf("default confirmation did not cancel safely: %+v", got)
+	}
+
+	model.modal = &modal{kind: "confirm", action: "delete_window", delete: DeleteRequest{ID: testInstanceID}}
+	updated, _ = model.handleModalKey(tea.KeyPressMsg{Code: tea.KeyRight})
+	selected := updated.(tuiModel)
+	updated, cmd = selected.handleModalKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	got = updated.(tuiModel)
+	if cmd == nil || got.modal != nil || !got.actionBusy {
+		t.Fatalf("selected Delete did not start: %+v", got)
 	}
 }
 
@@ -127,7 +173,7 @@ func TestMinimumViewportShowsTitleUsageSidebarAndFooter(t *testing.T) {
 	state := ClientState{Version: stateVersion, InstanceID: testInstanceID, Hosts: []Host{{ID: localHostID, Name: localHostName}}}
 	model := tuiModel{manager: &Manager{state: state}, width: minimumWidth, height: minimumHeight, usageText: "usage alpha 42%", message: "ready"}
 	view := ansi.Strip(model.View().Content)
-	for _, want := range []string{"multicodex editor", "usage alpha 42%", "No workspaces", "Ctrl+G controls", "ready"} {
+	for _, want := range []string{"multicodex editor", "usage alpha 42%", "No workspaces", "Ctrl+G editor controls", "ready"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("missing %q in view:\n%s", want, view)
 		}
@@ -405,16 +451,34 @@ func TestChoiceModalKeepsLargeSelectionVisible(t *testing.T) {
 
 func TestRepeatedActionsStaySingleFlight(t *testing.T) {
 	model := tuiModel{manager: &Manager{}, controlMode: true}
-	updated, cmd := model.handleKey(tea.KeyPressMsg{Code: 'c', Text: "c"})
+	model.openActionMenu()
+	selectEditorAction(t, &model, "cleanup")
+	updated, cmd := model.handleModalKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	first := updated.(tuiModel)
 	if cmd == nil || !first.actionBusy {
 		t.Fatalf("first cleanup did not start: %+v", first)
 	}
-	updated, cmd = first.handleKey(tea.KeyPressMsg{Code: 'c', Text: "c"})
+	first.openActionMenu()
+	selectEditorAction(t, &first, "cleanup")
+	updated, cmd = first.handleModalKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	second := updated.(tuiModel)
 	if cmd != nil || !second.actionBusy || !strings.Contains(second.message, "still running") {
 		t.Fatalf("repeated cleanup was not suppressed: %+v", second)
 	}
+}
+
+func selectEditorAction(t *testing.T, model *tuiModel, action string) {
+	t.Helper()
+	if model.modal == nil || model.modal.kind != "actions" {
+		t.Fatal("editor action menu is not open")
+	}
+	for i, item := range model.modal.choices {
+		if item.action == action {
+			model.modal.choice = i
+			return
+		}
+	}
+	t.Fatalf("editor action %q is missing", action)
 }
 
 func TestUIWorkersCancelAndJoinFetchesAndLongTimers(t *testing.T) {

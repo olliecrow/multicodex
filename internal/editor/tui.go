@@ -79,6 +79,7 @@ type formField struct {
 
 type choice struct {
 	label     string
+	action    string
 	host      Host
 	project   Project
 	workspace Workspace
@@ -370,62 +371,25 @@ func (m tuiModel) handleKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+g", "esc":
 		m.controlMode = false
 		m.message = "terminal input active"
-	case "q", "ctrl+c":
+	case "ctrl+c":
 		return m, tea.Quit
-	case "g":
-		if m.attachment == nil {
-			m.message = "no terminal is connected"
-			return m, nil
-		}
-		if err := m.attachment.SendKey(tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl}); err != nil {
-			m.message = err.Error()
-			return m, nil
-		}
-		m.controlMode = false
-		m.message = "sent Ctrl+G to terminal"
 	case "up":
 		m.moveSelection(-1)
 	case "down":
 		m.moveSelection(1)
+	case "home":
+		m.selectSidebarEdge(false)
+	case "end":
+		m.selectSidebarEdge(true)
+	case "pgup":
+		m.moveSelectionPage(-1)
+	case "pgdown":
+		m.moveSelectionPage(1)
 	case "enter":
 		return m.selectCurrentRow()
-	case "h":
-		m.modal = &modal{kind: "form", action: "add_host", title: "Add SSH host", fields: []formField{{label: "Name", limit: 80}, {label: "SSH alias", limit: 128}}}
-	case "p":
-		m.openHostChoice("add_project", "Choose the project host")
-	case "w":
-		m.openProjectChoice()
-	case "n":
-		m.openWorkspaceChoice()
-	case "d":
-		m.openDeleteConfirmation()
-	case "s":
-		if m.attachedID != "" {
-			if !m.beginAction("opening tmux scrollback…") {
-				return m, nil
-			}
-			m.controlMode = false
-			return m, m.track(copyModeCmd(m.manager, m.attachedHost, m.attachedID))
-		}
-	case "c":
-		if !m.beginAction("running safe cleanup…") {
-			return m, nil
-		}
-		return m, m.track(cleanupCmd(m.manager, "cleanup"))
-	case "i":
-		return m.startClipboardAttachment()
-	case "a":
-		if row, ok := m.currentAttachedRow(); ok {
-			if _, pending := m.pendingPastes[row.window.ID]; pending {
-				m.message = "this window already has an attachment waiting to paste"
-				return m, nil
-			}
-			m.modal = &modal{kind: "form", action: "put_file", title: "Attach a client file", host: row.host, workspace: row.workspace, window: row.window,
-				fields: []formField{{label: "Absolute client file path", limit: 4096}}}
-		} else {
-			m.message = "select a window before attaching a file"
-		}
-	case "?":
+	case "tab", "shift+tab", "right":
+		m.openActionMenu()
+	case "f1", "?":
 		m.modal = &modal{kind: "help", title: "Keyboard shortcuts"}
 	}
 	return m, nil
@@ -438,29 +402,52 @@ func (m tuiModel) handleModalKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	switch m.modal.kind {
 	case "help":
-		if key.Keystroke() == "enter" || key.Keystroke() == "?" {
+		if key.Keystroke() == "enter" || key.Keystroke() == "f1" || key.Keystroke() == "?" {
 			m.modal = nil
 		}
-	case "choice":
+	case "choice", "actions":
 		switch key.Keystroke() {
 		case "up":
 			m.modal.choice = max(0, m.modal.choice-1)
 		case "down":
 			m.modal.choice = min(len(m.modal.choices)-1, m.modal.choice+1)
+		case "shift+tab":
+			if len(m.modal.choices) > 0 {
+				m.modal.choice = (m.modal.choice - 1 + len(m.modal.choices)) % len(m.modal.choices)
+			}
+		case "tab":
+			if len(m.modal.choices) > 0 {
+				m.modal.choice = (m.modal.choice + 1) % len(m.modal.choices)
+			}
+		case "home":
+			m.modal.choice = 0
+		case "end":
+			m.modal.choice = max(0, len(m.modal.choices)-1)
 		case "enter":
+			if m.modal.kind == "actions" {
+				return m.activateEditorAction()
+			}
 			m.acceptChoice()
 		}
 	case "confirm":
 		switch key.Keystroke() {
-		case "y":
+		case "left", "shift+tab":
+			m.modal.choice = 0
+		case "right":
+			m.modal.choice = 1
+		case "tab":
+			m.modal.choice = 1 - m.modal.choice
+		case "enter":
+			if m.modal.choice == 0 {
+				m.modal = nil
+				return m, nil
+			}
 			if !m.beginAction("deleting owned resources…") {
 				return m, nil
 			}
 			current := *m.modal
 			m.modal = nil
 			return m, m.track(deleteCmd(m.manager, current))
-		case "n":
-			m.modal = nil
 		}
 	case "form":
 		switch key.Keystroke() {
@@ -508,9 +495,9 @@ func (m tuiModel) View() tea.View {
 	sidebar := m.renderSidebar()
 	main := m.renderMain()
 	body := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, "│", main)
-	footerLeft := "Ctrl+G controls"
+	footerLeft := "Ctrl+G editor controls"
 	if m.controlMode {
-		footerLeft = "Esc terminal · ↑↓ select · Enter open · ? shortcuts"
+		footerLeft = "↑↓ select · Enter open · Tab actions · F1 help · Esc terminal"
 	}
 	footer := joinKeepRight(footerLeft, m.message, m.width)
 	view := tea.NewView(header + "\n" + body + "\n" + footer)
@@ -558,7 +545,7 @@ func (m tuiModel) renderSidebar() string {
 		lines = append(lines, style.Render(label))
 	}
 	if len(lines) == 0 {
-		lines = append(lines, fitPlain("No workspaces", width), fitPlain("Ctrl+G then w", width))
+		lines = append(lines, fitPlain("No workspaces", width), fitPlain("Ctrl+G · Tab actions", width))
 	}
 	start := min(m.sidebarOffset, len(lines))
 	end := min(len(lines), start+height)
@@ -575,7 +562,7 @@ func (m tuiModel) renderMain() string {
 		return renderModal(*m.modal, width, height)
 	}
 	if m.attachment == nil {
-		text := "No terminal selected.\n\nCtrl+G opens editor controls.\nUse w to create a workspace, then n to create a window."
+		text := "No terminal selected.\n\nPress Ctrl+G to focus the editor.\nPress Tab for actions, then use arrows and Enter."
 		return padBlock(text, width, height)
 	}
 	return m.attachment.Render(width, height)
@@ -586,19 +573,18 @@ func renderModal(modal modal, width, height int) string {
 	switch modal.kind {
 	case "help":
 		lines = append(lines,
-			"Ctrl+G       Toggle editor controls",
-			"g            Send Ctrl+G to the terminal",
-			"Alt/⌘+1–9   Select window slot (⌘ when supported)",
-			"↑/↓, Enter   Select and open",
-			"h / p        Add host / project",
-			"w / n        New workspace / window",
-			"d            Delete selected window/workspace",
-			"s            Open 50,000-line tmux scrollback",
-			"i / a        Paste clipboard image / attach file",
-			"c            Run safe cleanup",
-			"q            Quit from editor controls",
+			"Ctrl+G       Focus the editor sidebar",
+			"↑/↓, Enter   Select and open a window",
+			"Home/End     Move to the first/last sidebar item",
+			"Tab / →      Open the editor action menu",
+			"Alt/⌘+1–9   Select a window slot (⌘ when supported)",
+			"F1           Show or close this help",
+			"Esc          Return to terminal input",
+			"Ctrl+C       Quit while editor controls are active",
+			"", "Actions include create, add, attach, scrollback,",
+			"delete, cleanup, send Ctrl+G, and quit.",
 			"", "Esc or Enter closes help")
-	case "choice":
+	case "choice", "actions":
 		visible := max(1, height-4)
 		start := max(0, modal.choice-visible/2)
 		start = min(start, max(0, len(modal.choices)-visible))
@@ -611,7 +597,11 @@ func renderModal(modal modal, width, height int) string {
 			}
 			lines = append(lines, line)
 		}
-		lines = append(lines, "", "↑/↓ choose · Enter continue · Esc cancel")
+		verb := "continue"
+		if modal.kind == "actions" {
+			verb = "run"
+		}
+		lines = append(lines, "", "↑/↓ or Tab choose · Enter "+verb+" · Esc cancel")
 	case "form":
 		for i, field := range modal.fields {
 			marker := "  "
@@ -622,7 +612,13 @@ func renderModal(modal modal, width, height int) string {
 		}
 		lines = append(lines, "", "Enter next/save · Tab change field · Esc cancel")
 	case "confirm":
-		lines = append(lines, modal.reason, "", "This action cannot be undone.", "Press y to confirm or n/Esc to cancel.")
+		cancel, remove := "[ Cancel ]", "[ Delete ]"
+		if modal.choice == 0 {
+			cancel = lipgloss.NewStyle().Reverse(true).Render(cancel)
+		} else {
+			remove = lipgloss.NewStyle().Reverse(true).Render(remove)
+		}
+		lines = append(lines, modal.reason, "", "This action cannot be undone.", "", cancel+"   "+remove, "←/→ or Tab choose · Enter continue · Esc cancel")
 	}
 	return padBlock(strings.Join(lines, "\n"), width, height)
 }
@@ -765,6 +761,29 @@ func (m *tuiModel) moveSelection(delta int) {
 	m.ensureSelectionVisible()
 }
 
+func (m *tuiModel) moveSelectionPage(direction int) {
+	if len(m.rows) == 0 {
+		return
+	}
+	if m.selectedRow < 0 {
+		m.selectedRow = 0
+	} else {
+		m.selectedRow = max(0, min(len(m.rows)-1, m.selectedRow+direction*max(1, m.bodyHeight()-1)))
+	}
+	m.ensureSelectionVisible()
+}
+
+func (m *tuiModel) selectSidebarEdge(last bool) {
+	if len(m.rows) == 0 {
+		return
+	}
+	m.selectedRow = 0
+	if last {
+		m.selectedRow = len(m.rows) - 1
+	}
+	m.ensureSelectionVisible()
+}
+
 func (m *tuiModel) ensureSelectionVisible() {
 	height := m.bodyHeight()
 	if len(m.rows) <= height {
@@ -778,6 +797,87 @@ func (m *tuiModel) ensureSelectionVisible() {
 		m.sidebarOffset = m.selectedRow - height + 1
 	}
 	m.sidebarOffset = min(m.sidebarOffset, max(0, len(m.rows)-height))
+}
+
+func (m *tuiModel) openActionMenu() {
+	m.modal = &modal{kind: "actions", title: "Editor actions", choices: []choice{
+		{label: "New window", action: "new_window"},
+		{label: "New workspace", action: "new_workspace"},
+		{label: "Add project", action: "add_project"},
+		{label: "Add SSH host", action: "add_host"},
+		{label: "Attach a client file", action: "attach_file"},
+		{label: "Attach a clipboard image", action: "attach_clipboard"},
+		{label: "Open 50,000-line scrollback", action: "scrollback"},
+		{label: "Delete selected window or workspace", action: "delete"},
+		{label: "Run safe cleanup", action: "cleanup"},
+		{label: "Send Ctrl+G to the terminal", action: "send_control_g"},
+		{label: "Keyboard help", action: "help"},
+		{label: "Quit multicodex editor", action: "quit"},
+	}}
+}
+
+func (m tuiModel) activateEditorAction() (tea.Model, tea.Cmd) {
+	if m.modal == nil || len(m.modal.choices) == 0 || m.modal.choice < 0 || m.modal.choice >= len(m.modal.choices) {
+		return m, nil
+	}
+	action := m.modal.choices[m.modal.choice].action
+	m.modal = nil
+	switch action {
+	case "new_window":
+		m.openWorkspaceChoice()
+	case "new_workspace":
+		m.openProjectChoice()
+	case "add_project":
+		m.openHostChoice("add_project", "Choose the project host")
+	case "add_host":
+		m.modal = &modal{kind: "form", action: "add_host", title: "Add SSH host", fields: []formField{{label: "Name", limit: 80}, {label: "SSH alias", limit: 128}}}
+	case "attach_file":
+		if row, ok := m.currentAttachedRow(); ok {
+			if _, pending := m.pendingPastes[row.window.ID]; pending {
+				m.message = "this window already has an attachment waiting to paste"
+				return m, nil
+			}
+			m.modal = &modal{kind: "form", action: "put_file", title: "Attach a client file", host: row.host, workspace: row.workspace, window: row.window,
+				fields: []formField{{label: "Absolute client file path", limit: 4096}}}
+		} else {
+			m.message = "select a window before attaching a file"
+		}
+	case "attach_clipboard":
+		return m.startClipboardAttachment()
+	case "scrollback":
+		if m.attachedID == "" {
+			m.message = "select a connected window before opening scrollback"
+			return m, nil
+		}
+		if !m.beginAction("opening tmux scrollback…") {
+			return m, nil
+		}
+		m.controlMode = false
+		return m, m.track(copyModeCmd(m.manager, m.attachedHost, m.attachedID))
+	case "delete":
+		m.openDeleteConfirmation()
+	case "cleanup":
+		if !m.beginAction("running safe cleanup…") {
+			return m, nil
+		}
+		return m, m.track(cleanupCmd(m.manager, "cleanup"))
+	case "send_control_g":
+		if m.attachment == nil {
+			m.message = "no terminal is connected"
+			return m, nil
+		}
+		if err := m.attachment.SendKey(tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl}); err != nil {
+			m.message = err.Error()
+			return m, nil
+		}
+		m.controlMode = false
+		m.message = "sent Ctrl+G to terminal"
+	case "help":
+		m.modal = &modal{kind: "help", title: "Keyboard shortcuts"}
+	case "quit":
+		return m, tea.Quit
+	}
+	return m, nil
 }
 
 func (m *tuiModel) openHostChoice(action, title string) {
@@ -798,7 +898,7 @@ func (m *tuiModel) openProjectChoice() {
 		}
 	}
 	if len(choices) == 0 {
-		m.message = "add a project first (Ctrl+G, p)"
+		m.message = "add a project first from the Actions menu"
 		return
 	}
 	m.modal = &modal{kind: "choice", action: "create_workspace", title: "Choose the project", choices: choices}
@@ -817,7 +917,7 @@ func (m *tuiModel) openWorkspaceChoice() {
 		}
 	}
 	if len(choices) == 0 {
-		m.message = "create a workspace first (Ctrl+G, w)"
+		m.message = "create a workspace first from the Actions menu"
 		return
 	}
 	m.modal = &modal{kind: "choice", action: "create_window", title: "Choose the workspace", choices: choices}
