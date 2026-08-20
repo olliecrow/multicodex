@@ -112,7 +112,12 @@ jobs:
           printf '{"tokens":{"%s":"%s","%s":"%s"}}\n' \
             "access_token" "abcdefghijklmnopqrstuvwxyz123456" \
             "refresh_token" "ABCDEFGHIJKLMNOPQRSTUVWXYZ123456" > "${tmp_bad_json}"
-          printf '%s@%s\n' "private.user" "gmail.com" > "${tmp_bad_email}"
+          {
+            printf '%s@%s\n' "private.user" "gmail.com"
+            printf '%s@%s\n' "user" "example.com.evil.com"
+            printf '"%s"@%s\n' "user" "gmail.com"
+            printf '%s@%s\n' "user" "example.xn--p1ai"
+          } > "${tmp_bad_email}"
           bash scripts/security/check-sensitive-text.sh --context=policy-selftest "${tmp_ok}"
           if bash scripts/security/check-sensitive-text.sh --context=policy-selftest "${tmp_bad}"; then
             echo "expected policy self-test failure did not occur" >&2
@@ -135,7 +140,12 @@ jobs:
           tmp_bad_email="$(mktemp)"
           printf 'fix: %s=%s\n' "token" "abc123456789XYZ" > "${tmp_bad}"
           printf '{"tokens":{"%s":"%s"}}\n' "access_token" "abcdefghijklmnopqrstuvwxyz123456" > "${tmp_bad_json}"
-          printf '%s@%s\n' "private.user" "gmail.com" > "${tmp_bad_email}"
+          {
+            printf '%s@%s\n' "private.user" "gmail.com"
+            printf '%s@%s\n' "user" "example.com.evil.com"
+            printf '"%s"@%s\n' "user" "gmail.com"
+            printf '%s@%s\n' "user" "example.xn--p1ai"
+          } > "${tmp_bad_email}"
           if PATH="/usr/bin:/bin" bash scripts/security/check-sensitive-text.sh --context=policy-fallback-selftest "${tmp_bad}"; then
             echo "expected fallback policy self-test failure did not occur" >&2
             exit 1
