@@ -165,8 +165,7 @@ func (s *hostStore) validateRegistry(registry hostRegistry) error {
 		}
 		if workspace.Git {
 			expectedPath := filepath.Join(s.worktreeRoot, workspace.ProjectID, workspace.ID)
-			expectedBranch := "multicodex/" + slug(workspace.Name) + "-" + workspace.ID[:8]
-			if workspace.Path != expectedPath || validateAbsolutePath(workspace.GitCommonDir, "Git common directory") != nil || workspace.Branch != expectedBranch || !safeStoredBaseRef(workspace.BaseRef) {
+			if workspace.Path != expectedPath || validateAbsolutePath(workspace.GitCommonDir, "Git common directory") != nil || !validOwnedBranch(workspace.Branch, workspace.ID) || !safeStoredBaseRef(workspace.BaseRef) {
 				return errors.New("editor host state contains a Git workspace outside its exact owned path")
 			}
 		} else {
@@ -198,7 +197,7 @@ func (s *hostStore) validateRegistry(registry hostRegistry) error {
 			return errors.New("editor host state contains a duplicate window name")
 		}
 		windowNames[windowName] = true
-		if window.Session != "mce-"+window.ID || window.Launch != "shell" && window.Launch != "codex" {
+		if window.Session != "mce-"+window.ID {
 			return errors.New("editor host state contains invalid window ownership metadata")
 		}
 		if window.CreatePending && window.DeletePending {

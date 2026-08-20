@@ -82,6 +82,16 @@ type actionResultMsg struct {
 	err      error
 }
 
+type createdWorkspace struct {
+	workspace Workspace
+	window    Window
+}
+
+type renamedResource struct {
+	kind string
+	name string
+}
+
 type sidebarRow struct {
 	kind      string
 	host      Host
@@ -128,6 +138,7 @@ type choice struct {
 	host      Host
 	project   Project
 	workspace Workspace
+	window    Window
 }
 
 type modal struct {
@@ -142,7 +153,6 @@ type modal struct {
 	project   Project
 	workspace Workspace
 	window    Window
-	launch    string
 	delete    DeleteRequest
 	reason    string
 }
@@ -472,6 +482,10 @@ func (m tuiModel) handleKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.moveSelectionPage(1)
 	case "enter":
 		return m.selectCurrentRow()
+	case "ctrl+n":
+		return m.createForSelection()
+	case "f2":
+		m.openRename()
 	case "tab", "shift+tab", "right":
 		m.openActionMenu()
 	}
@@ -696,8 +710,7 @@ func (m tuiModel) activateModalChoice() (tea.Model, tea.Cmd) {
 	if m.modal.kind == "actions" {
 		return m.activateEditorAction()
 	}
-	m.acceptChoice()
-	return m, nil
+	return m.acceptChoice()
 }
 
 func (m tuiModel) activateConfirmation() (tea.Model, tea.Cmd) {
@@ -797,7 +810,7 @@ func (m tuiModel) View() tea.View {
 	sidebarLines, mainLines := strings.Split(sidebar, "\n"), strings.Split(main, "\n")
 	usageLines := m.renderUsageLines(layout.sidebarWidth)
 	bodyLines := []string{
-		frame("┌") + styledTitledSegment("Workspaces", layout.sidebarWidth) + frame("┬") + styledTitledSegment(m.mainTitle(), layout.terminalWidth) + frame("┐"),
+		frame("┌") + styledTitledSegment("Projects", layout.sidebarWidth) + frame("┬") + styledTitledSegment(m.mainTitle(), layout.terminalWidth) + frame("┐"),
 	}
 	for i := 0; i < layout.bodyHeight; i++ {
 		switch {
@@ -812,9 +825,9 @@ func (m tuiModel) View() tea.View {
 	bodyLines = append(bodyLines, frame("└"+strings.Repeat("─", layout.sidebarWidth)+"┴"+strings.Repeat("─", layout.terminalWidth)+"┘"))
 	footerLeft := "Terminal · Ctrl+G: sidebar · F1 Help"
 	if m.controlMode {
-		footerLeft = "Sidebar · ↑/↓ · Enter open · Tab Actions · Esc back"
+		footerLeft = m.sidebarFooter()
 	} else if m.attachment == nil {
-		footerLeft = "No terminal · Click window · Actions: New window · F1 Help"
+		footerLeft = "No terminal · Select a project or workspace, then Enter · F1 Help"
 	}
 	footer := joinKeepRight(footerLeft, m.message, m.width)
 	content := header + "\n" + strings.Join(bodyLines, "\n") + "\n" + footer
@@ -872,7 +885,7 @@ func (m tuiModel) renderSidebar() string {
 		lines = append(lines, style.Render(label))
 	}
 	if len(lines) == 0 {
-		lines = append(lines, fitPlain(" No workspaces", width), fitPlain(" Ctrl+G → Tab: Actions", width))
+		lines = append(lines, fitPlain(" No projects", width), fitPlain(" Ctrl+G → Tab: Actions", width))
 	}
 	start := min(m.sidebarOffset, len(lines))
 	end := min(len(lines), start+height)
@@ -889,13 +902,37 @@ func (m tuiModel) renderMain() string {
 		return renderModal(*m.modal, width, height)
 	}
 	if m.attachment == nil {
-		text := "Set up your first terminal\n\n1. Open Actions: click [ Actions ].\n   Keyboard: Ctrl+G, then Tab.\n2. Add a project.\n3. Create a workspace.\n4. Create a window."
-		if len(m.rows) > 0 {
-			text = "No terminal is open\n\nClick a window in Workspaces.\nOr choose Actions → New window.\n\nKeyboard: Ctrl+G, select with ↑/↓, then Enter."
+		text := "Set up your first terminal\n\n1. Open Actions: click [ Actions ].\n   Keyboard: Ctrl+G, then Tab.\n2. Add a project.\n3. Create a named workspace.\n   Its first terminal opens automatically."
+		if row, ok := m.selectedSidebarRow(); ok {
+			switch row.kind {
+			case "project":
+				text = "Project selected\n\nPress Enter to create a named workspace.\nIts first terminal opens automatically.\n\nOr click Actions."
+			case "workspace":
+				text = "Workspace selected\n\nPress Enter to create and open a new terminal.\nPress F2 to rename the workspace."
+			case "window":
+				text = "No terminal is open\n\nPress Enter or click the selected window to open it.\nPress Ctrl+N for another terminal."
+			}
 		}
 		return padInsetBlock(text, width, height, 1, 1)
 	}
 	return m.attachment.Render(width, height)
+}
+
+func (m tuiModel) sidebarFooter() string {
+	row, ok := m.selectedSidebarRow()
+	if !ok {
+		return "Sidebar · Tab: Actions · Esc: back"
+	}
+	switch row.kind {
+	case "project":
+		return "Project · Enter/Ctrl+N: new workspace · Tab: Actions · Esc: back"
+	case "workspace":
+		return "Workspace · Enter/Ctrl+N: new window · F2: rename · Esc: back"
+	case "window":
+		return "Window · Enter: open · Ctrl+N: new window · F2: rename · Esc: back"
+	default:
+		return "Sidebar · Tab: Actions · Esc: back"
+	}
 }
 
 func (m tuiModel) focusLabel() string {
@@ -979,12 +1016,14 @@ func renderModal(modal modal, width, height int) string {
 func helpModalContent() []string {
 	return []string{
 		"Mouse",
-		"  Click windows, actions, fields, choices, buttons",
+		"  Click project, workspace, or window rows",
+		"  Click actions, fields, choices, and buttons",
 		"  Wheel: move lists or scroll terminal history",
 		"  Click terminal: return input to the terminal",
 		"Keyboard",
 		"  Ctrl+G: focus the sidebar",
-		"  ↑/↓: select · Enter: open · Tab: Actions",
+		"  ↑/↓: select · Enter: open or create · Tab: Actions",
+		"  Ctrl+N: create for selection · F2: rename selection",
 		"  F1: Help · Esc: return to terminal",
 		"  In the sidebar, Ctrl+C: quit",
 		"  Home/End/Page Up/Page Down: move through list",
@@ -1012,8 +1051,8 @@ func modalPrimaryLabel(current modal) string {
 		label = "Add project"
 	case "create_workspace":
 		label = "Create workspace"
-	case "create_window":
-		label = "Create window"
+	case "rename_workspace", "rename_window":
+		label = "Rename"
 	case "put_file":
 		label = "Attach file"
 	}
@@ -1128,10 +1167,20 @@ func (m tuiModel) selectWindowSlot(slot int) (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) selectCurrentRow() (tea.Model, tea.Cmd) {
-	if m.selectedRow < 0 || m.selectedRow >= len(m.rows) || m.rows[m.selectedRow].kind != "window" {
+	if m.selectedRow < 0 || m.selectedRow >= len(m.rows) {
 		return m, nil
 	}
 	row := m.rows[m.selectedRow]
+	switch row.kind {
+	case "project":
+		m.openWorkspaceName(row.host, row.project)
+		return m, nil
+	case "workspace":
+		return m.startCreateWindow(row)
+	case "window":
+	default:
+		return m, nil
+	}
 	if row.window.ID == m.attachedID {
 		m.controlMode = false
 		if m.attachingID != "" {
@@ -1147,6 +1196,19 @@ func (m tuiModel) selectCurrentRow() (tea.Model, tea.Cmd) {
 	}
 	m.controlMode = false
 	return m, m.requestAttach(row)
+}
+
+func (m tuiModel) createForSelection() (tea.Model, tea.Cmd) {
+	row, ok := m.selectedSidebarRow()
+	if !ok {
+		m.openActionMenu()
+		return m, nil
+	}
+	if row.kind == "project" {
+		m.openWorkspaceName(row.host, row.project)
+		return m, nil
+	}
+	return m.startCreateWindow(row)
 }
 
 func (m *tuiModel) requestAttach(row sidebarRow) tea.Cmd {
@@ -1220,29 +1282,58 @@ func (m *tuiModel) ensureSelectionVisible() {
 }
 
 func (m *tuiModel) openActionMenu() {
-	m.modal = &modal{kind: "actions", title: "Editor actions", choices: []choice{
-		{label: "New window…", action: "new_window"},
-		{label: "New workspace…", action: "new_workspace"},
-		{label: "Add project…", action: "add_project"},
-		{label: "Add SSH host…", action: "add_host"},
-		{label: "Attach file…", action: "attach_file"},
-		{label: "Attach clipboard image", action: "attach_clipboard"},
-		{label: "Open terminal history", action: "scrollback"},
-		{label: "Delete selected window or workspace…", action: "delete"},
-		{label: "Run safe cleanup", action: "cleanup"},
-		{label: "Send Ctrl+G to terminal", action: "send_control_g"},
-		{label: "Help", action: "help"},
-		{label: "Quit multicodex editor", action: "quit"},
-	}}
+	choices := []choice{}
+	if row, ok := m.selectedSidebarRow(); ok {
+		switch row.kind {
+		case "project":
+			choices = append(choices, choice{label: "New workspace in " + row.project.Name + "…", action: "new_workspace_selected", host: row.host, project: row.project})
+		case "workspace":
+			choices = append(choices,
+				choice{label: "New window in " + row.workspace.Name, action: "new_window_selected", host: row.host, project: row.project, workspace: row.workspace},
+				choice{label: "Rename workspace…", action: "rename_selected", host: row.host, project: row.project, workspace: row.workspace},
+			)
+		case "window":
+			choices = append(choices,
+				choice{label: "New window in " + row.workspace.Name, action: "new_window_selected", host: row.host, project: row.project, workspace: row.workspace, window: row.window},
+				choice{label: "Rename window…", action: "rename_selected", host: row.host, project: row.project, workspace: row.workspace, window: row.window},
+			)
+		}
+	}
+	choices = append(choices,
+		choice{label: "New workspace…", action: "new_workspace"},
+		choice{label: "New window…", action: "new_window"},
+		choice{label: "Add project…", action: "add_project"},
+		choice{label: "Add SSH host…", action: "add_host"},
+		choice{label: "Attach file…", action: "attach_file"},
+		choice{label: "Attach clipboard image", action: "attach_clipboard"},
+		choice{label: "Open terminal history", action: "scrollback"},
+		choice{label: "Delete selected window or workspace…", action: "delete"},
+		choice{label: "Run safe cleanup", action: "cleanup"},
+		choice{label: "Send Ctrl+G to terminal", action: "send_control_g"},
+		choice{label: "Help", action: "help"},
+		choice{label: "Quit multicodex editor", action: "quit"},
+	)
+	m.modal = &modal{kind: "actions", title: "Editor actions", choices: choices}
 }
 
 func (m tuiModel) activateEditorAction() (tea.Model, tea.Cmd) {
 	if m.modal == nil || len(m.modal.choices) == 0 || m.modal.choice < 0 || m.modal.choice >= len(m.modal.choices) {
 		return m, nil
 	}
-	action := m.modal.choices[m.modal.choice].action
+	selected := m.modal.choices[m.modal.choice]
+	action := selected.action
 	m.modal = nil
 	switch action {
+	case "new_window_selected":
+		return m.startCreateWindow(sidebarRow{kind: "workspace", host: selected.host, project: selected.project, workspace: selected.workspace})
+	case "new_workspace_selected":
+		m.openWorkspaceName(selected.host, selected.project)
+	case "rename_selected":
+		kind := "workspace"
+		if selected.window.ID != "" {
+			kind = "window"
+		}
+		m.openRenameRow(sidebarRow{kind: kind, host: selected.host, project: selected.project, workspace: selected.workspace, window: selected.window})
 	case "new_window":
 		m.openWorkspaceChoice()
 	case "new_workspace":
@@ -1340,13 +1431,59 @@ func (m *tuiModel) openWorkspaceChoice() {
 		m.message = "create a workspace first from the Actions menu"
 		return
 	}
-	m.modal = &modal{kind: "choice", action: "choose_window_launch", title: "Choose a workspace for the new window", choices: choices}
+	m.modal = &modal{kind: "choice", action: "create_window", title: "Choose a workspace for the new window", choices: choices}
 }
 
-func (m *tuiModel) acceptChoice() {
+func (m tuiModel) selectedSidebarRow() (sidebarRow, bool) {
+	if m.selectedRow < 0 || m.selectedRow >= len(m.rows) {
+		return sidebarRow{}, false
+	}
+	return m.rows[m.selectedRow], true
+}
+
+func (m *tuiModel) openWorkspaceName(host Host, project Project) {
+	m.modal = &modal{kind: "form", action: "create_workspace", title: "Create workspace — " + project.Name, host: host, project: project,
+		fields: []formField{{label: "Workspace name", limit: 80}}}
+}
+
+func (m *tuiModel) openRename() {
+	row, ok := m.selectedSidebarRow()
+	if !ok {
+		m.message = "select a workspace or window to rename"
+		return
+	}
+	m.openRenameRow(row)
+}
+
+func (m *tuiModel) openRenameRow(row sidebarRow) {
+	switch row.kind {
+	case "workspace":
+		m.modal = &modal{kind: "form", action: "rename_workspace", title: "Rename workspace", host: row.host, workspace: row.workspace,
+			fields: []formField{{label: "Workspace name", value: row.workspace.Name, limit: 80}}}
+	case "window":
+		m.modal = &modal{kind: "form", action: "rename_window", title: "Rename window", host: row.host, workspace: row.workspace, window: row.window,
+			fields: []formField{{label: "Window name", value: row.window.Name, limit: 80}}}
+	default:
+		m.message = "select a workspace or window to rename"
+	}
+}
+
+func (m tuiModel) startCreateWindow(row sidebarRow) (tea.Model, tea.Cmd) {
+	if row.workspace.ID == "" {
+		m.message = "select a workspace before creating a window"
+		return m, nil
+	}
+	if !m.beginAction("creating a terminal in " + row.workspace.Name + "…") {
+		return m, nil
+	}
+	m.modal = nil
+	return m, m.track(createWindowCmd(m.manager, row.host.ID, row.workspace.ID))
+}
+
+func (m tuiModel) acceptChoice() (tea.Model, tea.Cmd) {
 	if len(m.modal.choices) == 0 {
 		m.modal = nil
-		return
+		return m, nil
 	}
 	selected := m.modal.choices[m.modal.choice]
 	action := m.modal.action
@@ -1355,21 +1492,11 @@ func (m *tuiModel) acceptChoice() {
 		m.modal = &modal{kind: "form", action: action, title: "Add project — " + selected.host.Name, host: selected.host,
 			fields: []formField{{label: "Project name", limit: 80}, {label: "Absolute host directory path", limit: 4096}}}
 	case "create_workspace":
-		m.modal = &modal{kind: "form", action: action, title: "Create workspace — " + selected.project.Name, host: selected.host, project: selected.project,
-			fields: []formField{{label: "Workspace name", limit: 80}}}
-	case "choose_window_launch":
-		m.modal = &modal{kind: "choice", action: "create_window", title: "Choose what to start", choices: []choice{
-			{label: "Shell — open a normal terminal", action: "shell", host: selected.host, project: selected.project, workspace: selected.workspace},
-			{label: "Codex — start multicodex Codex CLI", action: "codex", host: selected.host, project: selected.project, workspace: selected.workspace},
-		}}
+		m.openWorkspaceName(selected.host, selected.project)
 	case "create_window":
-		name := defaultShellWin
-		if selected.action == "codex" {
-			name = "Codex"
-		}
-		m.modal = &modal{kind: "form", action: action, title: "Create window — " + selected.workspace.Name, host: selected.host, project: selected.project, workspace: selected.workspace, launch: selected.action,
-			fields: []formField{{label: "Window name", value: name, limit: 80}}}
+		return m.startCreateWindow(sidebarRow{kind: "workspace", host: selected.host, project: selected.project, workspace: selected.workspace})
 	}
+	return m, nil
 }
 
 func (m *tuiModel) openDeleteConfirmation() {
@@ -1427,8 +1554,13 @@ func (m tuiModel) handleActionResult(msg actionResultMsg) (tea.Model, tea.Cmd) {
 		m.message = "added host " + value.Name
 	case Project:
 		m.message = "added project " + value.Name
-	case Workspace:
-		m.message = "created workspace " + value.Name
+	case createdWorkspace:
+		m.message = "created workspace " + value.workspace.Name + " with " + value.window.Name
+		m.selectOnRefreshID = value.window.ID
+		if host, ok := m.manager.findHost(msg.hostID); ok {
+			cmd := m.requestAttach(sidebarRow{kind: "window", host: host, workspace: value.workspace, window: value.window})
+			return m, tea.Batch(m.startRefresh(), cmd)
+		}
 	case Window:
 		m.message = "created window " + value.Name
 		m.selectOnRefreshID = value.ID
@@ -1436,6 +1568,8 @@ func (m tuiModel) handleActionResult(msg actionResultMsg) (tea.Model, tea.Cmd) {
 			cmd := m.requestAttach(sidebarRow{kind: "window", host: host, window: value})
 			return m, tea.Batch(m.startRefresh(), cmd)
 		}
+	case renamedResource:
+		m.message = "renamed " + value.kind + " to " + value.name
 	case DeleteResult:
 		if value.Deleted {
 			m.message = "deleted"
@@ -1920,7 +2054,7 @@ func copyModeCmd(manager *Manager, hostID, windowID string) tea.Cmd {
 
 func submitFormCmd(manager *Manager, form modal) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(manager.Context(), 2*time.Minute+15*time.Second)
+		ctx, cancel := context.WithTimeout(manager.Context(), 2*time.Minute+45*time.Second)
 		defer cancel()
 		result := actionResultMsg{action: form.action, hostID: form.host.ID, form: &form}
 		switch form.action {
@@ -1929,9 +2063,23 @@ func submitFormCmd(manager *Manager, form modal) tea.Cmd {
 		case "add_project":
 			result.value, result.err = manager.AddProject(ctx, form.host.ID, form.fields[0].value, form.fields[1].value)
 		case "create_workspace":
-			result.value, result.err = manager.CreateWorkspace(ctx, form.host.ID, CreateWorkspaceRequest{ProjectID: form.project.ID, ProjectPath: form.project.Path, Name: form.fields[0].value})
-		case "create_window":
-			result.value, result.err = manager.CreateWindow(ctx, form.host.ID, CreateWindowRequest{WorkspaceID: form.workspace.ID, Name: form.fields[0].value, Launch: form.launch})
+			workspace, window, err := manager.CreateWorkspaceWithWindow(ctx, form.host.ID, CreateWorkspaceRequest{ProjectID: form.project.ID, ProjectPath: form.project.Path, Name: form.fields[0].value})
+			result.value, result.err = createdWorkspace{workspace: workspace, window: window}, err
+			if err != nil && workspace.ID != "" {
+				result.form = nil
+			}
+		case "rename_workspace":
+			result.targetID = form.workspace.ID
+			result.err = manager.RenameWorkspace(ctx, form.host.ID, RenameRequest{ID: form.workspace.ID, Name: form.fields[0].value})
+			if result.err == nil {
+				result.value = renamedResource{kind: "workspace", name: form.fields[0].value}
+			}
+		case "rename_window":
+			result.targetID = form.window.ID
+			result.err = manager.RenameWindow(ctx, form.host.ID, RenameRequest{ID: form.window.ID, Name: form.fields[0].value})
+			if result.err == nil {
+				result.value = renamedResource{kind: "window", name: form.fields[0].value}
+			}
 		case "put_file":
 			data, extension, err := ReadAttachment(form.fields[0].value)
 			if err != nil {
@@ -1942,6 +2090,15 @@ func submitFormCmd(manager *Manager, form modal) tea.Cmd {
 			result.value, result.err = manager.PutAttachment(ctx, form.host.ID, PutAttachmentRequest{WorkspaceID: form.workspace.ID, Extension: extension, Data: data})
 		}
 		return result
+	}
+}
+
+func createWindowCmd(manager *Manager, hostID, workspaceID string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(manager.Context(), 30*time.Second)
+		defer cancel()
+		window, err := manager.CreateWindow(ctx, hostID, CreateWindowRequest{WorkspaceID: workspaceID})
+		return actionResultMsg{action: "create_window", hostID: hostID, value: window, err: err}
 	}
 }
 

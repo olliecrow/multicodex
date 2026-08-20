@@ -51,7 +51,7 @@ func TestSnapshotKeepsOtherHostStateWhenWindowDisappearsDuringCapture(t *testing
 	}
 	workspace.Path = workspace.ProjectPath
 	window := Window{
-		ID: mustID(t), WorkspaceID: workspace.ID, Name: "Terminal", Launch: "shell",
+		ID: mustID(t), WorkspaceID: workspace.ID, Name: "Terminal",
 		CreatedAt: time.Now().UTC(), LastUsedAt: time.Now().UTC(),
 	}
 	window.Session = "mce-" + window.ID

@@ -17,7 +17,7 @@ import (
 	"github.com/olliecrow/multicodex/internal/monitor/usage"
 )
 
-func TestSidebarHidesEmptyProjectsGroupsWorkspacesAndUsesDynamicSlots(t *testing.T) {
+func TestSidebarShowsProjectsGroupsWorkspacesAndUsesDynamicSlots(t *testing.T) {
 	hostID := "111111111111111111111111"
 	projectAID := "222222222222222222222222"
 	projectBID := "333333333333333333333333"
@@ -52,7 +52,7 @@ func TestSidebarHidesEmptyProjectsGroupsWorkspacesAndUsesDynamicSlots(t *testing
 	manager := &Manager{state: state}
 	model := tuiModel{manager: manager, statuses: []HostStatus{status}, selectedRow: -1}
 	model.rebuildRows()
-	if len(model.rows) != 6 {
+	if len(model.rows) != 7 {
 		t.Fatalf("rows = %+v", model.rows)
 	}
 	if model.rows[0].project.Name != "Beta" || model.rows[2].slot != 1 {
@@ -61,10 +61,8 @@ func TestSidebarHidesEmptyProjectsGroupsWorkspacesAndUsesDynamicSlots(t *testing
 	if model.rows[3].project.Name != "Alpha" || model.rows[5].slot != 2 {
 		t.Fatalf("second project and slot mismatch: %+v", model.rows)
 	}
-	for _, row := range model.rows {
-		if row.project.Name == "Empty" {
-			t.Fatal("project without a workspace must remain hidden")
-		}
+	if model.rows[6].kind != "project" || model.rows[6].project.Name != "Empty" {
+		t.Fatalf("empty project is not directly selectable: %+v", model.rows)
 	}
 }
 
@@ -131,49 +129,100 @@ func TestEditorControlsUseNavigationAndAVisibleActionMenu(t *testing.T) {
 		}
 	}
 	help := ansi.Strip(renderModal(modal{kind: "help", title: "Controls"}, helpWidth, (tuiModel{width: minimumWidth, height: minimumHeight}).bodyHeight()))
-	for _, want := range []string{"Click windows, actions, fields, choices, buttons", "scroll terminal history", "In the sidebar, Ctrl+C: quit", "● running · ○ stopped", "Need terminal Ctrl+G?", "[ Close ]"} {
+	for _, want := range []string{"Click project, workspace, or window rows", "Ctrl+N: create for selection", "scroll terminal history", "In the sidebar, Ctrl+C: quit", "● running · ○ stopped", "Need terminal Ctrl+G?", "[ Close ]"} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("minimum-width help truncated %q:\n%s", want, help)
 		}
 	}
 }
 
-func TestWindowCreationUsesAChoiceInsteadOfFreeTextLaunchInput(t *testing.T) {
+func TestWorkspaceRequiresANameAndWindowCreationIsDirect(t *testing.T) {
 	host := Host{ID: localHostID, Name: localHostName}
 	project := Project{ID: "111111111111111111111111", Name: "Project"}
 	workspace := Workspace{ID: "222222222222222222222222", Name: "Workspace"}
 
-	for _, test := range []struct {
-		choice int
-		launch string
-		name   string
-	}{
-		{choice: 0, launch: "shell", name: defaultShellWin},
-		{choice: 1, launch: "codex", name: "Codex"},
-	} {
-		model := tuiModel{modal: &modal{kind: "choice", action: "choose_window_launch", choices: []choice{{host: host, project: project, workspace: workspace}}}}
-		model.acceptChoice()
-		if model.modal == nil || model.modal.kind != "choice" || model.modal.action != "create_window" || len(model.modal.choices) != 2 {
-			t.Fatalf("launch choice = %+v", model.modal)
-		}
-		for _, want := range []string{"Shell — open a normal terminal", "Codex — start multicodex Codex CLI"} {
-			if !strings.Contains(ansi.Strip(renderModal(*model.modal, 60, 20)), want) {
-				t.Fatalf("launch choice is missing %q", want)
-			}
-		}
+	model := tuiModel{modal: &modal{kind: "choice", action: "create_workspace", choices: []choice{{host: host, project: project}}}}
+	updated, cmd := model.acceptChoice()
+	model = updated.(tuiModel)
+	if cmd != nil || model.modal == nil || model.modal.kind != "form" || model.modal.action != "create_workspace" || len(model.modal.fields) != 1 || model.modal.fields[0].label != "Workspace name" {
+		t.Fatalf("workspace name form = %+v, cmd=%v", model.modal, cmd)
+	}
 
-		model.modal.choice = test.choice
-		model.acceptChoice()
-		if model.modal == nil || model.modal.kind != "form" || model.modal.launch != test.launch || len(model.modal.fields) != 1 || model.modal.fields[0].value != test.name {
-			t.Fatalf("%s window form = %+v", test.launch, model.modal)
-		}
-		rendered := renderModal(*model.modal, 60, 20)
-		if strings.Contains(rendered, "shell or codex") {
-			t.Fatalf("%s window form kept the free-text launch field", test.launch)
-		}
-		if !strings.Contains(rendered, "Enter: create window") || !strings.Contains(rendered, "Ctrl+U: clear this field") || strings.Contains(rendered, "Tab/↑/↓: next field") {
-			t.Fatalf("%s single-field form has unclear guidance: %q", test.launch, rendered)
-		}
+	model = tuiModel{manager: &Manager{}, modal: &modal{kind: "choice", action: "create_window", choices: []choice{{host: host, project: project, workspace: workspace}}}}
+	updated, cmd = model.acceptChoice()
+	model = updated.(tuiModel)
+	if cmd == nil || model.modal != nil || !model.actionBusy {
+		t.Fatalf("direct window creation = %+v, cmd=%v", model, cmd)
+	}
+}
+
+func TestSidebarSelectionProvidesContextualCreateAndRename(t *testing.T) {
+	host := Host{ID: localHostID, Name: localHostName}
+	project := Project{ID: "111111111111111111111111", Name: "Project"}
+	workspace := Workspace{ID: "222222222222222222222222", ProjectID: project.ID, Name: "Workspace"}
+	window := Window{ID: "333333333333333333333333", WorkspaceID: workspace.ID, Name: "Terminal"}
+
+	model := tuiModel{manager: &Manager{}, controlMode: true, rows: []sidebarRow{
+		{kind: "project", host: host, project: project},
+		{kind: "workspace", host: host, project: project, workspace: workspace},
+		{kind: "window", host: host, project: project, workspace: workspace, window: window},
+	}}
+	updated, cmd := model.selectCurrentRow()
+	model = updated.(tuiModel)
+	if cmd != nil || model.modal == nil || model.modal.action != "create_workspace" || len(model.modal.fields) != 1 || model.modal.fields[0].label != "Workspace name" {
+		t.Fatalf("project Enter did not request the required workspace name: %+v", model.modal)
+	}
+
+	model.modal = nil
+	model.selectedRow = 1
+	updated, cmd = model.selectCurrentRow()
+	model = updated.(tuiModel)
+	if cmd == nil || model.modal != nil || !model.actionBusy {
+		t.Fatalf("workspace Enter did not start direct terminal creation: %+v", model)
+	}
+
+	model.actionBusy = false
+	model.selectedRow = 2
+	model.openRename()
+	if model.modal == nil || model.modal.action != "rename_window" || len(model.modal.fields) != 1 || model.modal.fields[0].value != "Terminal" {
+		t.Fatalf("F2 rename was not prefilled from the selected window: %+v", model.modal)
+	}
+
+	model.modal = nil
+	model.openActionMenu()
+	if len(model.modal.choices) < 2 || model.modal.choices[0].action != "new_window_selected" || model.modal.choices[1].action != "rename_selected" {
+		t.Fatalf("selected-window actions are not contextual: %+v", model.modal.choices)
+	}
+	model.selectedRow = 0 // A refresh may move selection while this menu stays open.
+	selectEditorAction(t, &model, "new_window_selected")
+	updated, cmd = model.activateEditorAction()
+	model = updated.(tuiModel)
+	if cmd == nil || !model.actionBusy || !strings.Contains(model.message, workspace.Name) {
+		t.Fatalf("contextual create did not keep its captured workspace: %+v", model)
+	}
+
+	model.actionBusy = false
+	model.selectedRow = 2
+	model.openActionMenu()
+	model.selectedRow = 0
+	selectEditorAction(t, &model, "rename_selected")
+	updated, cmd = model.activateEditorAction()
+	model = updated.(tuiModel)
+	if cmd != nil || model.modal == nil || model.modal.action != "rename_window" || model.modal.window.ID != window.ID {
+		t.Fatalf("contextual rename did not keep its captured window: %+v", model.modal)
+	}
+}
+
+func TestCreatedWorkspaceSelectsAndOpensItsAutomaticWindow(t *testing.T) {
+	host := Host{ID: localHostID, Name: localHostName}
+	workspace := Workspace{ID: "111111111111111111111111", ProjectID: "222222222222222222222222", Name: "Work"}
+	window := Window{ID: "333333333333333333333333", WorkspaceID: workspace.ID, Name: "Terminal", Session: "mce-333333333333333333333333"}
+	manager := &Manager{ctx: context.Background(), state: ClientState{Hosts: []Host{host}}}
+	model := tuiModel{manager: manager, width: minimumWidth, height: minimumHeight, actionBusy: true}
+	updated, cmd := model.handleActionResult(actionResultMsg{action: "create_workspace", hostID: host.ID, value: createdWorkspace{workspace: workspace, window: window}})
+	got := updated.(tuiModel)
+	if cmd == nil || got.actionBusy || got.selectOnRefreshID != window.ID || got.attachingID != window.ID || !strings.Contains(got.message, host.Name) {
+		t.Fatalf("created workspace did not select and open its automatic window: %+v", got)
 	}
 }
 
@@ -420,7 +469,7 @@ func TestMinimumViewportShowsTitleUsageSidebarAndFooter(t *testing.T) {
 	state := ClientState{Version: stateVersion, InstanceID: testInstanceID, Hosts: []Host{{ID: localHostID, Name: localHostName}}}
 	model := tuiModel{manager: &Manager{state: state}, width: minimumWidth, height: minimumHeight, usage: accountUsageState{accounts: []accountUsage{{label: "alpha", usedPercent: 42, available: true}}}, message: "ready"}
 	view := ansi.Strip(model.View().Content)
-	for _, want := range []string{"multicodex editor", "[ Actions ]", "[ Help ]", "Codex weekly use", "alpha", "42% used", "Workspaces", "No workspaces", "Set up your first terminal", "ready", "┌", "┬", "├", "┤", "┴"} {
+	for _, want := range []string{"multicodex editor", "[ Actions ]", "[ Help ]", "Codex weekly use", "alpha", "42% used", "Projects", "No projects", "Set up your first terminal", "ready", "┌", "┬", "├", "┤", "┴"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("missing %q in view:\n%s", want, view)
 		}

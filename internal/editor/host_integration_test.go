@@ -51,12 +51,39 @@ func TestHostServiceGitWindowReconnectAndSafeDeletion(t *testing.T) {
 		t.Fatalf("worktree branch = %q, want %q", got, workspace.Branch)
 	}
 
-	window, err := service.CreateWindow(ctx, CreateWindowRequest{WorkspaceID: workspace.ID, Name: "Terminal", Launch: "shell"})
+	window, err := service.CreateWindow(ctx, CreateWindowRequest{WorkspaceID: workspace.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if window.Session != "mce-"+window.ID {
+	if window.Name != defaultWindowName || window.Session != "mce-"+window.ID {
 		t.Fatalf("non-deterministic session: %+v", window)
+	}
+	secondWindow, err := service.CreateWindow(ctx, CreateWindowRequest{WorkspaceID: workspace.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if secondWindow.Name != "Terminal 2" {
+		t.Fatalf("second automatic window name = %q", secondWindow.Name)
+	}
+	if err := service.RenameWindow(ctx, RenameRequest{ID: secondWindow.ID, Name: window.Name}); err == nil {
+		t.Fatal("duplicate window rename was accepted")
+	}
+	if deleted, err := service.DeleteWindow(ctx, DeleteRequest{ID: secondWindow.ID, Force: true}); err != nil || !deleted.Deleted {
+		t.Fatalf("delete second automatic window = %+v, %v", deleted, err)
+	}
+	branch := workspace.Branch
+	if err := service.RenameWorkspace(ctx, RenameRequest{ID: workspace.ID, Name: "Parser work"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.RenameWindow(ctx, RenameRequest{ID: window.ID, Name: "Main terminal"}); err != nil {
+		t.Fatal(err)
+	}
+	renamed, err := service.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(renamed.Workspaces) != 1 || renamed.Workspaces[0].Name != "Parser work" || renamed.Workspaces[0].Branch != branch || len(renamed.Windows) != 1 || renamed.Windows[0].Name != "Main terminal" {
+		t.Fatalf("display rename changed ownership identity: %+v", renamed)
 	}
 	if got := commandOutput(t, "tmux", "-L", service.socketName(), "show-options", "-g", "-v", "history-limit"); got != "50000" {
 		t.Fatalf("history-limit = %q", got)
@@ -308,7 +335,7 @@ func TestTerminalPassesRequestedExtendedKeyThroughTmux(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	window, err := service.CreateWindow(ctx, CreateWindowRequest{WorkspaceID: workspace.ID, Name: "Terminal", Launch: "shell"})
+	window, err := service.CreateWindow(ctx, CreateWindowRequest{WorkspaceID: workspace.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -364,7 +391,7 @@ func TestCleanupRemovesOnlyExpiredOwnedResources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	window, err := service.CreateWindow(ctx, CreateWindowRequest{WorkspaceID: workspace.ID, Name: "Finished", Launch: "shell"})
+	window, err := service.CreateWindow(ctx, CreateWindowRequest{WorkspaceID: workspace.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -475,7 +502,7 @@ func TestDeleteWindowPreservesSessionAndRegistryWhenOwnershipChanged(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	window, err := service.CreateWindow(ctx, CreateWindowRequest{WorkspaceID: workspace.ID, Name: "Terminal", Launch: "shell"})
+	window, err := service.CreateWindow(ctx, CreateWindowRequest{WorkspaceID: workspace.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -629,7 +656,7 @@ func TestCleanupRecoversPendingOwnedResources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	window, err := service.CreateWindow(ctx, CreateWindowRequest{WorkspaceID: workspace.ID, Name: "Recovered terminal", Launch: "shell"})
+	window, err := service.CreateWindow(ctx, CreateWindowRequest{WorkspaceID: workspace.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -908,7 +935,7 @@ func TestDecliningPendingWorkspaceForceRestoresWorkspaceUse(t *testing.T) {
 	if err != nil || refused.Deleted || !refused.Forceable {
 		t.Fatalf("pending workspace did not offer safe retention: %+v, %v", refused, err)
 	}
-	window, err := service.CreateWindow(ctx, CreateWindowRequest{WorkspaceID: workspace.ID, Name: "Resumed", Launch: "shell"})
+	window, err := service.CreateWindow(ctx, CreateWindowRequest{WorkspaceID: workspace.ID})
 	if err != nil {
 		t.Fatalf("declined deletion did not restore workspace use: %v", err)
 	}
@@ -934,7 +961,7 @@ func TestCleanupCompletesInterruptedOwnedDeletes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	window, err := service.CreateWindow(ctx, CreateWindowRequest{WorkspaceID: workspace.ID, Name: "Terminal", Launch: "shell"})
+	window, err := service.CreateWindow(ctx, CreateWindowRequest{WorkspaceID: workspace.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -986,7 +1013,7 @@ func TestClearWindowDeletePendingRestoresNormalCleanupGuard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	window, err := service.CreateWindow(ctx, CreateWindowRequest{WorkspaceID: workspace.ID, Name: "Terminal", Launch: "shell"})
+	window, err := service.CreateWindow(ctx, CreateWindowRequest{WorkspaceID: workspace.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1038,7 +1065,7 @@ func TestTerminalHandlesLargePasteAndOutputFlood(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	window, err := service.CreateWindow(ctx, CreateWindowRequest{WorkspaceID: workspace.ID, Name: "Stress", Launch: "shell"})
+	window, err := service.CreateWindow(ctx, CreateWindowRequest{WorkspaceID: workspace.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1191,6 +1218,10 @@ func commandOutput(t *testing.T, name string, args ...string) string {
 		t.Fatalf("%s failed: %v", name, err)
 	}
 	return strings.TrimSpace(string(out))
+}
+
+func quotePOSIX(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
 
 func waitForRender(t *testing.T, attachment *Attachment, needle string, timeout time.Duration) {

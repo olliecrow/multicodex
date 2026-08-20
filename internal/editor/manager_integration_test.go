@@ -54,12 +54,17 @@ func TestManagerUsesLongLivedLocalProtocolAndRecoversSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace, err := manager.CreateWorkspace(ctx, localHostID, CreateWorkspaceRequest{ProjectID: project.ID, ProjectPath: project.Path, Name: "Desk"})
+	workspace, window, err := manager.CreateWorkspaceWithWindow(ctx, localHostID, CreateWorkspaceRequest{ProjectID: project.ID, ProjectPath: project.Path, Name: "Desk"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	window, err := manager.CreateWindow(ctx, localHostID, CreateWindowRequest{WorkspaceID: workspace.ID, Name: "Terminal", Launch: "shell"})
-	if err != nil {
+	if window.Name != defaultWindowName {
+		t.Fatalf("automatic first window = %+v", window)
+	}
+	if err := manager.RenameWorkspace(ctx, localHostID, RenameRequest{ID: workspace.ID, Name: "Desk work"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.RenameWindow(ctx, localHostID, RenameRequest{ID: window.ID, Name: "Main"}); err != nil {
 		t.Fatal(err)
 	}
 	socket := "mce-" + manager.State().InstanceID[:12]
@@ -77,7 +82,7 @@ func TestManagerUsesLongLivedLocalProtocolAndRecoversSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	statuses := manager.Refresh(ctx)
-	if len(statuses) != 1 || statuses[0].Error != "" || len(statuses[0].Snapshot.Windows) != 1 {
+	if len(statuses) != 1 || statuses[0].Error != "" || len(statuses[0].Snapshot.Workspaces) != 1 || statuses[0].Snapshot.Workspaces[0].Name != "Desk work" || len(statuses[0].Snapshot.Windows) != 1 || statuses[0].Snapshot.Windows[0].Name != "Main" {
 		t.Fatalf("unexpected manager snapshot: %+v", statuses)
 	}
 	if manager.clients[localHostID] == nil {
