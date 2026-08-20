@@ -95,7 +95,7 @@ func TestControlModeCanSendLiteralControlG(t *testing.T) {
 }
 
 func TestEditorControlsUseNavigationAndAVisibleActionMenu(t *testing.T) {
-	model := tuiModel{controlMode: true}
+	model := tuiModel{width: minimumWidth, height: minimumHeight, controlMode: true}
 	updated, cmd := model.handleKey(tea.KeyPressMsg{Code: 'h', Text: "h"})
 	got := updated.(tuiModel)
 	if cmd != nil || got.modal != nil {
@@ -117,13 +117,19 @@ func TestEditorControlsUseNavigationAndAVisibleActionMenu(t *testing.T) {
 		t.Fatalf("Tab did not open the action menu: %+v", got)
 	}
 	rendered := ansi.Strip(renderModal(*got.modal, 60, 24))
-	for _, want := range []string{"Editor actions", "New window", "Add SSH host", "Run safe cleanup", "[ Cancel ] · Click or Enter to run"} {
+	for _, want := range []string{"Editor actions", "New window…", "Add SSH host…", "Run safe cleanup", "[ Cancel ]", "Enter: run", "Esc: cancel"} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("action menu is missing %q:\n%s", want, rendered)
 		}
 	}
-	help := ansi.Strip(renderModal(modal{kind: "help", title: "Controls"}, minimumWidth-24-1, minimumHeight-2))
-	for _, want := range []string{"Click windows, buttons, fields, and menus", "Scroll lists and terminal history", "Actions include create, attach, delete, and cleanup.", "[ Close ]"} {
+	helpWidth := (tuiModel{width: minimumWidth, height: minimumHeight}).terminalWidth()
+	for _, line := range helpModalContent() {
+		if lipgloss.Width(line) > helpWidth {
+			t.Fatalf("minimum-width help line is clipped: %q", line)
+		}
+	}
+	help := ansi.Strip(renderModal(modal{kind: "help", title: "Controls"}, helpWidth, minimumHeight-7))
+	for _, want := range []string{"Click windows, actions, fields, choices, buttons", "scroll terminal history", "Need terminal Ctrl+G?", "[ Close ]"} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("minimum-width help truncated %q:\n%s", want, help)
 		}
@@ -148,27 +154,34 @@ func TestDeleteConfirmationDefaultsToCancelAndUsesDialogControls(t *testing.T) {
 	}
 }
 
-func TestCompactUsageIsAlwaysClearAndBounded(t *testing.T) {
+func TestAccountUsageShowsEveryAccountAndFailureState(t *testing.T) {
 	summary := &usage.Summary{Accounts: []usage.AccountSummary{
 		{Label: "delta", WeeklyWindow: usage.WindowSummary{UsedPercent: 40}},
 		{Label: "alpha", WeeklyWindow: usage.WindowSummary{UsedPercent: 10}},
-		{Label: "charlie", WeeklyWindow: usage.WindowSummary{UsedPercent: 30}},
+		{Label: "charlie", Error: "signed out", WeeklyWindow: usage.WindowSummary{UsedPercent: 0}},
 		{Label: "bravo", WeeklyWindow: usage.WindowSummary{UsedPercent: 20}},
 	}}
-	got := compactUsage(summary)
-	if got != "usage alpha 10% · bravo 20% · charlie 30% · +1" {
-		t.Fatalf("compact usage = %q", got)
+	rows := accountUsageRows(summary)
+	if len(rows) != 4 || rows[2].label != "charlie" || rows[2].available {
+		t.Fatalf("account rows = %+v", rows)
 	}
-	if got := compactUsage(&usage.Summary{WeeklyWindow: usage.WindowSummary{UsedPercent: -1}}); got != "usage unavailable" {
-		t.Fatalf("unavailable usage = %q", got)
+	model := tuiModel{usage: accountUsageState{accounts: rows}}
+	got := strings.Join(model.usageLines(38), "\n")
+	for _, want := range []string{"alpha 10%", "bravo 20%", "charlie unavailable", "delta 40%"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("usage is missing %q: %q", want, got)
+		}
+	}
+	if strings.Contains(got, "+") || strings.Contains(got, "charlie 0%") {
+		t.Fatalf("usage collapsed or misreported a failed account: %q", got)
 	}
 }
 
-func TestCompactUsageNeverRendersAccountControlSequences(t *testing.T) {
+func TestAccountUsageNeverRendersAccountControlSequences(t *testing.T) {
 	summary := &usage.Summary{Accounts: []usage.AccountSummary{{
 		Label: "safe\x1b]52;c;clipboard\a\x1b[31m", WeeklyWindow: usage.WindowSummary{UsedPercent: 12},
 	}}}
-	got := compactUsage(summary)
+	got := strings.Join((tuiModel{usage: accountUsageState{accounts: accountUsageRows(summary)}}).usageLines(78), "\n")
 	for _, forbidden := range []string{"\x1b]52", "\x1b[31m", "\a"} {
 		if strings.Contains(got, forbidden) {
 			t.Fatalf("usage rendered terminal control sequence %q: %q", forbidden, got)
@@ -176,11 +189,101 @@ func TestCompactUsageNeverRendersAccountControlSequences(t *testing.T) {
 	}
 }
 
+func TestAccountUsageRetainsLastResultAfterRefreshFailure(t *testing.T) {
+	model := tuiModel{usage: accountUsageState{accounts: []accountUsage{{label: "alpha", usedPercent: 42, available: true}}}}
+	model.applyUsage(usageMsg{accounts: []accountUsage{{label: "alpha"}, {label: "bravo"}}, err: "usage refresh failed"})
+	got := strings.Join(model.usageLines(78), "\n")
+	for _, want := range []string{"alpha 42% (stale)", "bravo unavailable"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("stale usage is missing %q: %q", want, got)
+		}
+	}
+}
+
+func TestAccountUsageRetainsOnlyFailedRowsAfterPartialRefresh(t *testing.T) {
+	model := tuiModel{usage: accountUsageState{accounts: []accountUsage{
+		{label: "alpha", usedPercent: 42, available: true},
+		{label: "bravo", usedPercent: 15, available: true},
+	}}}
+	model.applyUsage(usageMsg{accounts: []accountUsage{
+		{label: "alpha", usedPercent: 50, available: true},
+		{label: "bravo"},
+	}})
+	got := strings.Join(model.usageLines(78), "\n")
+	for _, want := range []string{"alpha 50%", "bravo 15% (stale)"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("partial usage refresh is missing %q: %q", want, got)
+		}
+	}
+	if strings.Contains(got, "alpha 42%") || strings.Contains(got, "bravo unavailable") {
+		t.Fatalf("partial usage refresh kept the wrong rows: %q", got)
+	}
+}
+
+func TestAccountUsageWrapsWithoutHidingLongLabels(t *testing.T) {
+	label := strings.Repeat("wide-account-", 8)
+	model := tuiModel{usage: accountUsageState{accounts: []accountUsage{
+		{label: label, usedPercent: 10, available: true},
+		{label: "second", usedPercent: 20, available: true},
+	}}}
+	got := strings.Join(model.usageLines(24), "")
+	if !strings.Contains(got, label) || !strings.Contains(got, "second 20%") || strings.Contains(got, "+") {
+		t.Fatalf("wrapped usage hid an account: %q", got)
+	}
+}
+
+func TestAccountUsageOverflowAsksForMoreHeightInsteadOfHidingRows(t *testing.T) {
+	accounts := make([]accountUsage, 20)
+	for i := range accounts {
+		accounts[i] = accountUsage{label: fmt.Sprintf("account-%02d-with-a-readable-name", i), usedPercent: i, available: true}
+	}
+	model := tuiModel{width: minimumWidth, height: minimumHeight, usage: accountUsageState{accounts: accounts}}
+	view := ansi.Strip(model.View().Content)
+	for _, want := range []string{"too small to show every account usage", "Enlarge the terminal", "never hidden or collapsed", "Ctrl+C quits"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("size blocker is missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestMultilineUsageGeometryKeepsSidebarMouseMappingExact(t *testing.T) {
+	accounts := make([]accountUsage, 10)
+	for i := range accounts {
+		accounts[i] = accountUsage{label: fmt.Sprintf("account-%02d", i), usedPercent: i, available: true}
+	}
+	model := tuiModel{
+		width: 100, height: 30, usage: accountUsageState{accounts: accounts}, selectedRow: 0,
+		rows: []sidebarRow{{kind: "workspace"}, {kind: "workspace"}, {kind: "workspace"}},
+	}
+	usageLines := model.usageLines(model.width - 2)
+	if len(usageLines) < 2 {
+		t.Fatalf("fixture did not create multiline usage: %q", usageLines)
+	}
+	layout := model.layout()
+	if layout.bodyContent != 4+len(usageLines) || layout.bodyHeight != model.height-len(usageLines)-6 {
+		t.Fatalf("multiline layout = %+v, usage lines = %d", layout, len(usageLines))
+	}
+	updated, cmd := model.handleMouse(tea.MouseClickMsg{X: 2, Y: layout.bodyContent + 1, Button: tea.MouseLeft})
+	got := updated.(tuiModel)
+	if cmd != nil || got.selectedRow != 1 {
+		t.Fatalf("multiline usage shifted sidebar mouse mapping: %+v", got)
+	}
+}
+
+func TestUsageRefreshIsSingleFlight(t *testing.T) {
+	model := tuiModel{usageBusy: true}
+	updated, cmd := model.Update(usageTickMsg(time.Now()))
+	got := updated.(tuiModel)
+	if cmd == nil || !got.usageBusy {
+		t.Fatalf("busy usage refresh did not keep one timer and suppress overlap: %+v", got)
+	}
+}
+
 func TestMinimumViewportShowsTitleUsageSidebarAndFooter(t *testing.T) {
 	state := ClientState{Version: stateVersion, InstanceID: testInstanceID, Hosts: []Host{{ID: localHostID, Name: localHostName}}}
-	model := tuiModel{manager: &Manager{state: state}, width: minimumWidth, height: minimumHeight, usageText: "usage alpha 42%", message: "ready"}
+	model := tuiModel{manager: &Manager{state: state}, width: minimumWidth, height: minimumHeight, usage: accountUsageState{accounts: []accountUsage{{label: "alpha", usedPercent: 42, available: true}}}, message: "ready"}
 	view := ansi.Strip(model.View().Content)
-	for _, want := range []string{"multicodex editor", "[ Actions ]", "[ Help ]", "usage alpha 42%", "No workspaces", "Ctrl+G keyboard controls", "ready"} {
+	for _, want := range []string{"multicodex editor", "[ Actions ]", "[ Help ]", "Weekly account usage", "alpha 42%", "Workspaces", "No workspaces", "Use Actions to create or open a window", "ready", "┌", "┬", "┴"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("missing %q in view:\n%s", want, view)
 		}
@@ -193,6 +296,81 @@ func TestMinimumViewportShowsTitleUsageSidebarAndFooter(t *testing.T) {
 		if width := lipgloss.Width(line); width != minimumWidth {
 			t.Fatalf("line %d width = %d, want %d: %q", i, width, minimumWidth, line)
 		}
+	}
+}
+
+func TestFramedLayoutShowsEveryAccountAcrossViewportSizes(t *testing.T) {
+	for _, width := range []int{80, 81, 100, 160} {
+		for _, height := range []int{24, 30} {
+			for _, count := range []int{0, 1, 5, 15} {
+				accounts := make([]accountUsage, count)
+				for i := range accounts {
+					accounts[i] = accountUsage{label: fmt.Sprintf("acct-%02d", i), usedPercent: i, available: true}
+				}
+				model := tuiModel{width: width, height: height, usage: accountUsageState{accounts: accounts}}
+				view := ansi.Strip(model.View().Content)
+				lines := strings.Split(view, "\n")
+				if len(lines) != height {
+					t.Fatalf("%dx%d with %d accounts rendered %d lines", width, height, count, len(lines))
+				}
+				for line, text := range lines {
+					if got := lipgloss.Width(text); got != width {
+						t.Fatalf("%dx%d with %d accounts line %d width = %d", width, height, count, line, got)
+					}
+				}
+				if !model.layout().fits() {
+					if !strings.Contains(view, "Enlarge the terminal") {
+						t.Fatalf("%dx%d with %d accounts did not show the size blocker", width, height, count)
+					}
+					continue
+				}
+				for i := range accounts {
+					if !strings.Contains(view, accounts[i].label) {
+						t.Fatalf("%dx%d hid account %q", width, height, accounts[i].label)
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestLongFocusLabelNeverHidesHeaderButtons(t *testing.T) {
+	windowID := "111111111111111111111111"
+	model := tuiModel{
+		width: minimumWidth, height: minimumHeight, attachedID: windowID,
+		rows: []sidebarRow{{kind: "window", host: Host{Name: strings.Repeat("host", 20)}, window: Window{ID: windowID, Name: strings.Repeat("window", 20)}}},
+	}
+	header := ansi.Strip(strings.Split(model.View().Content, "\n")[0])
+	for _, want := range []string{"multicodex editor", actionsButtonLabel, helpButtonLabel} {
+		if !strings.Contains(header, want) {
+			t.Fatalf("long focus label hid %q: %q", want, header)
+		}
+	}
+	if lipgloss.Width(header) != minimumWidth {
+		t.Fatalf("header width = %d, want %d: %q", lipgloss.Width(header), minimumWidth, header)
+	}
+}
+
+func TestHelpOpensFromTerminalInputWithoutEditorFocus(t *testing.T) {
+	model := tuiModel{width: minimumWidth, height: minimumHeight}
+	updated, cmd := model.handleKey(tea.KeyPressMsg{Code: tea.KeyF1})
+	got := updated.(tuiModel)
+	if cmd != nil || got.modal == nil || got.modal.kind != "help" {
+		t.Fatalf("global F1 did not open help: %+v", got)
+	}
+}
+
+func TestSizeBlockerNeverForwardsHiddenTerminalInput(t *testing.T) {
+	attachment := &Attachment{inputQueue: make(chan terminalInput, 2)}
+	model := tuiModel{width: minimumWidth - 1, height: minimumHeight, attachment: attachment}
+	updated, cmd := model.Update(tea.PasteMsg{Content: "hidden paste"})
+	got := updated.(tuiModel)
+	if cmd != nil || got.attachment != attachment || len(attachment.inputQueue) != 0 {
+		t.Fatalf("size blocker forwarded a hidden paste: %+v", got)
+	}
+	updated, cmd = got.handleKey(tea.KeyPressMsg{Code: 'x', Text: "x"})
+	if cmd != nil || len(attachment.inputQueue) != 0 {
+		t.Fatalf("size blocker forwarded a hidden key")
 	}
 }
 
@@ -220,14 +398,16 @@ func TestMouseModeRoutesClicksToVisibleEditorControls(t *testing.T) {
 	if helpIndex < 0 {
 		t.Fatal("help action is missing")
 	}
-	mainX := got.sidebarWidth() + 3
-	updated, cmd = got.handleMouse(tea.MouseClickMsg{X: mainX, Y: 3 + helpIndex, Button: tea.MouseLeft})
+	layout := got.layout()
+	mainX := layout.terminalX
+	updated, cmd = got.handleMouse(tea.MouseClickMsg{X: mainX, Y: layout.bodyContent + 2 + helpIndex, Button: tea.MouseLeft})
 	got = updated.(tuiModel)
 	if cmd != nil || got.modal == nil || got.modal.kind != "help" {
 		t.Fatalf("Help menu click = %+v", got)
 	}
-	closeY := 1 + 2 + len(helpModalContent()) - 1
-	updated, cmd = got.handleMouse(tea.MouseClickMsg{X: got.sidebarWidth() + 1, Y: closeY, Button: tea.MouseLeft})
+	layout = got.layout()
+	closeY := layout.bodyContent + 2 + len(helpModalContent()) - 1
+	updated, cmd = got.handleMouse(tea.MouseClickMsg{X: layout.terminalX, Y: closeY, Button: tea.MouseLeft})
 	got = updated.(tuiModel)
 	if cmd != nil || got.modal != nil {
 		t.Fatalf("Close button click = %+v", got)
@@ -241,7 +421,8 @@ func TestDirectMouseUpdatePreservesInputOrder(t *testing.T) {
 		t.Fatal("header mouse update returned an asynchronous command")
 	}
 	current := updated.(tuiModel)
-	updated, cmd = current.Update(tea.MouseWheelMsg{X: current.sidebarWidth() + 2, Y: 5, Button: tea.MouseWheelDown})
+	layout := current.layout()
+	updated, cmd = current.Update(tea.MouseWheelMsg{X: layout.terminalX, Y: layout.bodyContent + 2, Button: tea.MouseWheelDown})
 	if cmd != nil {
 		t.Fatal("wheel update returned an asynchronous command")
 	}
@@ -264,18 +445,20 @@ func TestMouseSelectsSidebarRowsAndForwardsTerminalEvents(t *testing.T) {
 	}
 	attachment := &Attachment{inputQueue: make(chan terminalInput, 4)}
 	model := tuiModel{width: 100, height: 30, rows: rows, selectedRow: 0, attachedID: windowID, attachment: attachment, controlMode: true}
-	updated, cmd := model.handleMouse(tea.MouseClickMsg{X: 2, Y: 2, Button: tea.MouseLeft})
+	layout := model.layout()
+	updated, cmd := model.handleMouse(tea.MouseClickMsg{X: 2, Y: layout.bodyContent + 1, Button: tea.MouseLeft})
 	got := updated.(tuiModel)
 	if cmd != nil || got.selectedRow != 1 || got.controlMode {
 		t.Fatalf("window row click = %+v", got)
 	}
-	updated, _ = got.handleMouse(tea.MouseWheelMsg{X: 2, Y: 2, Button: tea.MouseWheelDown})
+	updated, _ = got.handleMouse(tea.MouseWheelMsg{X: 2, Y: layout.bodyContent + 1, Button: tea.MouseWheelDown})
 	got = updated.(tuiModel)
 	if got.selectedRow != 4 || !got.controlMode {
 		t.Fatalf("sidebar wheel = %+v", got)
 	}
 
-	terminalX, terminalY := got.sidebarWidth()+5, 4
+	layout = got.layout()
+	terminalX, terminalY := layout.terminalX+4, layout.bodyContent+3
 	updated, cmd = got.handleMouse(tea.MouseClickMsg{X: terminalX, Y: terminalY, Button: tea.MouseLeft})
 	got = updated.(tuiModel)
 	if cmd != nil || got.controlMode {
@@ -289,28 +472,32 @@ func TestMouseSelectsSidebarRowsAndForwardsTerminalEvents(t *testing.T) {
 
 func TestMouseUsesFormAndConfirmationButtons(t *testing.T) {
 	model := tuiModel{manager: &Manager{}, width: 100, height: 30, modal: &modal{kind: "form", action: "add_host", title: "Add", fields: []formField{{label: "Name"}, {label: "SSH alias"}}}}
-	mainX := model.sidebarWidth() + 2
-	updated, cmd := model.handleMouse(tea.MouseClickMsg{X: mainX, Y: 4, Button: tea.MouseLeft})
+	layout := model.layout()
+	mainX := layout.terminalX
+	updated, cmd := model.handleMouse(tea.MouseClickMsg{X: mainX, Y: layout.bodyContent + 3, Button: tea.MouseLeft})
 	got := updated.(tuiModel)
 	if cmd != nil || got.modal.field != 1 {
 		t.Fatalf("form field click = %+v", got)
 	}
-	updated, cmd = got.handleMouse(tea.MouseClickMsg{X: mainX, Y: 6, Button: tea.MouseLeft})
+	layout = got.layout()
+	updated, cmd = got.handleMouse(tea.MouseClickMsg{X: mainX, Y: layout.bodyContent + 5, Button: tea.MouseLeft})
 	got = updated.(tuiModel)
 	if cmd == nil || got.modal != nil || !got.actionBusy {
 		t.Fatalf("Save button click = %+v", got)
 	}
 
 	model = tuiModel{manager: &Manager{}, width: 100, height: 30, modal: &modal{kind: "confirm", action: "delete_window", delete: DeleteRequest{ID: testInstanceID}}}
-	updated, cmd = model.handleMouse(tea.MouseClickMsg{X: model.sidebarWidth() + 1, Y: 7, Button: tea.MouseLeft})
+	layout = model.layout()
+	updated, cmd = model.handleMouse(tea.MouseClickMsg{X: layout.terminalX, Y: layout.bodyContent + 6, Button: tea.MouseLeft})
 	got = updated.(tuiModel)
 	if cmd != nil || got.modal != nil || got.actionBusy {
 		t.Fatalf("Cancel button click = %+v", got)
 	}
 
 	model.modal = &modal{kind: "confirm", action: "delete_window", delete: DeleteRequest{ID: testInstanceID}}
-	deleteX := model.sidebarWidth() + 1 + lipgloss.Width(cancelButtonLabel) + 4
-	updated, cmd = model.handleMouse(tea.MouseClickMsg{X: deleteX, Y: 7, Button: tea.MouseLeft})
+	layout = model.layout()
+	deleteX := layout.terminalX + lipgloss.Width(cancelButtonLabel) + 3
+	updated, cmd = model.handleMouse(tea.MouseClickMsg{X: deleteX, Y: layout.bodyContent + 6, Button: tea.MouseLeft})
 	got = updated.(tuiModel)
 	if cmd == nil || got.modal != nil || !got.actionBusy {
 		t.Fatalf("Delete button click = %+v", got)
@@ -326,8 +513,21 @@ func TestFormAcceptsShiftedText(t *testing.T) {
 	}
 }
 
+func TestFailedFormKeepsUserInputForCorrection(t *testing.T) {
+	form := modal{kind: "form", action: "add_host", title: "Add SSH host", fields: []formField{
+		{label: "Display name", value: "Build box"},
+		{label: "SSH alias from ~/.ssh/config", value: "bad alias"},
+	}}
+	model := tuiModel{manager: &Manager{}, refreshing: true, actionBusy: true}
+	updated, cmd := model.Update(actionResultMsg{action: "add_host", form: &form, err: errors.New("invalid SSH alias")})
+	got := updated.(tuiModel)
+	if cmd != nil || got.modal == nil || got.modal.fields[1].value != "bad alias" || got.actionBusy {
+		t.Fatalf("failed form did not preserve its input: %+v", got)
+	}
+}
+
 func TestFormPasteNeverRendersTerminalControlSequences(t *testing.T) {
-	model := tuiModel{modal: &modal{kind: "form", title: "Add", fields: []formField{{label: "Name", limit: 80}}}}
+	model := tuiModel{width: minimumWidth, height: minimumHeight, modal: &modal{kind: "form", title: "Add", fields: []formField{{label: "Name", limit: 80}}}}
 	updated, _ := model.Update(tea.PasteMsg{Content: "safe\x1b]52;c;clipboard\a\x1b[31m\ntext"})
 	got := updated.(tuiModel)
 	rendered := renderModal(*got.modal, 80, 24)

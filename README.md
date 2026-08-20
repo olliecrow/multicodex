@@ -291,7 +291,7 @@ Example manual monitor account file:
 
 ## Editor
 
-`multicodex editor` is one terminal workspace for local and SSH projects. It shows a project and workspace sidebar, one active terminal, and compact local multicodex account usage. Projects move to the top when the last 100 rows of one of their terminals change.
+`multicodex editor` is one terminal workspace for local and SSH projects. Clear labeled boundaries separate its project and workspace sidebar, active terminal, and persistent weekly-usage band. The band always shows every configured local Codex account as a percentage, loading, unavailable, or stale; it never collapses accounts behind a count. If all rows cannot fit while keeping the controls usable, the editor states the required height instead of hiding data. Projects move to the top when the last 100 rows of one of their terminals change.
 
 Start it outside tmux:
 
@@ -299,7 +299,7 @@ Start it outside tmux:
 multicodex editor
 ```
 
-Use the mouse like a normal interface: click a sidebar window to open it, click the visible **Actions** or **Help** buttons, click menu items and dialog buttons, and click form fields before typing. The wheel scrolls the sidebar, menus, and tmux terminal history. Click the terminal to return keyboard focus to it. Most terminal applications use `Shift` while dragging to override mouse reporting and select terminal text; use the override configured by your terminal when it differs.
+Use the mouse like a normal interface: click a sidebar window to open it, click the visible **Actions** or **Help** buttons, click menu items and dialog buttons, and click form fields before typing. The wheel scrolls the sidebar, menus, and tmux terminal history. Click the terminal to return keyboard focus to it. Region titles, the top-right focus label, the footer, empty-state steps, action-specific field labels, and named form buttons show what will happen and what to do next. Most terminal applications use `Shift` while dragging to override mouse reporting and select terminal text; use the override configured by your terminal when it differs.
 
 The keyboard remains fully supported. Press `Ctrl+G` to focus the sidebar, use arrows to select an item, `Enter` to open a window, `Tab` to open Actions, `F1` for help, and `Esc` to return to terminal input. The Actions menu creates windows and workspaces, adds hosts and projects, attaches files or clipboard images, opens scrollback, deletes owned resources, runs cleanup, sends a literal `Ctrl+G`, and quits. Use `Alt+1` through `Alt+9` to select windows in current sidebar order. `Cmd+1` through `Cmd+9` also work when the terminal sends those keys to applications. Normal terminal paste uses the terminal application's paste action. Attachments paste the host-local path into the terminal draft and never submit it.
 

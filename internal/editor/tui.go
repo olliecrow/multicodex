@@ -28,7 +28,8 @@ type refreshMsg struct {
 }
 
 type usageMsg struct {
-	text string
+	accounts []accountUsage
+	err      string
 }
 
 type refreshTickMsg time.Time
@@ -40,7 +41,6 @@ const (
 	actionsButtonLabel = "[ Actions ]"
 	helpButtonLabel    = "[ Help ]"
 	cancelButtonLabel  = "[ Cancel ]"
-	saveButtonLabel    = "[ Save ]"
 	deleteButtonLabel  = "[ Delete ]"
 	closeButtonLabel   = "[ Close ]"
 )
@@ -68,6 +68,7 @@ type actionResultMsg struct {
 	hostID   string
 	targetID string
 	value    any
+	form     *modal
 	err      error
 }
 
@@ -85,6 +86,28 @@ type formField struct {
 	label string
 	value string
 	limit int
+}
+
+type accountUsage struct {
+	label       string
+	usedPercent int
+	available   bool
+	loading     bool
+	stale       bool
+}
+
+type accountUsageState struct {
+	accounts []accountUsage
+	err      string
+}
+
+type screenLayout struct {
+	width, height            int
+	bodyContent              int
+	sidebarWidth             int
+	terminalX, terminalWidth int
+	bodyHeight               int
+	requiredHeight           int
 }
 
 type choice struct {
@@ -125,6 +148,7 @@ type tuiModel struct {
 	refreshing        bool
 	actionBusy        bool
 	cleanupBusy       bool
+	usageBusy         bool
 	modal             *modal
 	attachment        *Attachment
 	attachedHost      string
@@ -134,7 +158,7 @@ type tuiModel struct {
 	selectOnRefreshID string
 	pendingPastes     map[string]string
 	message           string
-	usageText         string
+	usage             accountUsageState
 }
 
 type uiWorkers struct {
@@ -218,7 +242,11 @@ func Run(opts Options) (runErr error) {
 	fetcher = usage.NewDefaultFetcherWithAccountOptions(usage.MonitorAccountOptions{IncludeDefault: true})
 	workers = newUIWorkers(manager.Context())
 
-	model := tuiModel{manager: manager, usageFetcher: fetcher, workers: workers, usageText: "usage …", selectedRow: -1, refreshing: true, cleanupBusy: true}
+	model := tuiModel{
+		manager: manager, usageFetcher: fetcher, workers: workers,
+		usage:       accountUsageState{accounts: loadingAccountUsage(fetcher.AccountLabels())},
+		selectedRow: -1, refreshing: true, cleanupBusy: true, usageBusy: true,
+	}
 	final, err := tea.NewProgram(model).Run()
 	if finished, ok := final.(tuiModel); ok && finished.attachment != nil {
 		_ = finished.attachment.Close()
@@ -238,7 +266,7 @@ func (m tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.ensureSelectionVisible()
-		if m.attachment != nil && m.hasUsableSize() {
+		if m.attachment != nil && m.layout().fits() {
 			_ = m.attachment.Resize(m.terminalWidth(), m.bodyHeight())
 		}
 	case refreshMsg:
@@ -246,14 +274,19 @@ func (m tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.mergeStatuses(msg.statuses)
 		m.rebuildRows()
 		m.flushPendingPaste(m.attachedID)
-		if m.hasUsableSize() && m.attachedID == "" && m.attachingID == "" {
+		if m.layout().fits() && m.attachedID == "" && m.attachingID == "" {
 			if row, ok := m.preferredWindow(); ok {
 				m.selectedRow = m.rowIndexForWindow(row.window.ID)
 				return m, m.requestAttach(row)
 			}
 		}
 	case usageMsg:
-		m.usageText = msg.text
+		m.usageBusy = false
+		m.applyUsage(msg)
+		m.ensureSelectionVisible()
+		if m.attachment != nil && m.layout().fits() {
+			_ = m.attachment.Resize(m.terminalWidth(), m.bodyHeight())
+		}
 	case refreshTickMsg:
 		return m, tea.Batch(m.startRefresh(), m.refreshTick())
 	case cleanupTickMsg:
@@ -263,6 +296,10 @@ func (m tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.cleanupBusy = true
 		return m, tea.Batch(m.track(cleanupCmd(m.manager, "background_cleanup")), m.cleanupTick())
 	case usageTickMsg:
+		if m.usageBusy {
+			return m, m.usageTick()
+		}
+		m.usageBusy = true
 		return m, tea.Batch(m.track(usageCmd(m.usageFetcher.Fetch, m.workerContext())), m.usageTick())
 	case attachResultMsg:
 		if msg.window.ID != m.attachingID {
@@ -293,7 +330,7 @@ func (m tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.attachment = msg.attachment
 		m.attachedHost, m.attachedID = msg.host.ID, msg.window.ID
-		if m.hasUsableSize() {
+		if m.layout().fits() {
 			_ = m.attachment.Resize(m.terminalWidth(), m.bodyHeight())
 		}
 		m.controlMode = false
@@ -325,6 +362,9 @@ func (m tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case actionResultMsg:
 		return m.handleActionResult(msg)
 	case tea.PasteMsg:
+		if !m.layout().fits() {
+			return m, nil
+		}
 		if m.modal != nil && m.modal.kind == "form" {
 			field := &m.modal.fields[m.modal.field]
 			plain := plainDisplayText(msg.Content)
@@ -357,8 +397,18 @@ func (m tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) handleKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if !m.layout().fits() {
+		if key.Keystroke() == "ctrl+c" {
+			return m, tea.Quit
+		}
+		return m, nil
+	}
 	if m.modal != nil {
 		return m.handleModalKey(key)
+	}
+	if key.Keystroke() == "f1" {
+		m.modal = &modal{kind: "help", title: "Controls"}
+		return m, nil
 	}
 	if key.Keystroke() == "super+v" || key.Keystroke() == "shift+super+v" {
 		return m.startClipboardAttachment()
@@ -402,8 +452,6 @@ func (m tuiModel) handleKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.selectCurrentRow()
 	case "tab", "shift+tab", "right":
 		m.openActionMenu()
-	case "f1":
-		m.modal = &modal{kind: "help", title: "Controls"}
 	}
 	return m, nil
 }
@@ -482,15 +530,16 @@ func (m tuiModel) handleModalKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 func (m tuiModel) handleMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
 	mouse := event.Mouse()
-	if !m.hasUsableSize() || mouse.X < 0 || mouse.X >= m.width || mouse.Y < 0 || mouse.Y >= m.height {
+	layout := m.layout()
+	if !layout.fits() || mouse.X < 0 || mouse.X >= m.width || mouse.Y < 0 || mouse.Y >= m.height {
 		return m, nil
 	}
 	if m.modal != nil {
 		return m.handleModalMouse(event)
 	}
 	if _, ok := event.(tea.MouseWheelMsg); ok {
-		if mouse.Y >= 1 && mouse.Y <= m.bodyHeight() {
-			if mouse.X < m.sidebarWidth() {
+		if mouse.Y >= layout.bodyContent && mouse.Y < layout.bodyContent+layout.bodyHeight {
+			if mouse.X > 0 && mouse.X <= layout.sidebarWidth {
 				delta, vertical := verticalWheelDelta(mouse.Button, 3)
 				if !vertical {
 					return m, nil
@@ -499,7 +548,7 @@ func (m tuiModel) handleMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
 				m.controlMode = true
 				return m, nil
 			}
-			if mouse.X > m.sidebarWidth() {
+			if mouse.X >= layout.terminalX && mouse.X < layout.terminalX+layout.terminalWidth {
 				return m.forwardTerminalMouse(event)
 			}
 		}
@@ -521,8 +570,8 @@ func (m tuiModel) handleMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		if click.Y >= 1 && click.Y <= m.bodyHeight() && click.X < m.sidebarWidth() {
-			index := m.sidebarOffset + click.Y - 1
+		if click.Y >= layout.bodyContent && click.Y < layout.bodyContent+layout.bodyHeight && click.X > 0 && click.X <= layout.sidebarWidth {
+			index := m.sidebarOffset + click.Y - layout.bodyContent
 			if index < 0 || index >= len(m.rows) {
 				return m, nil
 			}
@@ -546,7 +595,8 @@ func (m tuiModel) handleMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 func (m tuiModel) handleModalMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
 	mouse := event.Mouse()
-	if mouse.X <= m.sidebarWidth() || mouse.X >= m.width || mouse.Y < 1 || mouse.Y > m.bodyHeight() {
+	layout := m.layout()
+	if mouse.X < layout.terminalX || mouse.X >= layout.terminalX+layout.terminalWidth || mouse.Y < layout.bodyContent || mouse.Y >= layout.bodyContent+layout.bodyHeight {
 		return m, nil
 	}
 	if _, ok := event.(tea.MouseWheelMsg); ok {
@@ -568,7 +618,7 @@ func (m tuiModel) handleModalMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if !ok || click.Button != tea.MouseLeft {
 		return m, nil
 	}
-	x, y := click.X-m.sidebarWidth()-1, click.Y-1
+	x, y := click.X-layout.terminalX, click.Y-layout.bodyContent
 	switch m.modal.kind {
 	case "help":
 		content := helpModalContent()
@@ -581,11 +631,7 @@ func (m tuiModel) handleModalMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
 			m.modal.choice = start + y - 2
 			return m.activateModalChoice()
 		}
-		verb := "continue"
-		if m.modal.kind == "actions" {
-			verb = "run"
-		}
-		if y == 3+end-start && hitLabel(modalChoiceButtonLine(verb), cancelButtonLabel, x) {
+		if y == 3+end-start && hitLabel(modalChoiceButtonLine(), cancelButtonLabel, x) {
 			m.modal = nil
 		}
 	case "form":
@@ -593,10 +639,11 @@ func (m tuiModel) handleModalMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
 			m.modal.field = y - 2
 			return m, nil
 		}
-		buttons := saveButtonLabel + "   " + cancelButtonLabel
+		primary := modalPrimaryButton(*m.modal)
+		buttons := primary + "   " + cancelButtonLabel
 		if y == 3+len(m.modal.fields) {
 			switch {
-			case hitLabel(buttons, saveButtonLabel, x):
+			case hitLabel(buttons, primary, x):
 				return m.submitModalForm()
 			case hitLabel(buttons, cancelButtonLabel, x):
 				m.modal = nil
@@ -652,12 +699,14 @@ func (m tuiModel) submitModalForm() (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) isTerminalMousePosition(x, y int) bool {
-	return m.attachment != nil && x > m.sidebarWidth() && x < m.width && y >= 1 && y <= m.bodyHeight()
+	layout := m.layout()
+	return m.attachment != nil && layout.fits() && x >= layout.terminalX && x < layout.terminalX+layout.terminalWidth && y >= layout.bodyContent && y < layout.bodyContent+layout.bodyHeight
 }
 
 func (m tuiModel) forwardTerminalMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
 	mouse := event.Mouse()
-	x, y := mouse.X-m.sidebarWidth()-1, mouse.Y-1
+	layout := m.layout()
+	x, y := mouse.X-layout.terminalX, mouse.Y-layout.bodyContent
 	if !m.isTerminalMousePosition(mouse.X, mouse.Y) || x < 0 || x >= m.terminalWidth() || y < 0 || y >= m.bodyHeight() {
 		return m, nil
 	}
@@ -706,24 +755,54 @@ func (m tuiModel) View() tea.View {
 		view.AltScreen = true
 		return view
 	}
+	layout := m.layout()
+	if !layout.fits() {
+		message := fmt.Sprintf(
+			"This terminal is too small to show every account usage.\n\nCurrent size: %d×%d\nRequired height at this width: %d\n\nEnlarge the terminal to continue.\nAccount usage is never hidden or collapsed.\nCtrl+C quits the editor.",
+			m.width, m.height, layout.requiredHeight,
+		)
+		view := tea.NewView(padBlock(message, m.width, m.height))
+		view.AltScreen = true
+		return view
+	}
 	buttonStyle := lipgloss.NewStyle().Reverse(true)
 	headerLeft := lipgloss.NewStyle().Bold(true).Render(headerTitleText) + " " + buttonStyle.Render(actionsButtonLabel) + " " + buttonStyle.Render(helpButtonLabel)
-	header := joinKeepRight(headerLeft, m.usageText, m.width)
+	header := joinKeepLeft(headerLeft, m.focusLabel(), m.width)
+	usageLines := m.usageLines(m.width - 2)
+	usageTitle := "Weekly account usage"
+	if m.usage.err != "" {
+		usageTitle += " · refresh failed"
+	}
+	usageBlock := []string{titledRule("┌", "┐", usageTitle, m.width-2)}
+	for _, line := range usageLines {
+		usageBlock = append(usageBlock, "│"+fitPlain(line, m.width-2)+"│")
+	}
+	usageBlock = append(usageBlock, "└"+strings.Repeat("─", m.width-2)+"┘")
 	sidebar := m.renderSidebar()
 	main := m.renderMain()
-	body := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, "│", main)
-	footerLeft := "Click windows or Actions · Ctrl+G keyboard controls"
+	leftTitle := "Workspaces"
+	rightTitle := m.mainTitle()
+	bodyLines := []string{"┌" + titledSegment(leftTitle, layout.sidebarWidth) + "┬" + titledSegment(rightTitle, layout.terminalWidth) + "┐"}
+	sidebarLines, mainLines := strings.Split(sidebar, "\n"), strings.Split(main, "\n")
+	for i := 0; i < layout.bodyHeight; i++ {
+		bodyLines = append(bodyLines, "│"+sidebarLines[i]+"│"+mainLines[i]+"│")
+	}
+	bodyLines = append(bodyLines, "└"+strings.Repeat("─", layout.sidebarWidth)+"┴"+strings.Repeat("─", layout.terminalWidth)+"┘")
+	footerLeft := "Terminal input · Ctrl+G: editor controls · F1: help"
 	if m.controlMode {
-		footerLeft = "↑↓ select · Enter open · Tab actions · F1 help · Esc terminal"
+		footerLeft = "Editor controls · ↑/↓ select · Enter open · Tab: actions · Esc: terminal"
+	} else if m.attachment == nil {
+		footerLeft = "No terminal open · Use Actions to create or open a window · F1: help"
 	}
 	footer := joinKeepRight(footerLeft, m.message, m.width)
-	view := tea.NewView(header + "\n" + body + "\n" + footer)
+	content := header + "\n" + strings.Join(usageBlock, "\n") + "\n" + strings.Join(bodyLines, "\n") + "\n" + footer
+	view := tea.NewView(content)
 	view.AltScreen = true
 	view.ReportFocus = true
 	view.MouseMode = tea.MouseModeCellMotion
 	if m.attachment != nil && !m.controlMode && m.modal == nil {
 		x, y := m.attachment.CursorPosition()
-		view.Cursor = tea.NewCursor(m.sidebarWidth()+1+x, 1+y)
+		view.Cursor = tea.NewCursor(layout.terminalX+x, layout.bodyContent+y)
 	}
 	return view
 }
@@ -779,10 +858,36 @@ func (m tuiModel) renderMain() string {
 		return renderModal(*m.modal, width, height)
 	}
 	if m.attachment == nil {
-		text := "No terminal selected.\n\nClick Actions above, or press Ctrl+G then Tab.\nChoose an action with the mouse, arrows, or Tab."
+		text := "Set up your first terminal\n\n1. Open Actions.\n2. Add a project, if needed.\n3. Create a workspace.\n4. Create a window.\n\nMouse: click Actions\nKeyboard: press Ctrl+G, then Tab"
+		if len(m.rows) > 0 {
+			text = "No terminal is open\n\nClick a window in Workspaces, or choose Actions → New window.\n\nKeyboard: Ctrl+G, ↑/↓, Enter"
+		}
 		return padBlock(text, width, height)
 	}
 	return m.attachment.Render(width, height)
+}
+
+func (m tuiModel) focusLabel() string {
+	if m.modal != nil {
+		return "Dialog: " + plainDisplayText(m.modal.title)
+	}
+	if m.controlMode {
+		return "Editor controls"
+	}
+	if row, ok := m.currentAttachedRow(); ok {
+		return "Terminal: " + plainDisplayText(row.window.Name) + " · " + plainDisplayText(row.host.Name)
+	}
+	return "No terminal"
+}
+
+func (m tuiModel) mainTitle() string {
+	if m.modal != nil {
+		return "Dialog"
+	}
+	if row, ok := m.currentAttachedRow(); ok {
+		return "Terminal · " + row.window.Name
+	}
+	return "Terminal"
 }
 
 func renderModal(modal modal, width, height int) string {
@@ -804,7 +909,7 @@ func renderModal(modal modal, width, height int) string {
 		if modal.kind == "actions" {
 			verb = "run"
 		}
-		lines = append(lines, "", modalChoiceButtonLine(verb), "↑/↓ or Tab choose · Esc cancel")
+		lines = append(lines, "", modalChoiceButtonLine(), "↑/↓ or Tab: choose · Enter: "+verb+" · Esc: cancel")
 	case "form":
 		for i, field := range modal.fields {
 			marker := "  "
@@ -813,7 +918,7 @@ func renderModal(modal modal, width, height int) string {
 			}
 			lines = append(lines, marker+plainDisplayText(field.label)+": "+plainDisplayText(field.value))
 		}
-		lines = append(lines, "", saveButtonLabel+"   "+cancelButtonLabel, "Enter next/save · Tab change field · Esc cancel")
+		lines = append(lines, "", modalPrimaryButton(modal)+"   "+cancelButtonLabel, "Tab: next field · Enter: next/save · Ctrl+U: clear · Esc: cancel")
 	case "confirm":
 		cancel, remove := cancelButtonLabel, deleteButtonLabel
 		if modal.choice == 0 {
@@ -821,27 +926,43 @@ func renderModal(modal modal, width, height int) string {
 		} else {
 			remove = lipgloss.NewStyle().Reverse(true).Render(remove)
 		}
-		lines = append(lines, modal.reason, "", "This action cannot be undone.", "", cancel+"   "+remove, "←/→ or Tab choose · Enter continue · Esc cancel")
+		lines = append(lines, modal.reason, "", "This cannot be undone. Cancel is selected by default.", "", cancel+"   "+remove, "←/→ or Tab: choose · Enter: confirm · Esc: cancel")
 	}
 	return padBlock(strings.Join(lines, "\n"), width, height)
 }
 
 func helpModalContent() []string {
 	return []string{
-		"Mouse         Click windows, buttons, fields, and menus",
-		"Wheel         Scroll lists and terminal history",
-		"Click terminal Return keyboard focus to the terminal",
-		"Ctrl+G        Focus the editor sidebar",
-		"↑/↓, Enter    Select and open a window",
-		"Home/End      Move to the first/last sidebar item",
-		"Tab / →       Open the editor action menu",
-		"Alt/⌘+1–9    Select a window slot (⌘ when supported)",
-		"F1            Show or close this help",
-		"Esc           Return to terminal input",
-		"Ctrl+C        Quit while editor controls are active",
-		"", "Actions include create, attach, delete, and cleanup.",
-		"", closeButtonLabel + " · Esc or Enter",
+		"Mouse",
+		"  Click windows, actions, fields, choices, buttons",
+		"  Wheel: move lists or scroll terminal history",
+		"  Click terminal: return input to the terminal",
+		"Keyboard",
+		"  Ctrl+G: focus editor controls",
+		"  ↑/↓: select · Enter: open · Tab: actions",
+		"  F1: help · Esc: terminal · Ctrl+C: quit",
+		"  Home/End/Page Up/Page Down: move through list",
+		"  Alt/⌘+1–9: open a window slot",
+		"Need terminal Ctrl+G? Use Actions → Send Ctrl+G.",
+		closeButtonLabel + " · Enter, F1, or Esc: close",
 	}
+}
+
+func modalPrimaryButton(current modal) string {
+	label := "Save"
+	switch current.action {
+	case "add_host":
+		label = "Add host"
+	case "add_project":
+		label = "Add project"
+	case "create_workspace":
+		label = "Create workspace"
+	case "create_window":
+		label = "Create window"
+	case "put_file":
+		label = "Attach file"
+	}
+	return "[ " + label + " ]"
 }
 
 func modalChoiceWindow(current modal, height int) (int, int) {
@@ -851,8 +972,8 @@ func modalChoiceWindow(current modal, height int) (int, int) {
 	return start, min(len(current.choices), start+visible)
 }
 
-func modalChoiceButtonLine(verb string) string {
-	return cancelButtonLabel + " · Click or Enter to " + verb
+func modalChoiceButtonLine() string {
+	return cancelButtonLabel
 }
 
 func (m *tuiModel) rebuildRows() {
@@ -1045,17 +1166,17 @@ func (m *tuiModel) ensureSelectionVisible() {
 
 func (m *tuiModel) openActionMenu() {
 	m.modal = &modal{kind: "actions", title: "Editor actions", choices: []choice{
-		{label: "New window", action: "new_window"},
-		{label: "New workspace", action: "new_workspace"},
-		{label: "Add project", action: "add_project"},
-		{label: "Add SSH host", action: "add_host"},
-		{label: "Attach a client file", action: "attach_file"},
-		{label: "Attach a clipboard image", action: "attach_clipboard"},
-		{label: "Open 50,000-line scrollback", action: "scrollback"},
-		{label: "Delete selected window or workspace", action: "delete"},
+		{label: "New window…", action: "new_window"},
+		{label: "New workspace…", action: "new_workspace"},
+		{label: "Add project…", action: "add_project"},
+		{label: "Add SSH host…", action: "add_host"},
+		{label: "Attach file…", action: "attach_file"},
+		{label: "Attach clipboard image", action: "attach_clipboard"},
+		{label: "Open terminal history", action: "scrollback"},
+		{label: "Delete selected window or workspace…", action: "delete"},
 		{label: "Run safe cleanup", action: "cleanup"},
-		{label: "Send Ctrl+G to the terminal", action: "send_control_g"},
-		{label: "Help and controls", action: "help"},
+		{label: "Send Ctrl+G to terminal", action: "send_control_g"},
+		{label: "Help", action: "help"},
 		{label: "Quit multicodex editor", action: "quit"},
 	}}
 }
@@ -1072,17 +1193,17 @@ func (m tuiModel) activateEditorAction() (tea.Model, tea.Cmd) {
 	case "new_workspace":
 		m.openProjectChoice()
 	case "add_project":
-		m.openHostChoice("add_project", "Choose the project host")
+		m.openHostChoice("add_project", "Choose a host for the new project")
 	case "add_host":
-		m.modal = &modal{kind: "form", action: "add_host", title: "Add SSH host", fields: []formField{{label: "Name", limit: 80}, {label: "SSH alias", limit: 128}}}
+		m.modal = &modal{kind: "form", action: "add_host", title: "Add SSH host", fields: []formField{{label: "Display name", limit: 80}, {label: "SSH alias from ~/.ssh/config", limit: 128}}}
 	case "attach_file":
 		if row, ok := m.currentAttachedRow(); ok {
 			if _, pending := m.pendingPastes[row.window.ID]; pending {
 				m.message = "this window already has an attachment waiting to paste"
 				return m, nil
 			}
-			m.modal = &modal{kind: "form", action: "put_file", title: "Attach a client file", host: row.host, workspace: row.workspace, window: row.window,
-				fields: []formField{{label: "Absolute client file path", limit: 4096}}}
+			m.modal = &modal{kind: "form", action: "put_file", title: "Attach file to " + row.window.Name, host: row.host, workspace: row.workspace, window: row.window,
+				fields: []formField{{label: "Absolute client file path (16 MiB max)", limit: 4096}}}
 		} else {
 			m.message = "select a window before attaching a file"
 		}
@@ -1145,7 +1266,7 @@ func (m *tuiModel) openProjectChoice() {
 		m.message = "add a project first from the Actions menu"
 		return
 	}
-	m.modal = &modal{kind: "choice", action: "create_workspace", title: "Choose the project", choices: choices}
+	m.modal = &modal{kind: "choice", action: "create_workspace", title: "Choose a project for the new workspace", choices: choices}
 }
 
 func (m *tuiModel) openWorkspaceChoice() {
@@ -1164,7 +1285,7 @@ func (m *tuiModel) openWorkspaceChoice() {
 		m.message = "create a workspace first from the Actions menu"
 		return
 	}
-	m.modal = &modal{kind: "choice", action: "create_window", title: "Choose the workspace", choices: choices}
+	m.modal = &modal{kind: "choice", action: "create_window", title: "Choose a workspace for the new window", choices: choices}
 }
 
 func (m *tuiModel) acceptChoice() {
@@ -1176,14 +1297,14 @@ func (m *tuiModel) acceptChoice() {
 	action := m.modal.action
 	switch action {
 	case "add_project":
-		m.modal = &modal{kind: "form", action: action, title: "Add project on " + selected.host.Name, host: selected.host,
-			fields: []formField{{label: "Name", limit: 80}, {label: "Absolute directory path", limit: 4096}}}
+		m.modal = &modal{kind: "form", action: action, title: "Add project — " + selected.host.Name, host: selected.host,
+			fields: []formField{{label: "Project name", limit: 80}, {label: "Absolute host directory path", limit: 4096}}}
 	case "create_workspace":
-		m.modal = &modal{kind: "form", action: action, title: "New workspace in " + selected.project.Name, host: selected.host, project: selected.project,
-			fields: []formField{{label: "Name", limit: 80}}}
+		m.modal = &modal{kind: "form", action: action, title: "Create workspace — " + selected.project.Name, host: selected.host, project: selected.project,
+			fields: []formField{{label: "Workspace name", limit: 80}}}
 	case "create_window":
-		m.modal = &modal{kind: "form", action: action, title: "New window in " + selected.workspace.Name, host: selected.host, project: selected.project, workspace: selected.workspace,
-			fields: []formField{{label: "Name", value: defaultShellWin, limit: 80}, {label: "Type: shell or codex", value: "shell", limit: 5}}}
+		m.modal = &modal{kind: "form", action: action, title: "Create window — " + selected.workspace.Name, host: selected.host, project: selected.project, workspace: selected.workspace,
+			fields: []formField{{label: "Window name", value: defaultShellWin, limit: 80}, {label: "Start: shell or codex", value: "shell", limit: 5}}}
 	}
 }
 
@@ -1195,10 +1316,10 @@ func (m *tuiModel) openDeleteConfirmation() {
 	current := &modal{kind: "confirm", host: row.host, project: row.project, workspace: row.workspace, delete: DeleteRequest{Force: false}}
 	switch row.kind {
 	case "window":
-		current.action, current.title, current.reason = "delete_window", "Delete window", "Delete window “"+row.window.Name+"” and its tmux session?"
+		current.action, current.title, current.reason = "delete_window", "Delete window?", "Delete “"+row.window.Name+"” and its tmux session?"
 		current.delete.ID = row.window.ID
 	case "workspace":
-		current.action, current.title = "delete_workspace", "Delete workspace"
+		current.action, current.title = "delete_workspace", "Delete workspace?"
 		if row.workspace.Git {
 			current.reason = "Delete workspace “" + row.workspace.Name + "” and its owned Git worktree and branch?"
 		} else {
@@ -1228,6 +1349,10 @@ func (m tuiModel) handleActionResult(msg actionResultMsg) (tea.Model, tea.Cmd) {
 			return m, m.startRefresh()
 		}
 		m.message = msg.err.Error()
+		if msg.form != nil {
+			form := *msg.form
+			m.modal = &form
+		}
 		return m, m.startRefresh()
 	}
 	if msg.action == "copy_mode" {
@@ -1255,7 +1380,7 @@ func (m tuiModel) handleActionResult(msg actionResultMsg) (tea.Model, tea.Cmd) {
 				m.attachment, m.attachedID, m.attachedHost = nil, "", ""
 			}
 		} else if value.Reason != "" && value.Forceable {
-			m.modal = &modal{kind: "confirm", action: msg.action, title: "Confirm permanent deletion", host: hostForID(m.manager.State(), msg.hostID), delete: DeleteRequest{ID: msg.targetID, Force: true}, reason: value.Reason}
+			m.modal = &modal{kind: "confirm", action: msg.action, title: "Delete permanently?", host: hostForID(m.manager.State(), msg.hostID), delete: DeleteRequest{ID: msg.targetID, Force: true}, reason: value.Reason}
 			return m, nil
 		} else if value.Reason != "" {
 			m.message = value.Reason
@@ -1366,8 +1491,28 @@ func (m *tuiModel) beginAction(message string) bool {
 
 func (m tuiModel) hasUsableSize() bool { return m.width >= minimumWidth && m.height >= minimumHeight }
 func (m tuiModel) sidebarWidth() int   { return min(34, max(24, m.width/4)) }
-func (m tuiModel) terminalWidth() int  { return max(1, m.width-m.sidebarWidth()-1) }
-func (m tuiModel) bodyHeight() int     { return max(1, m.height-2) }
+func (m tuiModel) terminalWidth() int  { return m.layout().terminalWidth }
+func (m tuiModel) bodyHeight() int     { return m.layout().bodyHeight }
+
+func (m tuiModel) layout() screenLayout {
+	const minimumBodyHeight = 14
+	usageLineCount := max(1, len(m.usageLines(max(1, m.width-2))))
+	sidebarWidth := m.sidebarWidth()
+	bodyHeight := max(1, m.height-usageLineCount-6)
+	return screenLayout{
+		width:        m.width,
+		height:       m.height,
+		bodyContent:  4 + usageLineCount,
+		sidebarWidth: sidebarWidth,
+		terminalX:    sidebarWidth + 2, terminalWidth: max(1, m.width-sidebarWidth-3),
+		bodyHeight:     bodyHeight,
+		requiredHeight: max(minimumHeight, usageLineCount+6+minimumBodyHeight),
+	}
+}
+
+func (l screenLayout) fits() bool {
+	return l.width >= minimumWidth && l.height >= l.requiredHeight
+}
 
 func rowIdentity(row sidebarRow) string {
 	switch row.kind {
@@ -1439,48 +1584,177 @@ func usageCmd(fetch func(context.Context) (*usage.Summary, error), parent contex
 		ctx, cancel := context.WithTimeout(parent, 45*time.Second)
 		defer cancel()
 		summary, err := fetch(ctx)
-		if err != nil || summary == nil {
-			return usageMsg{text: "usage unavailable"}
+		message := usageMsg{accounts: accountUsageRows(summary)}
+		if err != nil {
+			message.err = "usage refresh failed"
 		}
-		return usageMsg{text: compactUsage(summary)}
+		return message
 	}
 }
 
-func compactUsage(summary *usage.Summary) string {
-	type item struct {
-		label string
-		used  int
+func loadingAccountUsage(labels []string) []accountUsage {
+	rows := make([]accountUsage, 0, len(labels))
+	for _, label := range labels {
+		rows = append(rows, accountUsage{label: accountUsageLabel(label), loading: true})
 	}
-	items := []item{}
+	return rows
+}
+
+func accountUsageRows(summary *usage.Summary) []accountUsage {
+	if summary == nil {
+		return nil
+	}
+	rows := make([]accountUsage, 0, len(summary.Accounts))
 	for _, account := range summary.Accounts {
-		if account.WeeklyWindow.UsedPercent >= 0 {
-			label := strings.TrimSpace(plainDisplayText(account.Label))
-			if label == "" {
-				label = "account"
+		rows = append(rows, accountUsage{
+			label:       accountUsageLabel(account.Label),
+			usedPercent: account.WeeklyWindow.UsedPercent,
+			available:   strings.TrimSpace(account.Error) == "" && account.WeeklyWindow.UsedPercent >= 0,
+		})
+	}
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i].label < rows[j].label })
+	return rows
+}
+
+func accountUsageLabel(label string) string {
+	label = strings.TrimSpace(plainDisplayText(label))
+	if label == "" {
+		return "account"
+	}
+	return label
+}
+
+func (m *tuiModel) applyUsage(message usageMsg) {
+	if message.err == "" {
+		m.usage = accountUsageState{accounts: retainFailedAccountUsage(m.usage.accounts, message.accounts)}
+		return
+	}
+	if hasAvailableAccountUsage(m.usage.accounts) {
+		for i := range m.usage.accounts {
+			if m.usage.accounts[i].available {
+				m.usage.accounts[i].stale = true
 			}
-			items = append(items, item{label: label, used: account.WeeklyWindow.UsedPercent})
+		}
+		m.usage.accounts = mergeAccountUsage(m.usage.accounts, message.accounts)
+		m.usage.err = message.err
+		return
+	}
+	if len(message.accounts) > 0 {
+		m.usage.accounts = message.accounts
+	} else {
+		for i := range m.usage.accounts {
+			m.usage.accounts[i].loading = false
+			m.usage.accounts[i].available = false
 		}
 	}
-	if len(items) == 0 && summary.WeeklyWindow.UsedPercent >= 0 {
-		label := strings.TrimSpace(plainDisplayText(summary.WindowAccountLabel))
-		if label == "" {
-			label = "account"
+	m.usage.err = message.err
+}
+
+func retainFailedAccountUsage(previous, incoming []accountUsage) []accountUsage {
+	previousByLabel := make(map[string][]accountUsage, len(previous))
+	for _, account := range previous {
+		previousByLabel[account.label] = append(previousByLabel[account.label], account)
+	}
+	used := make(map[string]int, len(incoming))
+	rows := make([]accountUsage, 0, len(incoming))
+	for _, account := range incoming {
+		index := used[account.label]
+		used[account.label]++
+		matches := previousByLabel[account.label]
+		if !account.available && index < len(matches) && matches[index].available {
+			account = matches[index]
+			account.loading = false
+			account.stale = true
 		}
-		items = append(items, item{label: label, used: summary.WeeklyWindow.UsedPercent})
+		rows = append(rows, account)
 	}
-	if len(items) == 0 {
-		return "usage unavailable"
-	}
-	sort.SliceStable(items, func(i, j int) bool { return items[i].label < items[j].label })
-	parts := []string{}
-	for i, item := range items {
-		if i == 3 {
-			parts = append(parts, fmt.Sprintf("+%d", len(items)-i))
-			break
+	return rows
+}
+
+func hasAvailableAccountUsage(accounts []accountUsage) bool {
+	for _, account := range accounts {
+		if account.available {
+			return true
 		}
-		parts = append(parts, fmt.Sprintf("%s %d%%", item.label, item.used))
 	}
-	return "usage " + strings.Join(parts, " · ")
+	return false
+}
+
+func mergeAccountUsage(previous, incoming []accountUsage) []accountUsage {
+	rows := append([]accountUsage(nil), previous...)
+	previousCount := make(map[string]int, len(previous))
+	for _, account := range previous {
+		previousCount[account.label]++
+	}
+	incomingCount := make(map[string]int, len(incoming))
+	for _, account := range incoming {
+		incomingCount[account.label]++
+		if incomingCount[account.label] > previousCount[account.label] {
+			rows = append(rows, account)
+		}
+	}
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i].label < rows[j].label })
+	return rows
+}
+
+func (m tuiModel) usageLines(width int) []string {
+	if len(m.usage.accounts) == 0 {
+		if m.usage.err != "" {
+			return []string{"Usage unavailable · run multicodex monitor doctor"}
+		}
+		return []string{"No local Codex accounts configured"}
+	}
+	items := make([]string, 0, len(m.usage.accounts))
+	for _, account := range m.usage.accounts {
+		item := account.label + " "
+		switch {
+		case account.loading:
+			item += "loading…"
+		case account.available:
+			item += fmt.Sprintf("%d%%", account.usedPercent)
+			if account.stale {
+				item += " (stale)"
+			}
+		default:
+			item += "unavailable"
+		}
+		items = append(items, item)
+	}
+	return packPlainItems(items, max(1, width))
+}
+
+func packPlainItems(items []string, width int) []string {
+	const separator = "  │  "
+	lines := []string{}
+	current := ""
+	for _, item := range items {
+		item = plainDisplayText(item)
+		if lipgloss.Width(item) > width {
+			if current != "" {
+				lines = append(lines, current)
+				current = ""
+			}
+			lines = append(lines, strings.Split(ansi.Hardwrap(item, width, true), "\n")...)
+			continue
+		}
+		candidate := item
+		if current != "" {
+			candidate = current + separator + item
+		}
+		if lipgloss.Width(candidate) <= width {
+			current = candidate
+			continue
+		}
+		lines = append(lines, current)
+		current = item
+	}
+	if current != "" {
+		lines = append(lines, current)
+	}
+	if len(lines) == 0 {
+		return []string{"No local Codex accounts configured"}
+	}
+	return lines
 }
 
 func (m tuiModel) track(command tea.Cmd) tea.Cmd {
@@ -1553,7 +1827,7 @@ func submitFormCmd(manager *Manager, form modal) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(manager.Context(), 2*time.Minute+15*time.Second)
 		defer cancel()
-		result := actionResultMsg{action: form.action, hostID: form.host.ID}
+		result := actionResultMsg{action: form.action, hostID: form.host.ID, form: &form}
 		switch form.action {
 		case "add_host":
 			result.value, result.err = manager.AddHost(ctx, form.fields[0].value, form.fields[1].value)
@@ -1618,6 +1892,38 @@ func joinKeepRight(left, right string, width int) string {
 	left = ansi.Truncate(left, max(0, leftLimit), "")
 	padding := max(0, width-lipgloss.Width(left)-rightWidth)
 	return left + strings.Repeat(" ", padding) + right
+}
+
+func joinKeepLeft(left, right string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	left = ansi.Truncate(left, width, "")
+	leftWidth := lipgloss.Width(left)
+	rightLimit := width - leftWidth
+	if left != "" && right != "" && rightLimit > 0 {
+		rightLimit--
+	}
+	right = ansi.Truncate(right, max(0, rightLimit), "")
+	padding := max(0, width-leftWidth-lipgloss.Width(right))
+	return left + strings.Repeat(" ", padding) + right
+}
+
+func titledRule(left, right, title string, innerWidth int) string {
+	return left + titledSegment(title, innerWidth) + right
+}
+
+func titledSegment(title string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	title = strings.TrimSpace(plainDisplayText(title))
+	if title == "" || width < 4 {
+		return strings.Repeat("─", width)
+	}
+	label := " " + ansi.Truncate(title, max(1, width-3), "…") + " "
+	label = ansi.Truncate(label, width, "")
+	return "─" + label + strings.Repeat("─", max(0, width-1-lipgloss.Width(label)))
 }
 
 func fitPlain(value string, width int) string {
