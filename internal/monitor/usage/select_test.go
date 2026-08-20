@@ -472,8 +472,53 @@ func TestSelectBestAccountWeeklyErrors(t *testing.T) {
 	_, err = selectBestAccountFromResultsForModel([]accountFetchResult{
 		selectionResult("exhausted", 0, 100, 60),
 	}, "")
-	if err == nil || err.Error() != "no accounts with remaining weekly usage" {
+	if err == nil || !strings.HasPrefix(err.Error(), "no accounts with remaining weekly usage") {
 		t.Fatalf("expected weekly exhaustion error, got %v", err)
+	}
+}
+
+// The bare "weekly usage" wording reads as a week-long outage. It is only the
+// name of the window we select on, and the real reset is often minutes away, so
+// the message must always carry the horizon that refutes that reading.
+func TestSelectBestAccountWeeklyExhaustionNamesResetHorizon(t *testing.T) {
+	_, err := selectBestAccountFromResultsForModel([]accountFetchResult{
+		selectionResult("exhausted-soon", 0, 100, 42*60),
+	}, "")
+	if err == nil {
+		t.Fatal("expected an exhaustion error")
+	}
+	if !strings.Contains(err.Error(), "soonest reset in 42m") {
+		t.Fatalf("exhaustion error must state when the window resets, got %q", err)
+	}
+
+	// Two accounts, different horizons: the caller needs the soonest, because
+	// that is when work can resume.
+	_, err = selectBestAccountFromResultsForModel([]accountFetchResult{
+		selectionResult("later", 0, 100, 6*24*60*60),
+		selectionResult("sooner", 0, 100, 15*60),
+	}, "")
+	if err == nil || !strings.Contains(err.Error(), "soonest reset in 15m") {
+		t.Fatalf("expected the soonest of several resets, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "2 exhausted") {
+		t.Fatalf("expected the exhausted account count, got %v", err)
+	}
+}
+
+func TestHumanizeResetDurationKeepsScaleUnmistakable(t *testing.T) {
+	for _, tc := range []struct {
+		seconds int64
+		want    string
+	}{
+		{0, "under a minute"},
+		{30, "under a minute"},
+		{42 * 60, "42m"},
+		{90 * 60, "1h30m"},
+		{6 * 24 * 60 * 60, "6d00h"},
+	} {
+		if got := humanizeResetDuration(tc.seconds); got != tc.want {
+			t.Fatalf("humanizeResetDuration(%d) = %q, want %q", tc.seconds, got, tc.want)
+		}
 	}
 }
 

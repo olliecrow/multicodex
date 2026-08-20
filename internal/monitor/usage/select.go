@@ -273,9 +273,81 @@ func selectBestAccountFromResultsForModel(results []accountFetchResult, model st
 		return SelectedAccount{}, errors.New("no model-eligible accounts available for the requested model")
 	}
 	if hadWeeklyWindow {
-		return SelectedAccount{}, fmt.Errorf("no accounts with remaining weekly usage")
+		return SelectedAccount{}, fmt.Errorf("no accounts with remaining weekly usage%s", exhaustedUsageDetail(results, model))
 	}
 	return SelectedAccount{}, fmt.Errorf("no usable weekly account usage available")
+}
+
+// exhaustedUsageDetail names when the blocking usage windows actually reset.
+//
+// The error text says "weekly" because that is the name of the window field we
+// select on, NOT a promise that the wait is a week long -- the provider reports
+// a rolling window whose reset is frequently minutes away. Without a reset time
+// the bare string reads as "this account is gone for the week", and callers act
+// on that: automated agents that hit it have abandoned a provider for the rest
+// of a session when the real wait was under an hour. Every window we already
+// hold carries ResetsAt/SecondsUntilReset, so state it instead of making the
+// reader guess.
+func exhaustedUsageDetail(results []accountFetchResult, model string) string {
+	var (
+		soonestSeconds int64
+		haveReset      bool
+		soonestAt      *time.Time
+		exhaustedCount int
+	)
+
+	for _, result := range results {
+		if result.fetchErr != nil || result.snapshot == nil {
+			continue
+		}
+		window, _ := selectWeeklyWindowForModel(result.account, model)
+		if !usageWindowAvailable(window) || !usageWindowIsKnownExhausted(window) {
+			continue
+		}
+		exhaustedCount++
+
+		seconds, known := secondsUntilReset(window)
+		if !known {
+			continue
+		}
+		if !haveReset || seconds < soonestSeconds {
+			soonestSeconds = seconds
+			soonestAt = window.ResetsAt
+			haveReset = true
+		}
+	}
+
+	if exhaustedCount == 0 {
+		return ""
+	}
+	if !haveReset {
+		return fmt.Sprintf(" (%d exhausted; reset time not reported by the provider)", exhaustedCount)
+	}
+
+	detail := fmt.Sprintf(" (%d exhausted; soonest reset in %s", exhaustedCount, humanizeResetDuration(soonestSeconds))
+	if soonestAt != nil {
+		detail += ", at " + soonestAt.UTC().Format(time.RFC3339)
+	}
+	return detail + ")"
+}
+
+// humanizeResetDuration renders a reset horizon so the scale is unmistakable at
+// a glance: "42m" must not be mistakable for "4d02h".
+func humanizeResetDuration(seconds int64) string {
+	if seconds <= 0 {
+		return "under a minute"
+	}
+	d := time.Duration(seconds) * time.Second
+	switch {
+	case d < time.Minute:
+		return "under a minute"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh%02dm", int(d.Hours()), int(d.Minutes())%60)
+	default:
+		return fmt.Sprintf("%dd%02dh", int(d.Hours())/24, int(d.Hours())%24)
+	}
 }
 
 func choosePrioritizedEligibleAccount(results []accountFetchResult, knownResetCandidates, unknownResetCandidates []accountWindowCandidate) (SelectedAccount, bool) {
