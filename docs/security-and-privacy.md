@@ -30,6 +30,7 @@
 - Recommended ignore coverage includes targeted current state paths: `**/multicodex/config.json` and `**/multicodex/profiles/`.
 - Legacy `.multicodex/` state paths remain sensitive and should stay ignored.
 - Tests must use synthetic fixtures only.
+- Committed email addresses must use reserved example domains or GitHub noreply addresses. Real addresses are blocked in staged files, commit messages, pushed patches, and pull request metadata.
 - Example files must never include real credentials.
 - CI should run secret scanning before merge.
 - `multicodex doctor` should be used before release to verify leak-guard checks.
