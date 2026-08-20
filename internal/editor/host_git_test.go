@@ -192,7 +192,7 @@ func TestExecRunnerCancellationKillsOwnedGrandchild(t *testing.T) {
 
 func TestExecRunnerHasNoControllingTerminal(t *testing.T) {
 	requireCommands(t, "sh")
-	if _, err := (execRunner{}).run(context.Background(), "sh", "-c", "if { : </dev/tty; } 2>/dev/null; then exit 9; fi"); err != nil {
+	if _, err := (execRunner{}).run(context.Background(), "sh", "-c", "if sh -c ': </dev/tty' 2>/dev/null; then exit 9; fi"); err != nil {
 		t.Fatal("transient command could open the editor controlling terminal")
 	}
 }
