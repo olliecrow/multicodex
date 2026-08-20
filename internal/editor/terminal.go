@@ -213,7 +213,19 @@ func (a *Attachment) Paste(text string) error {
 	if len(text) > maxTerminalPaste {
 		return fmt.Errorf("terminal paste exceeds %d MiB", maxTerminalPaste>>20)
 	}
-	return a.enqueueInput(terminalInput{kind: "paste", text: text})
+	return a.enqueueInput(terminalInput{kind: "paste", text: safeTerminalPaste(text)})
+}
+
+func safeTerminalPaste(text string) string {
+	return strings.Map(func(value rune) rune {
+		if value == '\t' || value == '\n' || value == '\r' {
+			return value
+		}
+		if value < ' ' || value == '\x7f' || value >= '\x80' && value <= '\x9f' {
+			return -1
+		}
+		return value
+	}, text)
 }
 
 func (a *Attachment) SendFocus(focused bool) error {

@@ -466,6 +466,9 @@ func TestCleanupRemovesInterruptedPendingAttachment(t *testing.T) {
 	if _, err := os.Stat(attachment.Path); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("pending attachment file remains: %v", err)
 	}
+	if _, err := os.Stat(filepath.Dir(attachment.Path)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("pending attachment directory remains: %v", err)
+	}
 	if err := service.store.withReadLock(func(registry hostRegistry) error {
 		if len(registry.Attachments) != 0 {
 			t.Fatalf("pending attachment record remains: %+v", registry.Attachments)
@@ -660,6 +663,39 @@ func TestGitWorkspacePreservesUniqueCommitsWithoutForce(t *testing.T) {
 	}
 }
 
+func TestDeleteWorkspaceRepairsRegisteredWorktreeAfterDirectoryLoss(t *testing.T) {
+	requireCommands(t, "git", "tmux")
+	ctx := context.Background()
+	project := syntheticGitProject(t)
+	service, err := NewHostService(privateTestHome(t), mustID(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectID := mustID(t)
+	workspace, err := service.CreateWorkspace(ctx, CreateWorkspaceRequest{ProjectID: projectID, ProjectPath: project, Name: "Interrupted metadata"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(workspace.Path); err != nil {
+		t.Fatal(err)
+	}
+	before := commandOutput(t, "git", "-C", project, "worktree", "list", "--porcelain")
+	if !strings.Contains(before, workspace.Path) || !strings.Contains(before, "refs/heads/"+workspace.Branch) {
+		t.Fatalf("fixture has no registered missing worktree:\n%s", before)
+	}
+	result, err := service.DeleteWorkspace(ctx, DeleteRequest{ID: workspace.ID})
+	if err != nil || !result.Deleted {
+		t.Fatalf("registered missing worktree cleanup: %+v, %v", result, err)
+	}
+	after := commandOutput(t, "git", "-C", project, "worktree", "list", "--porcelain")
+	if strings.Contains(after, workspace.Path) || strings.Contains(after, "refs/heads/"+workspace.Branch) {
+		t.Fatalf("registered worktree metadata remains:\n%s", after)
+	}
+	if _, err := os.Stat(filepath.Join(service.store.worktreeRoot, projectID)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("empty owned worktree directory remains: %v", err)
+	}
+}
+
 func TestInterruptedWorkspaceDeleteRechecksNewCommits(t *testing.T) {
 	requireCommands(t, "git", "tmux")
 	ctx := context.Background()
@@ -745,6 +781,55 @@ func TestCleanupCompletesInterruptedOwnedDeletes(t *testing.T) {
 	result, err = service.Cleanup(ctx)
 	if err != nil || result.WorkspacesDeleted != 1 {
 		t.Fatalf("workspace delete recovery: %+v, %v", result, err)
+	}
+}
+
+func TestClearWindowDeletePendingRestoresNormalCleanupGuard(t *testing.T) {
+	requireCommands(t, "git", "tmux")
+	ctx := context.Background()
+	service, err := NewHostService(privateTestHome(t), mustID(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer killTestServer(service)
+	project := syntheticGitProject(t)
+	workspace, err := service.CreateWorkspace(ctx, CreateWorkspaceRequest{ProjectID: mustID(t), ProjectPath: project, Name: "Pending guard"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	window, err := service.CreateWindow(ctx, CreateWindowRequest{WorkspaceID: workspace.ID, Name: "Terminal", Launch: "shell"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.store.withLock(func(registry *hostRegistry) error {
+		registry.Windows[0].DeletePending = true
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.clearWindowDeletePending(window.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.store.withReadLock(func(registry hostRegistry) error {
+		if registry.Windows[0].DeletePending {
+			t.Fatal("declined deletion left a persistent delete intent")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.TouchWindow(ctx, window.ID); err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.Cleanup(ctx)
+	if err != nil || result.WindowsDeleted != 0 {
+		t.Fatalf("normal cleanup removed a live window after declined deletion: %+v, %v", result, err)
+	}
+	if result, err := service.DeleteWindow(ctx, DeleteRequest{ID: window.ID, Force: true}); err != nil || !result.Deleted {
+		t.Fatalf("cleanup window: %+v, %v", result, err)
+	}
+	if result, err := service.DeleteWorkspace(ctx, DeleteRequest{ID: workspace.ID, Force: true}); err != nil || !result.Deleted {
+		t.Fatalf("cleanup workspace: %+v, %v", result, err)
 	}
 }
 

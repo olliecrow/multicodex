@@ -181,7 +181,13 @@ func (s *HostService) Snapshot(ctx context.Context) (HostSnapshot, error) {
 		window.Alive = alive
 		capture, err := s.tmux(ctx, "capture-pane", "-p", "-J", "-S", "-"+strconv.Itoa(activityRows), "-t", window.Session)
 		if err != nil {
-			return HostSnapshot{}, fmt.Errorf("capture owned terminal %q: %w", window.Name, err)
+			currentState, currentAlive, inspectErr := s.inspectSession(ctx, window)
+			if inspectErr != nil || currentState == sessionOwned && currentAlive {
+				return HostSnapshot{}, fmt.Errorf("capture owned terminal %q: %w", window.Name, err)
+			}
+			window.Alive = false
+			windows = append(windows, window)
+			continue
 		}
 		hash := sha256.Sum256(capture)
 		window.PaneHash = hex.EncodeToString(hash[:])
@@ -293,7 +299,7 @@ func (s *HostService) rollbackWorkspaceCreation(workspace Workspace) {
 	if !clean {
 		return
 	}
-	_ = s.store.withLock(func(registry *hostRegistry) error {
+	if err := s.store.withLock(func(registry *hostRegistry) error {
 		kept := registry.Workspaces[:0]
 		for _, candidate := range registry.Workspaces {
 			if candidate.ID != workspace.ID {
@@ -302,7 +308,9 @@ func (s *HostService) rollbackWorkspaceCreation(workspace Workspace) {
 		}
 		registry.Workspaces = kept
 		return nil
-	})
+	}); err == nil {
+		s.removeEmptyWorktreeDirs(workspace.ProjectID)
+	}
 }
 
 func (s *HostService) InspectProject(ctx context.Context, path string) (ProjectInfo, error) {
@@ -552,7 +560,7 @@ func (s *HostService) rollbackAttachmentCreation(attachment AttachmentFile) {
 	if err := s.removeOwnedAttachment(attachment); err != nil {
 		return
 	}
-	_ = s.store.withLock(func(registry *hostRegistry) error {
+	if err := s.store.withLock(func(registry *hostRegistry) error {
 		kept := registry.Attachments[:0]
 		for _, candidate := range registry.Attachments {
 			if candidate.ID != attachment.ID {
@@ -561,7 +569,9 @@ func (s *HostService) rollbackAttachmentCreation(attachment AttachmentFile) {
 		}
 		registry.Attachments = kept
 		return nil
-	})
+	}); err == nil {
+		s.removeEmptyAttachmentDirs(attachment.WorkspaceID)
+	}
 }
 
 func (s *HostService) TouchWindow(ctx context.Context, id string) error {
@@ -671,6 +681,9 @@ func (s *HostService) DeleteWindow(ctx context.Context, request DeleteRequest) (
 	}
 	if state == sessionOwned && !effectiveForce {
 		if alive {
+			if err := s.clearWindowDeletePending(window.ID); err != nil {
+				return DeleteResult{}, err
+			}
 			return DeleteResult{Reason: "window became active; confirm permanent deletion"}, nil
 		}
 	}
@@ -791,7 +804,20 @@ func (s *HostService) DeleteWorkspace(ctx context.Context, request DeleteRequest
 		return DeleteResult{}, err
 	}
 	s.removeEmptyAttachmentDirs(workspace.ID)
+	s.removeEmptyWorktreeDirs(workspace.ProjectID)
 	return DeleteResult{Deleted: true}, nil
+}
+
+func (s *HostService) clearWindowDeletePending(windowID string) error {
+	return s.store.withLock(func(registry *hostRegistry) error {
+		for i := range registry.Windows {
+			if registry.Windows[i].ID == windowID {
+				registry.Windows[i].DeletePending = false
+				return nil
+			}
+		}
+		return errors.New("window no longer exists")
+	})
 }
 
 func (s *HostService) Cleanup(ctx context.Context) (CleanupResult, error) {
@@ -888,6 +914,7 @@ func (s *HostService) Cleanup(ctx context.Context) (CleanupResult, error) {
 		}); err != nil {
 			return result, err
 		}
+		s.removeEmptyAttachmentDirs(attachment.WorkspaceID)
 		result.AttachmentsDeleted++
 	}
 	if err := s.cleanupUnusedTmuxSocket(ctx); err != nil {
@@ -898,6 +925,8 @@ func (s *HostService) Cleanup(ctx context.Context) (CleanupResult, error) {
 
 func (s *HostService) reconcilePendingCreates(ctx context.Context) ([]string, error) {
 	var notes []string
+	var prunedProjects []string
+	var prunedAttachmentWorkspaces []string
 	err := s.store.withLock(func(registry *hostRegistry) error {
 		keptWorkspaces := registry.Workspaces[:0]
 		for i := range registry.Workspaces {
@@ -942,6 +971,7 @@ func (s *HostService) reconcilePendingCreates(ctx context.Context) ([]string, er
 				continue
 			}
 			if !exists {
+				prunedProjects = append(prunedProjects, workspace.ProjectID)
 				continue
 			}
 			out, countErr := s.runner.run(ctx, "git", "-C", workspace.ProjectPath, "rev-list", "--count", workspace.BaseRef+".."+workspace.Branch)
@@ -949,6 +979,8 @@ func (s *HostService) reconcilePendingCreates(ctx context.Context) ([]string, er
 			if countErr != nil || parseErr != nil || count != 0 || s.removeGitWorktree(ctx, workspace, false) != nil {
 				notes = append(notes, workspace.Name+": pending branch has work or is uncertain")
 				keptWorkspaces = append(keptWorkspaces, workspace)
+			} else {
+				prunedProjects = append(prunedProjects, workspace.ProjectID)
 			}
 		}
 		registry.Workspaces = keptWorkspaces
@@ -1002,11 +1034,21 @@ func (s *HostService) reconcilePendingCreates(ctx context.Context) ([]string, er
 			if err := s.removeOwnedAttachment(attachment); err != nil {
 				notes = append(notes, "attachment: pending upload recovery is uncertain")
 				keptAttachments = append(keptAttachments, attachment)
+			} else {
+				prunedAttachmentWorkspaces = append(prunedAttachmentWorkspaces, attachment.WorkspaceID)
 			}
 		}
 		registry.Attachments = keptAttachments
 		return nil
 	})
+	if err == nil {
+		for _, projectID := range prunedProjects {
+			s.removeEmptyWorktreeDirs(projectID)
+		}
+		for _, workspaceID := range prunedAttachmentWorkspaces {
+			s.removeEmptyAttachmentDirs(workspaceID)
+		}
+	}
 	return notes, err
 }
 
@@ -1395,6 +1437,21 @@ func (s *HostService) removeGitWorktree(ctx context.Context, workspace Workspace
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return errors.New("inspect owned Git worktree before removal")
+	} else {
+		registeredPath, registered, err := s.registeredOwnedWorktree(ctx, workspace)
+		if err != nil {
+			return err
+		}
+		if registered {
+			args := []string{"-c", "core.hooksPath=/dev/null", "-C", workspace.ProjectPath, "worktree", "remove"}
+			if force {
+				args = append(args, "--force")
+			}
+			args = append(args, registeredPath)
+			if _, err := s.runner.run(ctx, "git", args...); err != nil {
+				return errors.New("remove registered owned Git worktree")
+			}
+		}
 	}
 	exists, err := s.gitBranchExists(ctx, workspace.ProjectPath, workspace.Branch)
 	if err != nil {
@@ -1419,6 +1476,58 @@ func (s *HostService) removeGitWorktree(ctx context.Context, workspace Workspace
 		return errors.New("remove owned Git branch after worktree removal")
 	}
 	return nil
+}
+
+func (s *HostService) registeredOwnedWorktree(ctx context.Context, workspace Workspace) (string, bool, error) {
+	out, err := s.runner.run(ctx, "git", "-C", workspace.ProjectPath, "worktree", "list", "--porcelain", "-z")
+	if err != nil {
+		return "", false, errors.New("inspect registered Git worktrees before removal")
+	}
+	expectedPath, err := canonicalMissingPath(workspace.Path)
+	if err != nil {
+		return "", false, errors.New("inspect owned Git worktree path before removal")
+	}
+	expectedBranch := "refs/heads/" + workspace.Branch
+	matched := ""
+	for _, record := range bytes.Split(out, []byte{0, 0}) {
+		path, branch := "", ""
+		for _, field := range bytes.Split(record, []byte{0}) {
+			value := string(field)
+			switch {
+			case strings.HasPrefix(value, "worktree "):
+				path = strings.TrimPrefix(value, "worktree ")
+			case strings.HasPrefix(value, "branch "):
+				branch = strings.TrimPrefix(value, "branch ")
+			}
+		}
+		if path == "" {
+			continue
+		}
+		canonicalPath, pathErr := canonicalMissingPath(path)
+		pathMatches := pathErr == nil && canonicalPath == expectedPath
+		branchMatches := branch == expectedBranch
+		if pathMatches != branchMatches {
+			return "", false, errors.New("refuse Git removal because registered worktree ownership is uncertain")
+		}
+		if pathMatches {
+			if matched != "" {
+				return "", false, errors.New("refuse Git removal because registered worktree ownership is ambiguous")
+			}
+			matched = path
+		}
+	}
+	return matched, matched != "", nil
+}
+
+func canonicalMissingPath(path string) (string, error) {
+	if validateAbsolutePath(path, "Git worktree path") != nil {
+		return "", errors.New("invalid Git worktree path")
+	}
+	parent, err := filepath.EvalSymlinks(filepath.Dir(path))
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(parent, filepath.Base(path)), nil
 }
 
 func (s *HostService) gitCommonDir(ctx context.Context, path string) (string, error) {
@@ -1550,6 +1659,15 @@ func (s *HostService) removeEmptyAttachmentDirs(workspaceID string) {
 	}
 	instanceRoot := filepath.Join(s.store.base, "editor", "attachments", s.store.instanceID)
 	_ = os.Remove(filepath.Join(instanceRoot, workspaceID))
+	_ = os.Remove(instanceRoot)
+}
+
+func (s *HostService) removeEmptyWorktreeDirs(projectID string) {
+	if validateID(projectID, "project identifier") != nil {
+		return
+	}
+	instanceRoot := s.store.worktreeRoot
+	_ = os.Remove(filepath.Join(instanceRoot, projectID))
 	_ = os.Remove(instanceRoot)
 }
 

@@ -197,7 +197,7 @@ func (s *appServerSession) ensureStarted() error {
 		BaseEnv:       os.Environ(),
 		CodexHome:     s.codexHome,
 		ClientName:    clientName,
-		ClientVersion: buildinfo.Version,
+		ClientVersion: buildinfo.Current(),
 		ErrorSanitizer: func(method string, code int, message string) error {
 			return safeProviderRPCError(method, &rpcError{Code: code, Message: message})
 		},

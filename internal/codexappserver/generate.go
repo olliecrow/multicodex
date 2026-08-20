@@ -177,7 +177,7 @@ func Generate(ctx context.Context, options GenerateOptions) error {
 		CodexHome:      options.CodexHome,
 		ActiveProfile:  options.ActiveProfile,
 		ClientName:     "multicodex-generate",
-		ClientVersion:  buildinfo.Version,
+		ClientVersion:  buildinfo.Current(),
 		CaptureEvents:  true,
 		ErrorSanitizer: generationRPCError,
 	})

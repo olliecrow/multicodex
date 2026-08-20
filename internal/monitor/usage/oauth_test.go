@@ -29,7 +29,7 @@ func TestOAuthSourceFetchLeavesNonWeeklyPrimaryOnlyWindowUnknown(t *testing.T) {
 		if got := req.Header.Get("Authorization"); got != "Bearer test-token" {
 			t.Fatalf("expected bearer token header, got %q", got)
 		}
-		if got := req.Header.Get("User-Agent"); got != clientName+"/"+buildinfo.Version {
+		if got := req.Header.Get("User-Agent"); got != clientName+"/"+buildinfo.Current() {
 			t.Fatalf("expected versioned user agent, got %q", got)
 		}
 		body := `{

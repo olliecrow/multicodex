@@ -24,6 +24,37 @@ func TestCleanupResultValidationRejectsUnsafeHostData(t *testing.T) {
 	}
 }
 
+func TestClearSelectedWindowPersistsOnlyTheDeletedSelection(t *testing.T) {
+	home := privateTestHome(t)
+	manager, err := NewManager(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected := mustID(t)
+	if err := manager.SetSelectedWindow(selected); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.clearSelectedWindow(mustID(t)); err != nil {
+		t.Fatal(err)
+	}
+	if manager.State().SelectedWindowID != selected {
+		t.Fatal("unrelated window deletion cleared the reconnect selection")
+	}
+	if err := manager.clearSelectedWindow(selected); err != nil {
+		t.Fatal(err)
+	}
+	state, err := NewStateStore(home).Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.SelectedWindowID != "" {
+		t.Fatalf("deleted reconnect selection persisted as %q", state.SelectedWindowID)
+	}
+	if err := manager.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRefreshQueueCancellationPreservesHealthyClient(t *testing.T) {
 	manager, err := NewManager(privateTestHome(t))
 	if err != nil {
