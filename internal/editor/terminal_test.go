@@ -90,3 +90,18 @@ func TestTerminalInputQueueIsBoundedAndNonBlocking(t *testing.T) {
 		t.Fatal("oversized terminal paste was accepted")
 	}
 }
+
+func TestTerminalPasteRemovesInjectedControlSequences(t *testing.T) {
+	attachment := &Attachment{inputQueue: make(chan terminalInput, 1)}
+	input := "safe\n\x1b[201~printf injected\n\u009b31mend\t"
+	if err := attachment.Paste(input); err != nil {
+		t.Fatal(err)
+	}
+	queued := <-attachment.inputQueue
+	if queued.kind != "paste" || queued.text != "safe\n[201~printf injected\n31mend\t" {
+		t.Fatalf("sanitized paste = %q", queued.text)
+	}
+	if strings.ContainsAny(queued.text, "\x1b\u009b") {
+		t.Fatalf("paste retained terminal controls: %q", queued.text)
+	}
+}

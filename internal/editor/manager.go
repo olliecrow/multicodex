@@ -383,8 +383,24 @@ func (m *Manager) delete(ctx context.Context, hostID, method string, request Del
 	result.Reason = safeClientText(result.Reason, 300)
 	if result.Deleted {
 		result.Reason = ""
+		if method == "delete_window" {
+			if err := m.clearSelectedWindow(request.ID); err != nil {
+				return result, err
+			}
+		}
 	}
 	return result, nil
+}
+
+func (m *Manager) clearSelectedWindow(windowID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.state.SelectedWindowID != windowID {
+		return nil
+	}
+	m.state.SelectedWindowID = ""
+	m.dirty = true
+	return m.maybeSaveLocked(true)
 }
 
 func validateHostSnapshot(host Host, snapshot HostSnapshot) error {

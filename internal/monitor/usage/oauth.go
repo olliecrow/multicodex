@@ -52,7 +52,7 @@ func (s *OAuthSource) Fetch(ctx context.Context) (*Summary, error) {
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", clientName+"/"+buildinfo.Version)
+	req.Header.Set("User-Agent", clientName+"/"+buildinfo.Current())
 
 	res, err := s.httpClient.Do(req)
 	if err != nil {

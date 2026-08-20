@@ -124,7 +124,7 @@ func dispatchHostRequest(parent context.Context, service *HostService, request p
 
 	switch request.Method {
 	case "hello":
-		return helloResult{Protocol: hostProtocol, Version: buildinfo.Version, Identity: editorBuildIdentity()}, nil
+		return helloResult{Protocol: hostProtocol, Version: buildinfo.Current(), Identity: editorBuildIdentity()}, nil
 	case "snapshot":
 		return service.Snapshot(ctx)
 	case "inspect_project":
@@ -295,7 +295,7 @@ func StartHostClient(ctx context.Context, executable, multicodexHome, instanceID
 		client.Close()
 		return nil, connectionHandshakeError(host)
 	}
-	if hello.Protocol != hostProtocol || hello.Version != buildinfo.Version {
+	if hello.Protocol != hostProtocol || hello.Version != buildinfo.Current() {
 		client.Close()
 		return nil, errors.New("editor host uses an incompatible multicodex version")
 	}
@@ -321,7 +321,7 @@ func editorBuildIdentity() string {
 			}
 		}
 	}
-	return buildIdentity(buildinfo.Version, revision, modified)
+	return buildIdentity(buildinfo.Current(), revision, modified)
 }
 
 func buildIdentity(version, revision string, modified bool) string {
@@ -329,11 +329,11 @@ func buildIdentity(version, revision string, modified bool) string {
 	if version == "" {
 		return ""
 	}
-	if revision != "" && !modified {
-		return version + "@" + revision
-	}
 	if !strings.HasSuffix(version, "-dev") {
 		return version
+	}
+	if revision != "" && !modified {
+		return version + "@" + revision
 	}
 	return ""
 }

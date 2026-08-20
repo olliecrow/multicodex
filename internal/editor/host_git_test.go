@@ -39,6 +39,84 @@ func TestGitRootFailsClosedForUnavailableOrMarkedRepository(t *testing.T) {
 	}
 }
 
+func TestSnapshotKeepsOtherHostStateWhenWindowDisappearsDuringCapture(t *testing.T) {
+	home := privateTestHome(t)
+	service, err := NewHostService(home, mustID(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace := Workspace{
+		ID: mustID(t), ProjectID: mustID(t), ProjectPath: t.TempDir(), Name: "Work", Path: t.TempDir(),
+		CreatedAt: time.Now().UTC(), LastUsedAt: time.Now().UTC(),
+	}
+	workspace.Path = workspace.ProjectPath
+	window := Window{
+		ID: mustID(t), WorkspaceID: workspace.ID, Name: "Terminal", Launch: "shell",
+		CreatedAt: time.Now().UTC(), LastUsedAt: time.Now().UTC(),
+	}
+	window.Session = "mce-" + window.ID
+	if err := service.store.withLock(func(registry *hostRegistry) error {
+		registry.Workspaces = append(registry.Workspaces, workspace)
+		registry.Windows = append(registry.Windows, window)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	service.runner = runnerFunc(func(_ context.Context, name string, args ...string) ([]byte, error) {
+		if name != "tmux" {
+			t.Fatalf("unexpected command %q", name)
+		}
+		calls++
+		switch calls {
+		case 1:
+			return []byte(window.Session + "\t" + service.store.instanceID + "\t" + window.ID + "\t" + workspace.ID + "\t0\t1\t1\n"), nil
+		case 2, 3:
+			return nil, commandFailure{exitCode: 1}
+		default:
+			t.Fatalf("unexpected tmux call %d: %v", calls, args)
+			return nil, errors.New("unexpected call")
+		}
+	})
+	snapshot, err := service.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Windows) != 1 || snapshot.Windows[0].Alive || snapshot.Windows[0].PaneHash != "" {
+		t.Fatalf("disappeared window snapshot = %+v", snapshot.Windows)
+	}
+}
+
+func TestFailedGitWorktreeAddRemovesEmptyOwnedDirectories(t *testing.T) {
+	requireCommands(t, "git")
+	project := syntheticGitProject(t)
+	service, err := NewHostService(privateTestHome(t), mustID(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.runner = runnerFunc(func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		if name == "git" && slices.Contains(args, "add") && slices.Contains(args, "worktree") {
+			return nil, commandFailure{exitCode: 1}
+		}
+		return (execRunner{}).run(ctx, name, args...)
+	})
+	projectID := mustID(t)
+	if _, err := service.CreateWorkspace(context.Background(), CreateWorkspaceRequest{ProjectID: projectID, ProjectPath: project, Name: "Failed add"}); err == nil {
+		t.Fatal("expected Git worktree creation to fail")
+	}
+	if _, err := os.Stat(filepath.Join(service.store.worktreeRoot, projectID)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("failed worktree left empty owned directories: %v", err)
+	}
+	if err := service.store.withReadLock(func(registry hostRegistry) error {
+		if len(registry.Workspaces) != 0 {
+			t.Fatalf("failed worktree retained registry state: %+v", registry.Workspaces)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestGitRootRecognizesPlainDirectoryAndRejectsUnsafeResults(t *testing.T) {
 	project := t.TempDir()
 	service := &HostService{runner: runnerFunc(func(context.Context, string, ...string) ([]byte, error) {

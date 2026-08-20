@@ -81,6 +81,20 @@ func TestWindowSlotShortcutsAreDynamicAndDoNotStealPlainTerminalDigits(t *testin
 	}
 }
 
+func TestControlModeCanSendLiteralControlG(t *testing.T) {
+	attachment := &Attachment{inputQueue: make(chan terminalInput, 1)}
+	model := tuiModel{attachment: attachment, controlMode: true}
+	updated, cmd := model.handleKey(tea.KeyPressMsg{Code: 'g', Text: "g"})
+	got := updated.(tuiModel)
+	if cmd != nil || got.controlMode || !strings.Contains(got.message, "Ctrl+G") {
+		t.Fatalf("literal Ctrl+G result = %+v", got)
+	}
+	input := <-attachment.inputQueue
+	if input.kind != "key" || input.key.Code != 'g' || input.key.Mod != tea.ModCtrl {
+		t.Fatalf("literal Ctrl+G input = %+v", input)
+	}
+}
+
 func TestCompactUsageIsAlwaysClearAndBounded(t *testing.T) {
 	summary := &usage.Summary{Accounts: []usage.AccountSummary{
 		{Label: "delta", WeeklyWindow: usage.WindowSummary{UsedPercent: 40}},
@@ -220,6 +234,62 @@ func TestRefreshIsSingleFlightAndStaleAttachResultIsIgnored(t *testing.T) {
 	got := updated.(tuiModel)
 	if got.attachingID != model.attachingID || got.message != model.message {
 		t.Fatalf("stale attach result changed current selection: %+v", got)
+	}
+}
+
+func TestCreatedWindowBecomesSidebarSelectionAfterRefresh(t *testing.T) {
+	projectID := "111111111111111111111111"
+	workspaceID := "222222222222222222222222"
+	oldWindowID := "333333333333333333333333"
+	newWindowID := "444444444444444444444444"
+	project := Project{ID: projectID, Name: "Project", Path: "/tmp/project"}
+	host := Host{ID: localHostID, Name: localHostName, Projects: []Project{project}}
+	manager := &Manager{state: ClientState{Version: stateVersion, InstanceID: testInstanceID, Hosts: []Host{host}}}
+	model := tuiModel{
+		manager: manager, selectedRow: 2, selectOnRefreshID: newWindowID,
+		rows: []sidebarRow{
+			{kind: "project", project: project},
+			{kind: "workspace", workspace: Workspace{ID: workspaceID}},
+			{kind: "window", window: Window{ID: oldWindowID}},
+		},
+		statuses: []HostStatus{{Host: host, Snapshot: HostSnapshot{
+			Workspaces: []Workspace{{ID: workspaceID, ProjectID: projectID, Name: "Work"}},
+			Windows: []Window{
+				{ID: oldWindowID, WorkspaceID: workspaceID, Name: "Old"},
+				{ID: newWindowID, WorkspaceID: workspaceID, Name: "New"},
+			},
+		}}},
+	}
+	model.rebuildRows()
+	if model.rows[model.selectedRow].window.ID != newWindowID || model.selectOnRefreshID != "" {
+		t.Fatalf("new window selection = %+v", model.rows[model.selectedRow])
+	}
+}
+
+func TestAttachmentPasteWaitsForItsTargetAndRetriesBusyInput(t *testing.T) {
+	targetID := "111111111111111111111111"
+	model := tuiModel{refreshing: true, actionBusy: true}
+	updated, _ := model.handleActionResult(actionResultMsg{
+		action: "put_file", targetID: targetID,
+		value: AttachmentFile{Path: "/srv/.multicodex/editor/attachments/file.txt"},
+	})
+	model = updated.(tuiModel)
+	if model.pendingPastes[targetID] == "" || !strings.Contains(model.message, "when its window opens") {
+		t.Fatalf("switched-window attachment was lost: %+v", model)
+	}
+	attachment := &Attachment{inputQueue: make(chan terminalInput, 1)}
+	attachment.inputQueue <- terminalInput{kind: "text", text: "busy"}
+	model.attachment, model.attachedID = attachment, targetID
+	if model.flushPendingPaste(targetID) || model.pendingPastes[targetID] == "" {
+		t.Fatal("busy terminal input discarded the pending attachment")
+	}
+	<-attachment.inputQueue
+	if !model.flushPendingPaste(targetID) || model.pendingPastes[targetID] != "" {
+		t.Fatal("pending attachment was not retried after terminal input drained")
+	}
+	input := <-attachment.inputQueue
+	if input.kind != "paste" || !strings.Contains(input.text, "file.txt") {
+		t.Fatalf("retried attachment input = %+v", input)
 	}
 }
 

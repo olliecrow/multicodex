@@ -18,7 +18,7 @@
 - Profile-scoped Codex subprocesses must scrub inherited Codex/OpenAI account override environment variables before setting the selected profile `CODEX_HOME`.
 - Profile resource settings may name local directories outside the default Codex home. The user owns the trust decision for those sources; multicodex only creates symlinks and does not execute or copy source contents.
 - Explicit resource reconciliation validates all configured sources before profile mutation. It removes or retargets only symlinks at documented managed positions and preserves regular profile guidance and skill entries.
-- Editor SSH input is restricted to an alias-shaped name and is passed as one argument with batch mode. Remote protocol errors and metadata are bounded and stripped of terminal control characters before display.
+- Editor SSH input is restricted to an alias-shaped name and is passed as one argument with batch mode. Remote protocol errors, metadata, and pasted terminal text are bounded and stripped of terminal control characters before use.
 - Editor Git commands disable interactive credential prompts but retain configured noninteractive SSH agents and credential helpers. Connection loss cancels transient host command process groups; owned tmux servers remain outside that cancellation scope.
 - Editor state, locks, sockets, worktrees, and attachments use private directories. State writes are atomic and directory-synced. Symlinked or permissive state paths are rejected.
 - Editor terminal output is memory-only. Persistent activity contains only a SHA-256 hash and timestamp for the last 100 captured rows. The client never stores remote terminal content or copies Codex auth between hosts.

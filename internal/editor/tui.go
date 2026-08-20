@@ -101,26 +101,28 @@ type modal struct {
 }
 
 type tuiModel struct {
-	manager       *Manager
-	usageFetcher  *usage.Fetcher
-	workers       *uiWorkers
-	width         int
-	height        int
-	statuses      []HostStatus
-	rows          []sidebarRow
-	selectedRow   int
-	sidebarOffset int
-	controlMode   bool
-	refreshing    bool
-	actionBusy    bool
-	modal         *modal
-	attachment    *Attachment
-	attachedHost  string
-	attachedID    string
-	attachingID   string
-	queuedAttach  *sidebarRow
-	message       string
-	usageText     string
+	manager           *Manager
+	usageFetcher      *usage.Fetcher
+	workers           *uiWorkers
+	width             int
+	height            int
+	statuses          []HostStatus
+	rows              []sidebarRow
+	selectedRow       int
+	sidebarOffset     int
+	controlMode       bool
+	refreshing        bool
+	actionBusy        bool
+	modal             *modal
+	attachment        *Attachment
+	attachedHost      string
+	attachedID        string
+	attachingID       string
+	queuedAttach      *sidebarRow
+	selectOnRefreshID string
+	pendingPastes     map[string]string
+	message           string
+	usageText         string
 }
 
 type uiWorkers struct {
@@ -231,6 +233,7 @@ func (m tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshing = false
 		m.mergeStatuses(msg.statuses)
 		m.rebuildRows()
+		m.flushPendingPaste(m.attachedID)
 		if m.hasUsableSize() && m.attachedID == "" && m.attachingID == "" {
 			if row, ok := m.preferredWindow(); ok {
 				m.selectedRow = m.rowIndexForWindow(row.window.ID)
@@ -278,11 +281,15 @@ func (m tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.attachment = msg.attachment
 		m.attachedHost, m.attachedID = msg.host.ID, msg.window.ID
+		if m.hasUsableSize() {
+			_ = m.attachment.Resize(m.terminalWidth(), m.bodyHeight())
+		}
 		m.controlMode = false
 		m.message = "connected to " + msg.window.Name
 		if err := m.manager.SetSelectedWindow(msg.window.ID); err != nil {
 			m.message = "connected, but reconnect selection was not saved: " + err.Error()
 		}
+		m.flushPendingPaste(msg.window.ID)
 		return m, tea.Batch(m.track(attachmentDoneCmd(msg.window.ID, msg.attachment)), m.track(attachmentUpdateCmd(msg.window.ID, msg.attachment)))
 	case attachmentUpdateMsg:
 		if msg.windowID != m.attachedID || msg.attachment != m.attachment {
@@ -291,6 +298,7 @@ func (m tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.closed {
 			return m, nil
 		}
+		m.flushPendingPaste(msg.windowID)
 		return m, m.track(attachmentUpdateCmd(msg.windowID, msg.attachment))
 	case attachmentDoneMsg:
 		if msg.windowID != m.attachedID || msg.attachment != m.attachment {
@@ -363,6 +371,17 @@ func (m tuiModel) handleKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.message = "terminal input active"
 	case "q", "ctrl+c":
 		return m, tea.Quit
+	case "g":
+		if m.attachment == nil {
+			m.message = "no terminal is connected"
+			return m, nil
+		}
+		if err := m.attachment.SendKey(tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl}); err != nil {
+			m.message = err.Error()
+			return m, nil
+		}
+		m.controlMode = false
+		m.message = "sent Ctrl+G to terminal"
 	case "up":
 		m.moveSelection(-1)
 	case "down":
@@ -396,6 +415,10 @@ func (m tuiModel) handleKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.startClipboardAttachment()
 	case "a":
 		if row, ok := m.currentAttachedRow(); ok {
+			if _, pending := m.pendingPastes[row.window.ID]; pending {
+				m.message = "this window already has an attachment waiting to paste"
+				return m, nil
+			}
 			m.modal = &modal{kind: "form", action: "put_file", title: "Attach a client file", host: row.host, workspace: row.workspace, window: row.window,
 				fields: []formField{{label: "Absolute client file path", limit: 4096}}}
 		} else {
@@ -563,6 +586,7 @@ func renderModal(modal modal, width, height int) string {
 	case "help":
 		lines = append(lines,
 			"Ctrl+G       Toggle editor controls",
+			"g            Send Ctrl+G to the terminal",
 			"Alt/⌘+1–9   Select window slot (⌘ when supported)",
 			"↑/↓, Enter   Select and open",
 			"h / p        Add host / project",
@@ -626,10 +650,21 @@ func (m *tuiModel) rebuildRows() {
 	}
 	m.rows = rows
 	m.selectedRow = -1
-	for i, row := range rows {
-		if rowIdentity(row) == selectedID || selectedID == "" && row.window.ID == state.SelectedWindowID {
-			m.selectedRow = i
-			break
+	if m.selectOnRefreshID != "" {
+		for i, row := range rows {
+			if row.window.ID == m.selectOnRefreshID {
+				m.selectedRow = i
+				m.selectOnRefreshID = ""
+				break
+			}
+		}
+	}
+	if m.selectedRow < 0 {
+		for i, row := range rows {
+			if rowIdentity(row) == selectedID || selectedID == "" && state.SelectedWindowID != "" && row.window.ID == state.SelectedWindowID {
+				m.selectedRow = i
+				break
+			}
 		}
 	}
 	if m.selectedRow < 0 && len(rows) > 0 {
@@ -828,6 +863,14 @@ func (m *tuiModel) openDeleteConfirmation() {
 func (m tuiModel) handleActionResult(msg actionResultMsg) (tea.Model, tea.Cmd) {
 	m.actionBusy = false
 	if msg.err != nil {
+		if value, ok := msg.value.(DeleteResult); ok && value.Deleted {
+			if msg.action == "delete_window" && msg.targetID == m.attachedID && m.attachment != nil {
+				_ = m.attachment.Close()
+				m.attachment, m.attachedID, m.attachedHost = nil, "", ""
+			}
+			m.message = "deleted, but client reconnect state was not saved: " + msg.err.Error()
+			return m, m.startRefresh()
+		}
 		m.message = msg.err.Error()
 		return m, m.startRefresh()
 	}
@@ -843,6 +886,7 @@ func (m tuiModel) handleActionResult(msg actionResultMsg) (tea.Model, tea.Cmd) {
 		m.message = "created workspace " + value.Name
 	case Window:
 		m.message = "created window " + value.Name
+		m.selectOnRefreshID = value.ID
 		if host, ok := m.manager.findHost(msg.hostID); ok {
 			cmd := m.requestAttach(sidebarRow{kind: "window", host: host, window: value})
 			return m, tea.Batch(m.startRefresh(), cmd)
@@ -859,20 +903,17 @@ func (m tuiModel) handleActionResult(msg actionResultMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	case AttachmentFile:
-		if msg.targetID != m.attachedID || m.attachment == nil {
-			m.message = "attachment uploaded; reopen its window to use " + value.Path
-			break
-		}
 		prefix := "Please inspect this attachment: "
 		if msg.action == "put_clipboard" {
 			prefix = "Please inspect this image: "
 		}
-		if err := m.attachment.Paste(prefix + value.Path + " "); err != nil {
-			m.message = err.Error()
-			break
+		if m.pendingPastes == nil {
+			m.pendingPastes = make(map[string]string)
 		}
-		m.controlMode = false
-		m.message = "attachment pasted into the draft; press Enter when ready"
+		m.pendingPastes[msg.targetID] = prefix + value.Path + " "
+		if !m.flushPendingPaste(msg.targetID) {
+			m.message = "attachment uploaded; it will paste when its window opens"
+		}
 	case map[string]CleanupResult:
 		m.message = cleanupSummary(value)
 	}
@@ -922,16 +963,33 @@ func (m tuiModel) currentAttachedRow() (sidebarRow, bool) {
 }
 
 func (m tuiModel) startClipboardAttachment() (tea.Model, tea.Cmd) {
-	if !m.beginAction("reading the client clipboard…") {
-		return m, nil
-	}
 	row, ok := m.currentAttachedRow()
 	if !ok {
-		m.actionBusy = false
 		m.message = "select a window before pasting an image"
 		return m, nil
 	}
+	if _, pending := m.pendingPastes[row.window.ID]; pending {
+		m.message = "this window already has an attachment waiting to paste"
+		return m, nil
+	}
+	if !m.beginAction("reading the client clipboard…") {
+		return m, nil
+	}
 	return m, m.track(clipboardAttachmentCmd(m.manager, row.host.ID, row.workspace.ID, row.window.ID))
+}
+
+func (m *tuiModel) flushPendingPaste(windowID string) bool {
+	text, ok := m.pendingPastes[windowID]
+	if !ok || windowID != m.attachedID || m.attachment == nil {
+		return false
+	}
+	if err := m.attachment.Paste(text); err != nil {
+		return false
+	}
+	delete(m.pendingPastes, windowID)
+	m.controlMode = false
+	m.message = "attachment pasted into the draft; press Enter when ready"
+	return true
 }
 
 func (m *tuiModel) beginAction(message string) bool {

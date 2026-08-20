@@ -192,6 +192,9 @@ func TestBuildIdentityRejectsUnverifiableDevelopmentBuilds(t *testing.T) {
 	if got := buildIdentity("v1.2.3", "", false); got != "v1.2.3" {
 		t.Fatalf("release identity = %q", got)
 	}
+	if got := buildIdentity("v1.2.3", "abc123", false); got != "v1.2.3" {
+		t.Fatalf("release identity with VCS metadata = %q", got)
+	}
 }
 
 func TestHostCallDeadlineInterruptsBlockedRequestWrite(t *testing.T) {
