@@ -6,10 +6,11 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/olliecrow/multicodex/internal/monitor/usage"
@@ -48,6 +49,48 @@ type Model struct {
 	lastGoodWindowData  *usage.Summary
 	showingStaleWindows bool
 	styles              styles
+	altScreen           bool
+	workers             *commandWorkers
+}
+
+type commandWorkers struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+	mu     sync.Mutex
+	wg     sync.WaitGroup
+	closed bool
+}
+
+func newCommandWorkers() *commandWorkers {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &commandWorkers{ctx: ctx, cancel: cancel}
+}
+
+func (w *commandWorkers) track(command tea.Cmd) tea.Cmd {
+	if command == nil {
+		return nil
+	}
+	w.mu.Lock()
+	if w.closed {
+		w.mu.Unlock()
+		return nil
+	}
+	w.wg.Add(1)
+	w.mu.Unlock()
+	return func() tea.Msg {
+		defer w.wg.Done()
+		return command()
+	}
+}
+
+func (w *commandWorkers) stopAndWait() {
+	w.mu.Lock()
+	if !w.closed {
+		w.closed = true
+		w.cancel()
+	}
+	w.mu.Unlock()
+	w.wg.Wait()
 }
 
 type styles struct {
@@ -116,6 +159,8 @@ func NewModel(opts Options) Model {
 		fetching:        true,
 		nextFetchAt:     now.Add(interval),
 		styles:          defaultStyles(opts.NoColor),
+		altScreen:       opts.AltScreen,
+		workers:         newCommandWorkers(),
 	}
 }
 
@@ -156,12 +201,12 @@ func defaultStyles(noColor bool) styles {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(fetchCmd(m.fetch, m.timeout), pollCmd(m.interval), clockCmd())
+	return tea.Batch(m.track(fetchCmd(m.fetch, m.timeout, m.workerContext())), m.pollCmd(), m.clockCmd())
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch v := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch v.String() {
 		case "ctrl+c":
 			return m, tea.Quit
@@ -171,15 +216,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = v.Height
 	case pollTickMsg:
 		m.nextFetchAt = v.at.UTC().Add(m.interval)
-		cmds := []tea.Cmd{pollCmd(m.interval)}
+		cmds := []tea.Cmd{m.pollCmd()}
 		if !m.fetching {
 			m.fetching = true
-			cmds = append(cmds, fetchCmd(m.fetch, m.timeout))
+			cmds = append(cmds, m.track(fetchCmd(m.fetch, m.timeout, m.workerContext())))
 		}
 		return m, tea.Batch(cmds...)
 	case clockTickMsg:
 		m.now = v.at.UTC()
-		return m, clockCmd()
+		return m, m.clockCmd()
 	case fetchResultMsg:
 		m.fetching = false
 		m.lastAttemptAt = v.at.UTC()
@@ -208,9 +253,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) View() string {
+func (m Model) View() tea.View {
 	if m.width <= 0 || m.height <= 0 {
-		return "initializing..."
+		view := tea.NewView("initializing...")
+		view.AltScreen = m.altScreen
+		return view
 	}
 
 	header := m.renderHeader()
@@ -219,7 +266,9 @@ func (m Model) View() string {
 
 	top := lipgloss.JoinVertical(lipgloss.Left, header, body, "")
 	combined := pinFooterToBottom(top, exitHint, m.height)
-	return clipToViewport(combined, m.width, m.height)
+	view := tea.NewView(clipToViewport(combined, m.width, m.height))
+	view.AltScreen = m.altScreen
+	return view
 }
 
 func (m Model) renderHeader() string {
@@ -989,22 +1038,46 @@ func compactCount(v int64) string {
 	return fmt.Sprintf("%s%s%s", sign, formatted, units[unitIndex])
 }
 
-func pollCmd(interval time.Duration) tea.Cmd {
-	return tea.Tick(interval, func(t time.Time) tea.Msg {
-		return pollTickMsg{at: t}
+func (m Model) track(command tea.Cmd) tea.Cmd {
+	if m.workers == nil {
+		return command
+	}
+	return m.workers.track(command)
+}
+
+func (m Model) workerContext() context.Context {
+	if m.workers != nil {
+		return m.workers.ctx
+	}
+	return context.Background()
+}
+
+func (m Model) after(duration time.Duration, message func(time.Time) tea.Msg) tea.Cmd {
+	ctx := m.workerContext()
+	return m.track(func() tea.Msg {
+		timer := time.NewTimer(duration)
+		defer timer.Stop()
+		select {
+		case now := <-timer.C:
+			return message(now)
+		case <-ctx.Done():
+			return nil
+		}
 	})
 }
 
-func clockCmd() tea.Cmd {
-	return tea.Tick(1*time.Second, func(t time.Time) tea.Msg {
-		return clockTickMsg{at: t}
-	})
+func (m Model) pollCmd() tea.Cmd {
+	return m.after(m.interval, func(t time.Time) tea.Msg { return pollTickMsg{at: t} })
 }
 
-func fetchCmd(fetch FetchFunc, timeout time.Duration) tea.Cmd {
+func (m Model) clockCmd() tea.Cmd {
+	return m.after(time.Second, func(t time.Time) tea.Msg { return clockTickMsg{at: t} })
+}
+
+func fetchCmd(fetch FetchFunc, timeout time.Duration, parent context.Context) tea.Cmd {
 	return func() tea.Msg {
 		start := time.Now()
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		ctx, cancel := context.WithTimeout(parent, timeout)
 		defer cancel()
 		summary, err := fetch(ctx)
 		return fetchResultMsg{
@@ -1018,12 +1091,9 @@ func fetchCmd(fetch FetchFunc, timeout time.Duration) tea.Cmd {
 
 func Run(opts Options) error {
 	model := NewModel(opts)
-	progOpts := []tea.ProgramOption{}
-	if opts.AltScreen {
-		progOpts = append(progOpts, tea.WithAltScreen())
-	}
-	prog := tea.NewProgram(model, progOpts...)
+	prog := tea.NewProgram(model)
 	_, err := prog.Run()
+	model.workers.stopAndWait()
 	return err
 }
 

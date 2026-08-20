@@ -23,6 +23,9 @@ func TestHelpCommandGlobal(t *testing.T) {
 	if !strings.Contains(out, "monitor [flags]") {
 		t.Fatalf("expected monitor command in help output")
 	}
+	if !strings.Contains(out, "editor") {
+		t.Fatalf("expected editor command in help output")
+	}
 	if !strings.Contains(out, "exec [--search] [codex exec args]") {
 		t.Fatalf("expected exec command in help output")
 	}
@@ -34,6 +37,19 @@ func TestHelpCommandGlobal(t *testing.T) {
 	}
 	if !strings.Contains(out, "multicodex help <command>") {
 		t.Fatalf("expected help topic usage in help output")
+	}
+}
+
+func TestHelpEditorDescribesOwnershipAndNestedTmuxRestriction(t *testing.T) {
+	app := newTestAppForCLI(t)
+	out, err := captureStdout(t, func() error { return app.Run([]string{"help", "editor"}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"configured SSH hosts", "new owned worktree and branch", "never runs inside tmux"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("editor help misses %q: %s", want, out)
+		}
 	}
 }
 
@@ -126,6 +142,9 @@ func TestCompletionCommandBash(t *testing.T) {
 	}
 	if !strings.Contains(out, "monitor") {
 		t.Fatalf("expected monitor command in completion output")
+	}
+	if !strings.Contains(out, "editor") {
+		t.Fatalf("expected editor command in completion output")
 	}
 	if !strings.Contains(out, "exec") {
 		t.Fatalf("expected exec command in completion output")

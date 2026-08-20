@@ -18,6 +18,8 @@ Profile login requires file-backed auth. If the effective Codex config does not 
 - Go 1.25 or newer for building from source.
 - Development and CI checks use the patched Go toolchain listed in `go.mod`.
 - Official `codex` CLI installed and available in `PATH`.
+- Git for `multicodex editor` project and worktree checks.
+- tmux 3.2 or newer for `multicodex editor`.
 - macOS or Linux.
 
 ## Install
@@ -80,6 +82,7 @@ Open the monitor and run checks.
 
 ```bash
 multicodex monitor
+multicodex editor
 multicodex doctor
 multicodex monitor doctor
 multicodex dry-run
@@ -147,6 +150,7 @@ multicodex monitor [flags]
 multicodex monitor tui [flags]
 multicodex monitor doctor [flags]
 multicodex monitor completion [shell]
+multicodex editor
 multicodex doctor [--json] [--timeout 8s]
 multicodex dry-run [operation]
 multicodex completion <bash|zsh|fish>
@@ -285,6 +289,26 @@ Example manual monitor account file:
 }
 ```
 
+## Editor
+
+`multicodex editor` is one terminal workspace for local and SSH projects. It shows a project and workspace sidebar, one active terminal, and compact local multicodex account usage. Projects move to the top when the last 100 rows of one of their terminals change.
+
+Start it outside tmux:
+
+```bash
+multicodex editor
+```
+
+Press `Ctrl+G` for editor controls and `?` for shortcuts. Use `h` to add an existing system SSH alias, `p` to add an absolute project directory, `w` to create a named workspace, and `n` to create a shell or Codex window. Use `Alt+1` through `Alt+9` to select windows in current sidebar order. `Cmd+1` through `Cmd+9` also work when the terminal sends those keys to applications. Normal terminal paste uses the terminal application's paste action. Use `i` to copy a local clipboard image to the selected workspace, or `a` to attach a local file. The editor pastes the host-local path into the terminal draft and never submits it.
+
+Each window is one single-pane tmux session on its project host. The outer editor never runs in tmux, and its managed tmux server disables the prefix keys and bindings. Detaching, sleep, SSH loss, or an editor restart leaves owned sessions running and reconnects the selected window. Other windows stay live and are polled through one warm host connection. `s` opens tmux copy mode with 50,000 lines of history.
+
+For a Git project, every workspace is a new owned worktree and a new `multicodex/<name>-<id>` branch. Creation fetches the remote default base branch when available but never changes the source checkout or its base branch. A non-Git project has one in-place workspace and is never deleted as a directory. A workspace stays in the sidebar without a window. Configured projects with no workspace stay hidden but remain available from the new-workspace form.
+
+Remote hosts must already work as system SSH aliases in non-interactive batch mode. They need tmux, Git, and the same multicodex release or clean source revision in `PATH`. Modified development builds cannot connect remotely because their exact source identity cannot be verified. Bounded SSH keepalives detect a dead path and trigger reconnection after sleep or network loss. Each host uses its own multicodex profiles and Codex sign-ins. The editor never copies auth state between hosts.
+
+The client stores only hosts, projects, selection, and activity hashes under `MULTICODEX_HOME/editor`. Each host stores a private ownership registry, worktrees, and uploaded attachments under its own `MULTICODEX_HOME/editor`. Terminal output is never written to editor state. Startup and hourly cleanup remove only exact, inactive editor-owned resources older than seven days. Live terminals, dirty worktrees, branches with unique commits, uncertain resources, and unrelated tmux sessions or directories are preserved. Manual deletion uses the same checks and asks for confirmation before forced loss. A force confirmation applies only to that invocation and is never replayed after interruption.
+
 ## Checks And Completion
 
 Run non-mutating checks and previews.
@@ -312,6 +336,7 @@ multicodex help exec
 multicodex help heartbeat
 multicodex help monitor
 multicodex help monitor doctor
+multicodex help editor
 ```
 
 ## Development Checks

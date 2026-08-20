@@ -4,11 +4,12 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/olliecrow/multicodex/internal/monitor/usage"
@@ -16,7 +17,7 @@ import (
 
 func TestWeeklyAccountCardShowsDefaultSparkAndExactReset(t *testing.T) {
 	m := fixtureModel(112, 24, true)
-	view := ansi.Strip(m.View())
+	view := ansi.Strip(m.View().Content)
 	for _, want := range []string{
 		"weekly usage [alpha]", "default", "35%", "Spark", "62%",
 		"resets in", "Mon 20 Jul 14:30", "[████",
@@ -34,7 +35,7 @@ func TestWeeklyAccountCardShowsDefaultSparkAndExactReset(t *testing.T) {
 
 func TestWeeklyAccountCardNarrowViewKeepsCoreValuesAndHidesDecoration(t *testing.T) {
 	m := fixtureModel(42, 18, true)
-	view := ansi.Strip(m.View())
+	view := ansi.Strip(m.View().Content)
 	for _, want := range []string{"weekly usage [alpha]", "default", "35%", "Spark", "62%", "resets"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("expected narrow view to keep %q:\n%s", want, view)
@@ -57,7 +58,7 @@ func TestWeeklyAccountCardUnavailableAndPartialSparkStates(t *testing.T) {
 	defaultBucket := m.summary.RateLimitWindows["codex"]
 	defaultBucket.WeeklyWindow = usage.WindowSummary{UsedPercent: -1}
 	m.summary.RateLimitWindows["codex"] = defaultBucket
-	view := ansi.Strip(m.View())
+	view := ansi.Strip(m.View().Content)
 	if !strings.Contains(view, "default unavailable") {
 		t.Fatalf("expected unavailable default weekly line:\n%s", view)
 	}
@@ -74,7 +75,7 @@ func TestAccountCardsOrderKnownWeeklyResetsThenUnknown(t *testing.T) {
 		accountFixture("later", 20, int64Ptr(600), true),
 		accountFixture("sooner", 30, int64Ptr(60), true),
 	}
-	view := ansi.Strip(m.View())
+	view := ansi.Strip(m.View().Content)
 	sooner := strings.Index(view, "weekly usage [sooner]")
 	later := strings.Index(view, "weekly usage [later]")
 	unknown := strings.Index(view, "weekly usage [unknown]")
@@ -105,7 +106,7 @@ func TestFixtureLayoutMatrixFitsViewportAndPinsExitHint(t *testing.T) {
 				reset := int64((i + 1) * 600)
 				m.summary.Accounts = append(m.summary.Accounts, accountFixture(string(rune('a'+i)), 10+i, &reset, true))
 			}
-			view := ansi.Strip(m.View())
+			view := ansi.Strip(m.View().Content)
 			t.Logf("%s fixture:\n%s", tc.name, view)
 			assertViewport(t, view, tc.width, tc.height)
 			lines := strings.Split(view, "\n")
@@ -129,7 +130,7 @@ func TestLoadingAndErrorViewsFit(t *testing.T) {
 			m := fixtureModel(52, 10, true)
 			m.summary = nil
 			m.lastError = tc.lastError
-			view := ansi.Strip(m.View())
+			view := ansi.Strip(m.View().Content)
 			if !strings.Contains(view, tc.want) {
 				t.Fatalf("expected %q:\n%s", tc.want, view)
 			}
@@ -141,7 +142,7 @@ func TestLoadingAndErrorViewsFit(t *testing.T) {
 func TestWeeklyObservedPanelShowsBreakdownAndDiagnostics(t *testing.T) {
 	m := fixtureModel(100, 24, true)
 	m.summary.Warnings = []string{"other warning", "account \"alpha\" fetch failed: auth expired"}
-	view := ansi.Strip(m.View())
+	view := ansi.Strip(m.View().Content)
 	for _, want := range []string{
 		"weekly token estimate [ready]", "- total: 12.3k", "- input: 8k",
 		"- input (cached): 2k", "- output: 4.34k", "auth expired",
@@ -175,7 +176,7 @@ func TestWeeklyObservedPanelShowsLoadingPartialAndUnavailable(t *testing.T) {
 			m.summary.ObservedTokensWarming = tc.warming
 			m.summary.ObservedTokensWeekly = nil
 			m.summary.ObservedWindowWeekly = nil
-			view := ansi.Strip(m.View())
+			view := ansi.Strip(m.View().Content)
 			if !strings.Contains(view, tc.want) {
 				t.Fatalf("expected %q:\n%s", tc.want, view)
 			}
@@ -186,7 +187,7 @@ func TestWeeklyObservedPanelShowsLoadingPartialAndUnavailable(t *testing.T) {
 func TestColorAndNoColorModesHaveSameText(t *testing.T) {
 	color := fixtureModel(100, 22, false)
 	plain := fixtureModel(100, 22, true)
-	if ansi.Strip(color.View()) != ansi.Strip(plain.View()) {
+	if ansi.Strip(color.View().Content) != ansi.Strip(plain.View().Content) {
 		t.Fatalf("expected color and no-color modes to preserve the same text")
 	}
 	if color.styles.title.GetForeground() == plain.styles.title.GetForeground() {
@@ -206,7 +207,7 @@ func TestFetchResultKeepsLastGoodWeeklyCardsAsStale(t *testing.T) {
 	if !got.showingStaleWindows || got.summary.WeeklyWindow.UsedPercent != 35 {
 		t.Fatalf("expected last good weekly snapshot, got %+v", got.summary)
 	}
-	view := ansi.Strip(got.View())
+	view := ansi.Strip(got.View().Content)
 	if !strings.Contains(view, "weekly usage [alpha] [stale]") {
 		t.Fatalf("expected stale weekly card:\n%s", view)
 	}
@@ -228,7 +229,7 @@ func TestFetchResultKeepsLastGoodWeeklyCardsWhenFetchHasNoWeeklyWindow(t *testin
 
 func TestHeaderAndFooterStayHumanFriendly(t *testing.T) {
 	m := fixtureModel(80, 16, true)
-	view := ansi.Strip(m.View())
+	view := ansi.Strip(m.View().Content)
 	for _, want := range []string{"multicodex monitor", "[refresh <1m]", "local 2026-07-20 12:00", "Ctrl+C to exit"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("expected %q in header/footer:\n%s", want, view)
@@ -241,9 +242,17 @@ func TestHeaderAndFooterStayHumanFriendly(t *testing.T) {
 
 func TestControlCQuits(t *testing.T) {
 	m := fixtureModel(80, 16, true)
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	_, cmd := m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	if cmd == nil {
 		t.Fatal("expected Ctrl+C to return a quit command")
+	}
+}
+
+func TestInitialViewPreservesAltScreenRequest(t *testing.T) {
+	model := NewModel(Options{AltScreen: true})
+	view := model.View()
+	if !view.AltScreen || view.Content != "initializing..." {
+		t.Fatalf("unexpected initial view: %+v", view)
 	}
 }
 
@@ -329,3 +338,50 @@ func assertViewport(t *testing.T, view string, width, height int) {
 }
 
 func int64Ptr(value int64) *int64 { return &value }
+
+func TestCommandWorkersCancelAndJoinFetchesAndLongTimers(t *testing.T) {
+	started := make(chan struct{})
+	fetchStopped := make(chan struct{})
+	model := NewModel(Options{Interval: time.Hour, Timeout: time.Hour, Fetch: func(ctx context.Context) (*usage.Summary, error) {
+		close(started)
+		<-ctx.Done()
+		close(fetchStopped)
+		return nil, ctx.Err()
+	}})
+	commands := []tea.Cmd{
+		model.track(fetchCmd(model.fetch, model.timeout, model.workerContext())),
+		model.pollCmd(), model.clockCmd(),
+	}
+	commandsDone := make(chan struct{})
+	go func() {
+		defer close(commandsDone)
+		var running sync.WaitGroup
+		for _, command := range commands {
+			running.Add(1)
+			go func(command tea.Cmd) {
+				defer running.Done()
+				_ = command()
+			}(command)
+		}
+		running.Wait()
+	}()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("monitor fetch did not start")
+	}
+	model.workers.stopAndWait()
+	select {
+	case <-fetchStopped:
+	case <-time.After(time.Second):
+		t.Fatal("monitor fetch did not observe shutdown")
+	}
+	select {
+	case <-commandsDone:
+	case <-time.After(time.Second):
+		t.Fatal("monitor commands remained after shutdown")
+	}
+	if command := model.workers.track(func() tea.Msg { return nil }); command != nil {
+		t.Fatal("monitor accepted a command after shutdown")
+	}
+}
