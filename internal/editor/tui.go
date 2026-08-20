@@ -130,6 +130,7 @@ type modal struct {
 	project   Project
 	workspace Workspace
 	window    Window
+	launch    string
 	delete    DeleteRequest
 	reason    string
 }
@@ -918,7 +919,11 @@ func renderModal(modal modal, width, height int) string {
 			}
 			lines = append(lines, marker+plainDisplayText(field.label)+": "+plainDisplayText(field.value))
 		}
-		lines = append(lines, "", modalPrimaryButton(modal)+"   "+cancelButtonLabel, "Tab: next field · Enter: next/save · Ctrl+U: clear · Esc: cancel")
+		help := "Enter: save · Ctrl+U: clear · Esc: cancel"
+		if len(modal.fields) > 1 {
+			help = "Tab: next field · Enter: next/save · Ctrl+U: clear · Esc: cancel"
+		}
+		lines = append(lines, "", modalPrimaryButton(modal)+"   "+cancelButtonLabel, help)
 	case "confirm":
 		cancel, remove := cancelButtonLabel, deleteButtonLabel
 		if modal.choice == 0 {
@@ -1285,7 +1290,7 @@ func (m *tuiModel) openWorkspaceChoice() {
 		m.message = "create a workspace first from the Actions menu"
 		return
 	}
-	m.modal = &modal{kind: "choice", action: "create_window", title: "Choose a workspace for the new window", choices: choices}
+	m.modal = &modal{kind: "choice", action: "choose_window_launch", title: "Choose a workspace for the new window", choices: choices}
 }
 
 func (m *tuiModel) acceptChoice() {
@@ -1302,9 +1307,18 @@ func (m *tuiModel) acceptChoice() {
 	case "create_workspace":
 		m.modal = &modal{kind: "form", action: action, title: "Create workspace — " + selected.project.Name, host: selected.host, project: selected.project,
 			fields: []formField{{label: "Workspace name", limit: 80}}}
+	case "choose_window_launch":
+		m.modal = &modal{kind: "choice", action: "create_window", title: "Choose what to start", choices: []choice{
+			{label: "Shell — open a normal terminal", action: "shell", host: selected.host, project: selected.project, workspace: selected.workspace},
+			{label: "Codex — start multicodex Codex CLI", action: "codex", host: selected.host, project: selected.project, workspace: selected.workspace},
+		}}
 	case "create_window":
-		m.modal = &modal{kind: "form", action: action, title: "Create window — " + selected.workspace.Name, host: selected.host, project: selected.project, workspace: selected.workspace,
-			fields: []formField{{label: "Window name", value: defaultShellWin, limit: 80}, {label: "Start: shell or codex", value: "shell", limit: 5}}}
+		name := defaultShellWin
+		if selected.action == "codex" {
+			name = "Codex"
+		}
+		m.modal = &modal{kind: "form", action: action, title: "Create window — " + selected.workspace.Name, host: selected.host, project: selected.project, workspace: selected.workspace, launch: selected.action,
+			fields: []formField{{label: "Window name", value: name, limit: 80}}}
 	}
 }
 
@@ -1836,7 +1850,7 @@ func submitFormCmd(manager *Manager, form modal) tea.Cmd {
 		case "create_workspace":
 			result.value, result.err = manager.CreateWorkspace(ctx, form.host.ID, CreateWorkspaceRequest{ProjectID: form.project.ID, ProjectPath: form.project.Path, Name: form.fields[0].value})
 		case "create_window":
-			result.value, result.err = manager.CreateWindow(ctx, form.host.ID, CreateWindowRequest{WorkspaceID: form.workspace.ID, Name: form.fields[0].value, Launch: strings.ToLower(form.fields[1].value)})
+			result.value, result.err = manager.CreateWindow(ctx, form.host.ID, CreateWindowRequest{WorkspaceID: form.workspace.ID, Name: form.fields[0].value, Launch: form.launch})
 		case "put_file":
 			data, extension, err := ReadAttachment(form.fields[0].value)
 			if err != nil {
