@@ -76,6 +76,17 @@ func (f *Fetcher) Fetch(ctx context.Context) (*Summary, error) {
 	return nil, fmt.Errorf("%s", msg)
 }
 
+// AccountLabels returns the configured display labels known to this fetcher.
+// It lets persistent UIs show every account while the first usage request runs.
+func (f *Fetcher) AccountLabels() []string {
+	labels := make([]string, 0, len(f.accounts))
+	for _, account := range f.accounts {
+		labels = append(labels, account.account.Label)
+	}
+	sort.Strings(labels)
+	return labels
+}
+
 func (f *Fetcher) fetchMultiAccount(ctx context.Context) (*Summary, error) {
 	now := time.Now().UTC()
 	f.refreshAccounts(now, false)
@@ -216,7 +227,7 @@ func (f *Fetcher) fetchMultiAccount(ctx context.Context) (*Summary, error) {
 	out.Warnings = dedupeStrings(out.Warnings)
 
 	if !anyAccountSuccess && !anyObservedAvailable {
-		return nil, fmt.Errorf("all account fetches failed and observed tokens are unavailable")
+		return out, fmt.Errorf("all account fetches failed and observed tokens are unavailable")
 	}
 	return out, nil
 }

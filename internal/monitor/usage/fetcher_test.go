@@ -127,6 +127,37 @@ func TestFetchWithFallbackFailsWhenBothSourcesFail(t *testing.T) {
 	}
 }
 
+func TestFetcherReturnsAccountRowsWhenEveryUsageFetchFails(t *testing.T) {
+	f := &Fetcher{accounts: []accountFetcher{
+		{account: MonitorAccount{Label: "alpha", CodexHome: "/alpha"}, primary: &fakeSource{name: "alpha", err: errors.New("offline")}},
+		{account: MonitorAccount{Label: "bravo", CodexHome: "/bravo"}, primary: &fakeSource{name: "bravo", err: errors.New("signed out")}},
+	}}
+
+	summary, err := f.Fetch(context.Background())
+	if err == nil {
+		t.Fatal("expected all-account failure")
+	}
+	if summary == nil || len(summary.Accounts) != 2 {
+		t.Fatalf("failed account rows were lost: %+v", summary)
+	}
+	for _, account := range summary.Accounts {
+		if account.Error == "" {
+			t.Fatalf("failed account has no error state: %+v", account)
+		}
+	}
+}
+
+func TestFetcherAccountLabelsAreStableForInitialDisplay(t *testing.T) {
+	f := &Fetcher{accounts: []accountFetcher{
+		{account: MonitorAccount{Label: "bravo"}},
+		{account: MonitorAccount{Label: "alpha"}},
+	}}
+	labels := f.AccountLabels()
+	if len(labels) != 2 || labels[0] != "alpha" || labels[1] != "bravo" {
+		t.Fatalf("account labels = %q", labels)
+	}
+}
+
 func TestFetcherCloseClosesAllSources(t *testing.T) {
 	primary := &fakeSource{name: "primary"}
 	fallback := &fakeSource{name: "fallback"}

@@ -967,7 +967,10 @@ func TestTerminalHandlesLargePasteAndOutputFlood(t *testing.T) {
 	if err := attachment.SendKey(tea.KeyPressMsg{Code: tea.KeyEnter}); err != nil {
 		t.Fatal(err)
 	}
-	waitForRender(t, attachment, "PASTE_READY", 5*time.Second)
+	// Race instrumentation and a busy public CI host can delay the initial tmux
+	// render without changing the terminal contract. Keep this below the test's
+	// 30-second lifecycle deadline while allowing the shell to become ready.
+	waitForRender(t, attachment, "PASTE_READY", 10*time.Second)
 	select {
 	case <-attachment.responsesDone:
 		t.Fatal("terminal input writer stopped before the large paste")
