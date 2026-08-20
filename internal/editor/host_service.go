@@ -796,13 +796,12 @@ func (s *HostService) deleteWorkspace(ctx context.Context, request DeleteRequest
 		return DeleteResult{}, err
 	}
 	var workspace Workspace
+	var windows []Window
 	found := false
-	hasWindows := false
 	if err := s.store.withReadLock(func(registry hostRegistry) error {
 		for _, window := range registry.Windows {
 			if window.WorkspaceID == request.ID {
-				hasWindows = true
-				break
+				windows = append(windows, window)
 			}
 		}
 		for _, candidate := range registry.Workspaces {
@@ -815,50 +814,55 @@ func (s *HostService) deleteWorkspace(ctx context.Context, request DeleteRequest
 	}); err != nil {
 		return DeleteResult{}, err
 	}
-	if hasWindows {
-		if found && !recovering {
-			if err := s.clearWorkspaceDeletePending(workspace.ID); err != nil {
-				return DeleteResult{}, err
-			}
-		}
-		return DeleteResult{Reason: "delete the workspace windows first"}, nil
-	}
 	if !found {
 		return DeleteResult{Reason: "workspace no longer exists"}, nil
 	}
 	effectiveForce := request.Force
-	if workspace.Git && !effectiveForce {
-		if _, err := os.Lstat(workspace.Path); err == nil {
-			if reason, forceable := s.gitWorkspaceDeletionRisk(ctx, workspace); reason != "" {
-				if !recovering {
-					if err := s.clearWorkspaceDeletePending(workspace.ID); err != nil {
-						return DeleteResult{}, err
-					}
-				}
-				return DeleteResult{Reason: reason, Forceable: forceable}, nil
+	reason, forceable, err := s.workspaceDeletionRisk(ctx, workspace, windows)
+	if err != nil {
+		return DeleteResult{}, err
+	}
+	if reason != "" && !effectiveForce {
+		if !recovering {
+			if err := s.clearWorkspaceCascadeDeletePending(workspace.ID); err != nil {
+				return DeleteResult{}, err
 			}
-		} else if errors.Is(err, os.ErrNotExist) {
-			if reason, forceable := s.gitBranchDeletionRisk(ctx, workspace); reason != "" {
-				if !recovering {
-					if err := s.clearWorkspaceDeletePending(workspace.ID); err != nil {
-						return DeleteResult{}, err
-					}
-				}
-				return DeleteResult{Reason: reason, Forceable: forceable}, nil
-			}
-		} else if !errors.Is(err, os.ErrNotExist) {
-			if !recovering {
-				if clearErr := s.clearWorkspaceDeletePending(workspace.ID); clearErr != nil {
-					return DeleteResult{}, clearErr
-				}
-			}
-			return DeleteResult{Reason: "worktree state is uncertain; no deletion was performed"}, nil
 		}
+		return DeleteResult{Reason: reason, Forceable: forceable}, nil
+	}
+	if reason != "" && !forceable {
+		return DeleteResult{}, errors.New(reason)
+	}
+	if err := s.store.withLock(func(registry *hostRegistry) error {
+		for i := range registry.Workspaces {
+			if registry.Workspaces[i].ID == workspace.ID {
+				registry.Workspaces[i].DeletePending = true
+				return nil
+			}
+		}
+		return errors.New("workspace no longer exists")
+	}); err != nil {
+		return DeleteResult{}, err
+	}
+	for _, window := range windows {
+		result, err := s.deleteWindow(ctx, DeleteRequest{ID: window.ID, Force: effectiveForce}, recovering)
+		if err != nil {
+			return DeleteResult{}, err
+		}
+		if result.Deleted || result.Reason == "window no longer exists" {
+			continue
+		}
+		if !recovering {
+			if clearErr := s.clearWorkspaceCascadeDeletePending(workspace.ID); clearErr != nil {
+				return DeleteResult{}, clearErr
+			}
+		}
+		return result, nil
 	}
 	if err := s.store.withLock(func(registry *hostRegistry) error {
 		for _, window := range registry.Windows {
 			if window.WorkspaceID == workspace.ID {
-				return errors.New("delete the workspace windows first")
+				return errors.New("workspace gained a terminal window during deletion; retry")
 			}
 		}
 		for i := range registry.Workspaces {
@@ -915,6 +919,64 @@ func (s *HostService) deleteWorkspace(ctx context.Context, request DeleteRequest
 	return DeleteResult{Deleted: true}, nil
 }
 
+func (s *HostService) workspaceDeletionRisk(ctx context.Context, workspace Workspace, windows []Window) (string, bool, error) {
+	var reasons []string
+	allForceable := true
+	liveWindows := 0
+	uncertainWindows := 0
+	for _, window := range windows {
+		state, alive, err := s.inspectSession(ctx, window)
+		if err != nil {
+			return "", false, err
+		}
+		switch {
+		case state == sessionAltered:
+			uncertainWindows++
+			allForceable = false
+		case state == sessionOwned && alive:
+			liveWindows++
+		}
+	}
+	if uncertainWindows > 0 {
+		label := "terminal window has"
+		if uncertainWindows != 1 {
+			label = "terminal windows have"
+		}
+		reasons = append(reasons, fmt.Sprintf("%d %s changed or uncertain ownership", uncertainWindows, label))
+	}
+	if liveWindows > 0 {
+		label := "terminal window"
+		if liveWindows != 1 {
+			label = "terminal windows"
+		}
+		reasons = append(reasons, fmt.Sprintf("workspace has %d live %s", liveWindows, label))
+	}
+	if workspace.Git {
+		reason, forceable := s.gitWorkspaceDeletionRiskForPath(ctx, workspace)
+		if reason != "" {
+			reasons = append(reasons, reason)
+			allForceable = allForceable && forceable
+		}
+	}
+	if len(reasons) == 0 {
+		return "", false, nil
+	}
+	suffix := "; no deletion was performed"
+	if allForceable {
+		suffix = "; confirm permanent deletion"
+	}
+	return strings.Join(reasons, "; ") + suffix, allForceable, nil
+}
+
+func (s *HostService) gitWorkspaceDeletionRiskForPath(ctx context.Context, workspace Workspace) (string, bool) {
+	if _, err := os.Lstat(workspace.Path); err == nil {
+		return s.gitWorkspaceDeletionRisk(ctx, workspace)
+	} else if errors.Is(err, os.ErrNotExist) {
+		return s.gitBranchDeletionRisk(ctx, workspace)
+	}
+	return "worktree state is uncertain; no deletion was performed", false
+}
+
 func (s *HostService) clearWindowDeletePending(windowID string) error {
 	return s.store.withLock(func(registry *hostRegistry) error {
 		for i := range registry.Windows {
@@ -927,15 +989,25 @@ func (s *HostService) clearWindowDeletePending(windowID string) error {
 	})
 }
 
-func (s *HostService) clearWorkspaceDeletePending(workspaceID string) error {
+func (s *HostService) clearWorkspaceCascadeDeletePending(workspaceID string) error {
 	return s.store.withLock(func(registry *hostRegistry) error {
+		found := false
 		for i := range registry.Workspaces {
 			if registry.Workspaces[i].ID == workspaceID {
 				registry.Workspaces[i].DeletePending = false
-				return nil
+				found = true
+				break
 			}
 		}
-		return errors.New("workspace no longer exists")
+		if !found {
+			return errors.New("workspace no longer exists")
+		}
+		for i := range registry.Windows {
+			if registry.Windows[i].WorkspaceID == workspaceID {
+				registry.Windows[i].DeletePending = false
+			}
+		}
+		return nil
 	})
 }
 

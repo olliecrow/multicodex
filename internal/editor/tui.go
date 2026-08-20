@@ -74,12 +74,13 @@ type attachmentUpdateMsg struct {
 }
 
 type actionResultMsg struct {
-	action   string
-	hostID   string
-	targetID string
-	value    any
-	form     *modal
-	err      error
+	action    string
+	hostID    string
+	targetID  string
+	windowIDs []string
+	value     any
+	form      *modal
+	err       error
 }
 
 type createdWorkspace struct {
@@ -153,6 +154,7 @@ type modal struct {
 	project   Project
 	workspace Workspace
 	window    Window
+	windowIDs []string
 	delete    DeleteRequest
 	reason    string
 }
@@ -1512,11 +1514,16 @@ func (m *tuiModel) openDeleteConfirmation() {
 	case "workspace":
 		current.action, current.title = "delete_workspace", "Delete workspace?"
 		if row.workspace.Git {
-			current.reason = "Delete workspace “" + row.workspace.Name + "” and its owned Git worktree and branch?"
+			current.reason = "Delete workspace “" + row.workspace.Name + "”, all its terminal windows, and its owned Git worktree and branch?"
 		} else {
-			current.reason = "Remove workspace “" + row.workspace.Name + "” from the editor? Its project directory will remain."
+			current.reason = "Delete workspace “" + row.workspace.Name + "” and all its terminal windows? Its project directory will remain."
 		}
 		current.delete.ID = row.workspace.ID
+		for _, candidate := range m.rows {
+			if candidate.workspace.ID == row.workspace.ID && candidate.window.ID != "" {
+				current.windowIDs = append(current.windowIDs, candidate.window.ID)
+			}
+		}
 	default:
 		m.message = "select a window or workspace to delete"
 		return
@@ -1577,8 +1584,13 @@ func (m tuiModel) handleActionResult(msg actionResultMsg) (tea.Model, tea.Cmd) {
 				_ = m.attachment.Close()
 				m.attachment, m.attachedID, m.attachedHost = nil, "", ""
 			}
+			if msg.action == "delete_workspace" {
+				if err := m.forgetDeletedWorkspace(msg.windowIDs); err != nil {
+					m.message = "deleted, but client reconnect state was not saved: " + err.Error()
+				}
+			}
 		} else if value.Reason != "" && value.Forceable {
-			m.modal = &modal{kind: "confirm", action: msg.action, title: "Delete permanently?", host: hostForID(m.manager.State(), msg.hostID), delete: DeleteRequest{ID: msg.targetID, Force: true}, reason: value.Reason}
+			m.modal = &modal{kind: "confirm", action: msg.action, title: "Delete permanently?", host: hostForID(m.manager.State(), msg.hostID), windowIDs: msg.windowIDs, delete: DeleteRequest{ID: msg.targetID, Force: true}, reason: value.Reason}
 			return m, nil
 		} else if value.Reason != "" {
 			m.message = value.Reason
@@ -1601,6 +1613,23 @@ func (m tuiModel) handleActionResult(msg actionResultMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, m.startRefresh()
+}
+
+func (m *tuiModel) forgetDeletedWorkspace(windowIDs []string) error {
+	selectedWindowID := m.manager.State().SelectedWindowID
+	selectedWindowDeleted, attachedWindowDeleted := false, false
+	for _, windowID := range windowIDs {
+		selectedWindowDeleted = selectedWindowDeleted || windowID == selectedWindowID
+		attachedWindowDeleted = attachedWindowDeleted || windowID == m.attachedID
+	}
+	if attachedWindowDeleted && m.attachment != nil {
+		_ = m.attachment.Close()
+		m.attachment, m.attachedID, m.attachedHost = nil, "", ""
+	}
+	if selectedWindowDeleted {
+		return m.manager.clearSelectedWindow(selectedWindowID)
+	}
+	return nil
 }
 
 func cleanupSummary(results map[string]CleanupResult) string {
@@ -2121,7 +2150,7 @@ func deleteCmd(manager *Manager, confirmation modal) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(manager.Context(), 2*time.Minute)
 		defer cancel()
-		result := actionResultMsg{action: confirmation.action, hostID: confirmation.host.ID, targetID: confirmation.delete.ID}
+		result := actionResultMsg{action: confirmation.action, hostID: confirmation.host.ID, targetID: confirmation.delete.ID, windowIDs: confirmation.windowIDs}
 		if confirmation.action == "delete_window" {
 			result.value, result.err = manager.DeleteWindow(ctx, confirmation.host.ID, confirmation.delete)
 		} else {

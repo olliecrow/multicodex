@@ -209,19 +209,15 @@ func TestHostServiceGitWindowReconnectAndSafeDeletion(t *testing.T) {
 		t.Fatalf("expected live deletion refusal, got %+v", refused)
 	}
 	blockedWorkspace, err := service.DeleteWorkspace(ctx, DeleteRequest{ID: workspace.ID})
-	if err != nil || blockedWorkspace.Deleted || blockedWorkspace.Forceable || !strings.Contains(blockedWorkspace.Reason, "windows first") {
-		t.Fatalf("workspace-with-window refusal is not actionable and non-forceable: %+v, %v", blockedWorkspace, err)
+	if err != nil || blockedWorkspace.Deleted || !blockedWorkspace.Forceable || !strings.Contains(blockedWorkspace.Reason, "1 live terminal window") {
+		t.Fatalf("workspace-with-window deletion did not offer one clear force confirmation: %+v, %v", blockedWorkspace, err)
 	}
-	deleted, err := service.DeleteWindow(ctx, DeleteRequest{ID: window.ID, Force: true})
-	if err != nil || !deleted.Deleted {
-		t.Fatalf("force delete window = %+v, %v", deleted, err)
+	deletedWorkspace, err := service.DeleteWorkspace(ctx, DeleteRequest{ID: workspace.ID, Force: true})
+	if err != nil || !deletedWorkspace.Deleted {
+		t.Fatalf("force delete workspace and its window = %+v, %v", deletedWorkspace, err)
 	}
 	if _, err := os.Lstat(service.tmuxSocketPath()); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("unused editor tmux socket remains: %v", err)
-	}
-	deletedWorkspace, err := service.DeleteWorkspace(ctx, DeleteRequest{ID: workspace.ID})
-	if err != nil || !deletedWorkspace.Deleted {
-		t.Fatalf("safe delete workspace = %+v, %v", deletedWorkspace, err)
 	}
 	if _, err := os.Stat(workspace.Path); !os.IsNotExist(err) {
 		t.Fatalf("worktree still exists or has uncertain state: %v", err)
@@ -527,6 +523,103 @@ func TestDeleteWindowPreservesSessionAndRegistryWhenOwnershipChanged(t *testing.
 	}
 }
 
+func TestDeleteWorkspacePreservesEveryWindowWhenOneOwnershipMarkerChanged(t *testing.T) {
+	requireCommands(t, "git", "tmux")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	service, err := NewHostService(privateTestHome(t), mustID(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer killTestServer(service)
+	project := filepath.Join(t.TempDir(), "notes")
+	if err := os.Mkdir(project, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	workspace, err := service.CreateWorkspace(ctx, CreateWorkspaceRequest{ProjectID: mustID(t), ProjectPath: project, Name: "Notes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := service.CreateWindow(ctx, CreateWindowRequest{WorkspaceID: workspace.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := service.CreateWindow(ctx, CreateWindowRequest{WorkspaceID: workspace.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.tmux(ctx, "set-environment", "-t", second.Session, "MCE_WINDOW", strings.Repeat("f", 24)); err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.DeleteWorkspace(ctx, DeleteRequest{ID: workspace.ID, Force: true})
+	if err == nil || result.Deleted || !strings.Contains(err.Error(), "ownership") {
+		t.Fatalf("altered workspace deletion = %+v, %v", result, err)
+	}
+	for _, window := range []Window{first, second} {
+		if _, err := service.tmux(ctx, "has-session", "-t", window.Session); err != nil {
+			t.Fatalf("workspace deletion removed preserved session %s", window.Name)
+		}
+	}
+	snapshot, err := service.Snapshot(ctx)
+	if err != nil || len(snapshot.Workspaces) != 1 || len(snapshot.Windows) != 2 {
+		t.Fatalf("workspace deletion changed preserved registry: %+v, %v", snapshot, err)
+	}
+	if _, err := service.tmux(ctx, "set-environment", "-t", second.Session, "MCE_WINDOW", second.ID); err != nil {
+		t.Fatal(err)
+	}
+	if result, err := service.DeleteWorkspace(ctx, DeleteRequest{ID: workspace.ID, Force: true}); err != nil || !result.Deleted {
+		t.Fatalf("delete after ownership restore = %+v, %v", result, err)
+	}
+}
+
+func TestDecliningInterruptedWorkspaceDeleteClearsCascadeIntent(t *testing.T) {
+	requireCommands(t, "git", "tmux")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	service, err := NewHostService(privateTestHome(t), mustID(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer killTestServer(service)
+	project := filepath.Join(t.TempDir(), "notes")
+	if err := os.Mkdir(project, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	workspace, err := service.CreateWorkspace(ctx, CreateWorkspaceRequest{ProjectID: mustID(t), ProjectPath: project, Name: "Retained"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	window, err := service.CreateWindow(ctx, CreateWindowRequest{WorkspaceID: workspace.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.store.withLock(func(registry *hostRegistry) error {
+		registry.Workspaces[0].DeletePending = true
+		registry.Windows[0].DeletePending = true
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.DeleteWorkspace(ctx, DeleteRequest{ID: workspace.ID})
+	if err != nil || result.Deleted || !result.Forceable {
+		t.Fatalf("retained workspace deletion = %+v, %v", result, err)
+	}
+	if err := service.store.withReadLock(func(registry hostRegistry) error {
+		if registry.Workspaces[0].DeletePending || registry.Windows[0].DeletePending {
+			return errors.New("retained workspace or window still has a delete intent")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.RenameWindow(ctx, RenameRequest{ID: window.ID, Name: "Still usable"}); err != nil {
+		t.Fatalf("retained window is not usable: %v", err)
+	}
+	if result, err := service.DeleteWorkspace(ctx, DeleteRequest{ID: workspace.ID, Force: true}); err != nil || !result.Deleted {
+		t.Fatalf("cleanup retained workspace = %+v, %v", result, err)
+	}
+}
+
 func TestNonGitWorkspaceIsInPlaceAndNeverDeletesProjectDirectory(t *testing.T) {
 	requireCommands(t, "git", "tmux")
 	ctx := context.Background()
@@ -786,6 +879,7 @@ func TestGitWorkspacePreservesUniqueCommitsWithoutForce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer killTestServer(service)
 	workspace, err := service.CreateWorkspace(ctx, CreateWorkspaceRequest{ProjectID: mustID(t), ProjectPath: project, Name: "Unique commit"})
 	if err != nil {
 		t.Fatal(err)
@@ -798,8 +892,11 @@ func TestGitWorkspacePreservesUniqueCommitsWithoutForce(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(workspace.Path, "untracked"), []byte("dirty\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := service.CreateWindow(ctx, CreateWindowRequest{WorkspaceID: workspace.ID}); err != nil {
+		t.Fatal(err)
+	}
 	result, err := service.DeleteWorkspace(ctx, DeleteRequest{ID: workspace.ID})
-	if err != nil || result.Deleted || !result.Forceable || !strings.Contains(result.Reason, "uncommitted") || !strings.Contains(result.Reason, "commits") {
+	if err != nil || result.Deleted || !result.Forceable || !strings.Contains(result.Reason, "live terminal") || !strings.Contains(result.Reason, "uncommitted") || !strings.Contains(result.Reason, "commits") {
 		t.Fatalf("unique commit was not preserved: %+v, %v", result, err)
 	}
 	if result, err := service.DeleteWorkspace(ctx, DeleteRequest{ID: workspace.ID, Force: true}); err != nil || !result.Deleted {

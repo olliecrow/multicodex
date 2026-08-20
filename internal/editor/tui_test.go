@@ -800,7 +800,7 @@ func TestJoinKeepRightNeverExceedsWidth(t *testing.T) {
 }
 
 func TestConfirmationWrapsReasonAndKeepsMouseButtonAligned(t *testing.T) {
-	reason := "Delete workspace “feature-with-a-very-long-identifiable-name” and its owned Git worktree and branch?"
+	reason := "Delete workspace “feature-with-a-very-long-identifiable-name”, all its terminal windows, and its owned Git worktree and branch?"
 	model := tuiModel{manager: &Manager{}, width: minimumWidth, height: minimumHeight, modal: &modal{
 		kind: "confirm", action: "delete_workspace", title: "Delete workspace?", reason: reason, delete: DeleteRequest{ID: testInstanceID},
 	}}
@@ -822,6 +822,55 @@ func TestConfirmationWrapsReasonAndKeepsMouseButtonAligned(t *testing.T) {
 	got := updated.(tuiModel)
 	if cmd == nil || got.modal != nil || !got.actionBusy {
 		t.Fatalf("wrapped confirmation Delete click = %+v", got)
+	}
+}
+
+func TestWorkspaceDeleteConfirmationCapturesAllWindows(t *testing.T) {
+	workspaceID := "111111111111111111111111"
+	firstWindowID := "222222222222222222222222"
+	secondWindowID := "333333333333333333333333"
+	workspace := Workspace{ID: workspaceID, Name: "Review", Git: true}
+	model := tuiModel{
+		selectedRow: 0,
+		rows: []sidebarRow{
+			{kind: "workspace", workspace: workspace},
+			{kind: "window", workspace: workspace, window: Window{ID: firstWindowID}},
+			{kind: "window", workspace: workspace, window: Window{ID: secondWindowID}},
+		},
+	}
+	model.openDeleteConfirmation()
+	if model.modal == nil || !strings.Contains(model.modal.reason, "all its terminal windows") {
+		t.Fatalf("workspace confirmation = %+v", model.modal)
+	}
+	if got := model.modal.windowIDs; len(got) != 2 || got[0] != firstWindowID || got[1] != secondWindowID {
+		t.Fatalf("workspace confirmation window IDs = %v", got)
+	}
+}
+
+func TestDeletedWorkspaceClearsItsReconnectSelection(t *testing.T) {
+	home := privateTestHome(t)
+	windowID := "222222222222222222222222"
+	state := ClientState{
+		Version: stateVersion, InstanceID: testInstanceID, SelectedWindowID: windowID,
+		Hosts: []Host{{ID: localHostID, Name: localHostName}},
+	}
+	store := NewStateStore(home)
+	if err := store.Save(state); err != nil {
+		t.Fatal(err)
+	}
+	manager := &Manager{store: store, state: state}
+	model := tuiModel{
+		manager: manager,
+	}
+	if err := model.forgetDeletedWorkspace([]string{windowID}); err != nil {
+		t.Fatal(err)
+	}
+	if got := manager.State().SelectedWindowID; got != "" {
+		t.Fatalf("deleted workspace left reconnect selection %q", got)
+	}
+	persisted, err := store.Load()
+	if err != nil || persisted.SelectedWindowID != "" {
+		t.Fatalf("deleted workspace selection was not saved: %+v, %v", persisted, err)
 	}
 }
 
@@ -895,19 +944,20 @@ func TestDeleteResultOnlyConfirmsForceableRisk(t *testing.T) {
 	model := tuiModel{manager: manager, actionBusy: true}
 	updated, _ := model.handleActionResult(actionResultMsg{
 		action: "delete_workspace", hostID: localHostID, targetID: "111111111111111111111111",
-		value: DeleteResult{Reason: "delete the workspace windows first"},
+		value: DeleteResult{Reason: "terminal window ownership is uncertain"},
 	})
 	got := updated.(tuiModel)
-	if got.modal != nil || got.message != "delete the workspace windows first" {
+	if got.modal != nil || got.message != "terminal window ownership is uncertain" {
 		t.Fatalf("non-forceable refusal opened confirmation: %+v", got)
 	}
 	got.actionBusy = true
+	windowIDs := []string{"222222222222222222222222", "333333333333333333333333"}
 	updated, _ = got.handleActionResult(actionResultMsg{
 		action: "delete_workspace", hostID: localHostID, targetID: "111111111111111111111111",
-		value: DeleteResult{Reason: "worktree has uncommitted changes", Forceable: true},
+		windowIDs: windowIDs, value: DeleteResult{Reason: "workspace has 2 live terminal windows", Forceable: true},
 	})
 	got = updated.(tuiModel)
-	if got.modal == nil || !got.modal.delete.Force {
+	if got.modal == nil || !got.modal.delete.Force || len(got.modal.windowIDs) != 2 || got.modal.windowIDs[0] != windowIDs[0] || got.modal.windowIDs[1] != windowIDs[1] {
 		t.Fatalf("forceable risk did not open confirmation: %+v", got)
 	}
 }
