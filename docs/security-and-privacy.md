@@ -4,6 +4,7 @@
 - `multicodex` is local-only.
 - No external auth relay.
 - No third-party secret storage.
+- The editor trusts the local user account, configured SSH aliases, their normal host-key policy, and software already installed on each selected host. It opens no network listener and changes no SSH or private-network configuration.
 
 ## Secret handling rules
 - Never print auth tokens, refresh tokens, or raw credential blobs.
@@ -17,6 +18,12 @@
 - Profile-scoped Codex subprocesses must scrub inherited Codex/OpenAI account override environment variables before setting the selected profile `CODEX_HOME`.
 - Profile resource settings may name local directories outside the default Codex home. The user owns the trust decision for those sources; multicodex only creates symlinks and does not execute or copy source contents.
 - Explicit resource reconciliation validates all configured sources before profile mutation. It removes or retargets only symlinks at documented managed positions and preserves regular profile guidance and skill entries.
+- Editor SSH input is restricted to an alias-shaped name and is passed as one argument with batch mode. Remote protocol errors and metadata are bounded and stripped of terminal control characters before display.
+- Editor Git commands disable interactive credential prompts but retain configured noninteractive SSH agents and credential helpers. Connection loss cancels transient host command process groups; owned tmux servers remain outside that cancellation scope.
+- Editor state, locks, sockets, worktrees, and attachments use private directories. State writes are atomic and directory-synced. Symlinked or permissive state paths are rejected.
+- Editor terminal output is memory-only. Persistent activity contains only a SHA-256 hash and timestamp for the last 100 captured rows. The client never stores remote terminal content or copies Codex auth between hosts.
+- Host deletion requires deterministic paths or names plus exact instance, workspace, and window ownership metadata. Tmux, Git, filesystem, or registry uncertainty stops deletion. Two-phase workspace, window, and attachment intent records make interrupted operations recoverable without expanding ownership. Force confirmation is never persisted or replayed after interruption.
+- Attachments are bounded to 16 MiB, opened without following symlinks, copied to private host-local files, and deleted with their workspace or after seven days. Image input is validated as PNG or JPEG with bounded dimensions. The editor pastes a path but never submits a terminal draft.
 
 ## Repository safeguards
 - `.gitignore` must ignore local auth and profile state.
@@ -27,6 +34,7 @@
 - CI should run secret scanning before merge.
 - `multicodex doctor` should be used before release to verify leak-guard checks.
 - Committed tests, examples, logs, and review artifacts must use temporary or dummy resource paths and must not include private resource contents or machine-specific paths.
+- Public editor tests must use synthetic repositories and temporary homes. System SSH configuration, installed binaries, user projects, and resources outside the selected multicodex home are never test targets.
 
 ## Global auth boundary
 - Multicodex must not change, restore, back up, symlink, lock, or otherwise manage the shared default Codex auth account.

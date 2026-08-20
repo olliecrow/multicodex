@@ -30,6 +30,7 @@ var commandSummaries = []struct {
 	{Name: "monitor tui [flags]", Summary: "run the monitor terminal UI explicitly"},
 	{Name: "monitor doctor [flags]", Summary: "check usage-monitor data sources"},
 	{Name: "monitor completion [shell]", Summary: "print shell completion script"},
+	{Name: "editor", Summary: "manage local and SSH project terminals in one UI"},
 	{Name: "doctor [--json] [--timeout 8s]", Summary: "run non-mutating setup and auth checks"},
 	{Name: "dry-run [operation]", Summary: "print planned operations without mutating state"},
 	{Name: "completion <shell>", Summary: "print shell completion script for bash, zsh, or fish"},
@@ -152,6 +153,13 @@ var commandHelpByName = map[string]commandHelp{
 			"multicodex monitor completion zsh",
 		},
 	},
+	"editor": {
+		Usage:       "multicodex editor",
+		Description: "Run the local-first multicodex editor. It groups owned tmux windows under project workspaces on this machine and configured SSH hosts. Git workspaces always use a new owned worktree and branch. The editor never runs inside tmux.",
+		Examples: []string{
+			"multicodex editor",
+		},
+	},
 	"doctor": {
 		Usage:       "multicodex doctor [--json] [--timeout 8s]",
 		Description: "Run non-mutating setup, auth, and leak-guard checks.",
@@ -215,6 +223,7 @@ func printHelp() {
 	fmt.Println("  multicodex cli --account personal")
 	fmt.Println(`  multicodex generate "Draft a short email."`)
 	fmt.Println("  multicodex monitor")
+	fmt.Println("  multicodex editor")
 	fmt.Println("  multicodex heartbeat")
 	fmt.Println("  multicodex reconcile")
 	fmt.Println(`  eval "$(multicodex completion zsh)"`)

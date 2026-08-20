@@ -79,3 +79,15 @@ Context: Subscription authentication is useful for general text generation, but 
 Rationale: A small App Server client reuses existing profile routing and managed ChatGPT authentication. An exact Codex version gate, the built-in OpenAI provider and endpoint, optional bounded instruction files, disabled context and MCP servers, a one-model catalog with agent-tool metadata removed, and fail-closed event handling keep coding tools out of the provider request. Explicit `--search` can expose the provider's native live web-search tool without adding the coding-agent harness. Model-catalog effort validation, App Server output schemas, and sanitized JSON metrics support controlled experiments without exposing raw events or account identity. Normal tolerant config loading preserves unrelated user-owned Codex settings that strict parsing can reject.
 Trade-offs: The command is one-shot, requires a tested Codex version, and must be updated when the experimental protocol changes. Search is opt-in and limited to the native provider tool. JSON mode buffers a bounded response. Provider-side instructions remain outside client control.
 References: `internal/codexappserver/`, `internal/multicodex/generate.go`, `docs/command-spec.md`
+
+Decision: Build the editor as a local TUI over dedicated host-local tmux servers.
+Context: One client must reconnect quickly to many local and SSH project terminals without a daemon, terminal transcript database, or cross-host coordination.
+Rationale: A small Go TUI keeps one warm protocol connection per host, renders only the selected PTY, and polls bounded tmux captures for activity. Deterministic session names and exact environment ownership markers make reconnection and cleanup simple. The outer editor stays outside tmux, and managed servers disable prefix keys and bindings, which removes nested-session ambiguity.
+Trade-offs: Only one terminal is visible at a time. Command-key shortcuts depend on the terminal emulator, mouse scroll is not forwarded, and every remote host needs the same release or clean source revision. Modified development builds cannot connect remotely.
+References: `internal/editor/`, `docs/command-spec.md`, `docs/security-and-privacy.md`
+
+Decision: Give each editor instance a private host registry and two-phase resource lifecycle.
+Context: Git worktrees, branches, tmux sessions, and attachments can outlive a client process or be left half-created after sleep, SSH loss, or a failed state write.
+Rationale: The client stores minimal navigation state. Each host records exact ownership and workspace, window, or attachment intent before external mutation. Startup and hourly reconciliation can then resume known operations and refuse uncertain ones without scanning or changing unrelated projects. Force consent is invocation-local and is never replayed after interruption.
+Trade-offs: Loss of the client instance identifier prevents automatic adoption of its old resources, and safe cleanup preserves dirty, unique, live, altered, or uncertain resources for manual review.
+References: `internal/editor/host_store.go`, `internal/editor/host_service.go`, `docs/security-and-privacy.md`
