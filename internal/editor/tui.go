@@ -350,7 +350,7 @@ func (m tuiModel) handleKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if key.Keystroke() == "super+v" || key.Keystroke() == "shift+super+v" {
 		return m.startClipboardAttachment()
 	}
-	if slot := windowSlotKey(key, m.controlMode); slot > 0 {
+	if slot := windowSlotKey(key); slot > 0 {
 		return m.selectWindowSlot(slot)
 	}
 	if !m.controlMode {
@@ -389,7 +389,7 @@ func (m tuiModel) handleKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.selectCurrentRow()
 	case "tab", "shift+tab", "right":
 		m.openActionMenu()
-	case "f1", "?":
+	case "f1":
 		m.modal = &modal{kind: "help", title: "Keyboard shortcuts"}
 	}
 	return m, nil
@@ -402,7 +402,7 @@ func (m tuiModel) handleModalKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	switch m.modal.kind {
 	case "help":
-		if key.Keystroke() == "enter" || key.Keystroke() == "f1" || key.Keystroke() == "?" {
+		if key.Keystroke() == "enter" || key.Keystroke() == "f1" {
 			m.modal = nil
 		}
 	case "choice", "actions":
@@ -1136,11 +1136,11 @@ func rowIdentity(row sidebarRow) string {
 	}
 }
 
-func windowSlotKey(key tea.KeyPressMsg, controlMode bool) int {
+func windowSlotKey(key tea.KeyPressMsg) int {
 	if key.Code < '1' || key.Code > '9' {
 		return 0
 	}
-	if controlMode && key.Mod == 0 || key.Mod&(tea.ModAlt|tea.ModSuper|tea.ModMeta) != 0 {
+	if key.Mod&(tea.ModAlt|tea.ModSuper|tea.ModMeta) != 0 {
 		return int(key.Code - '0')
 	}
 	return 0

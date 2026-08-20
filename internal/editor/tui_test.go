@@ -67,16 +67,13 @@ func TestSidebarHidesEmptyProjectsGroupsWorkspacesAndUsesDynamicSlots(t *testing
 }
 
 func TestWindowSlotShortcutsAreDynamicAndDoNotStealPlainTerminalDigits(t *testing.T) {
-	if got := windowSlotKey(tea.KeyPressMsg{Code: '3'}, false); got != 0 {
+	if got := windowSlotKey(tea.KeyPressMsg{Code: '3'}); got != 0 {
 		t.Fatalf("plain terminal digit selected slot %d", got)
 	}
-	if got := windowSlotKey(tea.KeyPressMsg{Code: '3'}, true); got != 3 {
-		t.Fatalf("control-mode digit selected slot %d", got)
-	}
-	if got := windowSlotKey(tea.KeyPressMsg{Code: '3', Mod: tea.ModSuper}, false); got != 3 {
+	if got := windowSlotKey(tea.KeyPressMsg{Code: '3', Mod: tea.ModSuper}); got != 3 {
 		t.Fatalf("Command+3 selected slot %d", got)
 	}
-	if got := windowSlotKey(tea.KeyPressMsg{Code: '3', Mod: tea.ModAlt}, false); got != 3 {
+	if got := windowSlotKey(tea.KeyPressMsg{Code: '3', Mod: tea.ModAlt}); got != 3 {
 		t.Fatalf("Alt+3 selected slot %d", got)
 	}
 }
@@ -103,6 +100,16 @@ func TestEditorControlsUseNavigationAndAVisibleActionMenu(t *testing.T) {
 	got := updated.(tuiModel)
 	if cmd != nil || got.modal != nil {
 		t.Fatalf("legacy mnemonic key opened an action: %+v", got)
+	}
+	updated, cmd = got.handleKey(tea.KeyPressMsg{Code: '?', Text: "?"})
+	got = updated.(tuiModel)
+	if cmd != nil || got.modal != nil {
+		t.Fatalf("legacy help key opened an action: %+v", got)
+	}
+	updated, cmd = got.handleKey(tea.KeyPressMsg{Code: '3', Text: "3"})
+	got = updated.(tuiModel)
+	if cmd != nil || got.modal != nil {
+		t.Fatalf("plain digit opened an action: %+v", got)
 	}
 	updated, cmd = got.handleKey(tea.KeyPressMsg{Code: tea.KeyTab})
 	got = updated.(tuiModel)
