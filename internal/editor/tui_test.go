@@ -136,6 +136,45 @@ func TestEditorControlsUseNavigationAndAVisibleActionMenu(t *testing.T) {
 	}
 }
 
+func TestWindowCreationUsesAChoiceInsteadOfFreeTextLaunchInput(t *testing.T) {
+	host := Host{ID: localHostID, Name: localHostName}
+	project := Project{ID: "111111111111111111111111", Name: "Project"}
+	workspace := Workspace{ID: "222222222222222222222222", Name: "Workspace"}
+
+	for _, test := range []struct {
+		choice int
+		launch string
+		name   string
+	}{
+		{choice: 0, launch: "shell", name: defaultShellWin},
+		{choice: 1, launch: "codex", name: "Codex"},
+	} {
+		model := tuiModel{modal: &modal{kind: "choice", action: "choose_window_launch", choices: []choice{{host: host, project: project, workspace: workspace}}}}
+		model.acceptChoice()
+		if model.modal == nil || model.modal.kind != "choice" || model.modal.action != "create_window" || len(model.modal.choices) != 2 {
+			t.Fatalf("launch choice = %+v", model.modal)
+		}
+		for _, want := range []string{"Shell — open a normal terminal", "Codex — start multicodex Codex CLI"} {
+			if !strings.Contains(ansi.Strip(renderModal(*model.modal, 60, 20)), want) {
+				t.Fatalf("launch choice is missing %q", want)
+			}
+		}
+
+		model.modal.choice = test.choice
+		model.acceptChoice()
+		if model.modal == nil || model.modal.kind != "form" || model.modal.launch != test.launch || len(model.modal.fields) != 1 || model.modal.fields[0].value != test.name {
+			t.Fatalf("%s window form = %+v", test.launch, model.modal)
+		}
+		rendered := renderModal(*model.modal, 60, 20)
+		if strings.Contains(rendered, "shell or codex") {
+			t.Fatalf("%s window form kept the free-text launch field", test.launch)
+		}
+		if !strings.Contains(rendered, "Enter: save") || strings.Contains(rendered, "Tab: next field") {
+			t.Fatalf("%s single-field form has unclear guidance: %q", test.launch, rendered)
+		}
+	}
+}
+
 func TestDeleteConfirmationDefaultsToCancelAndUsesDialogControls(t *testing.T) {
 	model := tuiModel{manager: &Manager{}, controlMode: true, modal: &modal{kind: "confirm", action: "delete_window", delete: DeleteRequest{ID: testInstanceID}}}
 	updated, cmd := model.handleModalKey(tea.KeyPressMsg{Code: tea.KeyEnter})
