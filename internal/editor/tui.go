@@ -567,7 +567,6 @@ func (m tuiModel) handleMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 				m.moveSelectionClamped(delta)
-				m.controlMode = true
 				return m, nil
 			}
 			if mouse.X >= layout.terminalX && mouse.X < layout.terminalX+layout.terminalWidth {
