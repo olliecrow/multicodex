@@ -135,3 +135,28 @@ func TestRefreshGivesQueuedHostsTheirOwnDeadline(t *testing.T) {
 		t.Fatalf("queued healthy host was starved: %+v", statuses)
 	}
 }
+
+func TestDoctorResultValidationRejectsRemoteTerminalData(t *testing.T) {
+	valid := DoctorResult{OK: true, Checks: []string{"tmux 3.4", "git version 2.43.0", "editor host path policy is valid"}}
+	if err := validateDoctorResult(valid); err != nil {
+		t.Fatal(err)
+	}
+	for _, unsafe := range []DoctorResult{
+		{OK: false},
+		{OK: true, Issues: []string{"unexpected"}},
+		{OK: false, Issues: []string{"\x1b]52;c;unsafe\a"}},
+		{OK: false, Issues: []string{strings.Repeat("x", 201)}},
+		{OK: false, Issues: make([]string, 9)},
+	} {
+		if err := validateDoctorResult(unsafe); err == nil {
+			t.Fatalf("accepted unsafe doctor result: %+v", unsafe)
+		}
+	}
+}
+
+func TestDoctorIssueSummaryIsBoundedPlainText(t *testing.T) {
+	value := doctorIssueSummary(DoctorResult{Issues: []string{strings.Repeat("x", 180), strings.Repeat("y", 180)}})
+	if len(value) != 300 || strings.ContainsAny(value, "\x1b\a") {
+		t.Fatalf("unsafe doctor summary: %q", value)
+	}
+}

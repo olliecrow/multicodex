@@ -190,6 +190,13 @@ func TestExecRunnerCancellationKillsOwnedGrandchild(t *testing.T) {
 	})
 }
 
+func TestExecRunnerHasNoControllingTerminal(t *testing.T) {
+	requireCommands(t, "sh")
+	if _, err := (execRunner{}).run(context.Background(), "sh", "-c", "if { : </dev/tty; } 2>/dev/null; then exit 9; fi"); err != nil {
+		t.Fatal("transient command could open the editor controlling terminal")
+	}
+}
+
 func TestCommandEnvironmentRemovesRepositoryAndTmuxOverrides(t *testing.T) {
 	environment := []string{
 		"PATH=/bin", "GIT_DIR=/tmp/wrong", "GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=core.hooksPath",
@@ -202,8 +209,13 @@ func TestCommandEnvironmentRemovesRepositoryAndTmuxOverrides(t *testing.T) {
 			t.Fatalf("Git environment retained %q: %s", removed, gitEnvironment)
 		}
 	}
-	if !strings.Contains(gitEnvironment, "GIT_SSH_COMMAND=ssh-custom") {
-		t.Fatalf("Git environment removed the configured SSH transport: %s", gitEnvironment)
+	for _, required := range []string{
+		"GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=Never", "GIT_ASKPASS=", "SSH_ASKPASS=", "SSH_ASKPASS_REQUIRE=never",
+		"GIT_SSH_COMMAND=ssh-custom",
+	} {
+		if strings.Count(gitEnvironment, required) != 1 {
+			t.Fatalf("Git environment does not enforce %q exactly once: %s", required, gitEnvironment)
+		}
 	}
 	if strings.Count(gitEnvironment, "GIT_TERMINAL_PROMPT=0") != 1 || strings.Count(gitEnvironment, "GCM_INTERACTIVE=Never") != 1 {
 		t.Fatalf("Git environment permits an interactive credential prompt: %s", gitEnvironment)
@@ -211,6 +223,71 @@ func TestCommandEnvironmentRemovesRepositoryAndTmuxOverrides(t *testing.T) {
 	tmuxEnvironment := strings.Join(sanitizedCommandEnvironment(environment, "tmux"), "|")
 	if strings.Contains(tmuxEnvironment, "TMUX=") || strings.Contains(tmuxEnvironment, "TMUX_TMPDIR=") {
 		t.Fatalf("tmux environment retained nesting overrides: %s", tmuxEnvironment)
+	}
+}
+
+func TestPrepareGitWorktreePreservesPreexistingGeneratedBranch(t *testing.T) {
+	requireCommands(t, "git")
+	ctx := context.Background()
+	project := syntheticGitProject(t)
+	service, err := NewHostService(privateTestHome(t), testInstanceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := "abcdef1234567890abcdef12"
+	branch := "multicodex/collision-" + id[:8]
+	runTestCommand(t, "git", "-C", project, "branch", branch, "HEAD")
+	wantOID := commandOutput(t, "git", "-C", project, "rev-parse", branch)
+	request := CreateWorkspaceRequest{ProjectID: mustID(t), ProjectPath: project, Name: "Collision"}
+	if _, _, _, err := service.prepareGitWorktree(ctx, request, id); err == nil {
+		t.Fatal("expected a pre-existing generated branch to stop workspace creation")
+	}
+	if got := commandOutput(t, "git", "-C", project, "rev-parse", branch); got != wantOID {
+		t.Fatalf("pre-existing branch changed from %s to %s", wantOID, got)
+	}
+}
+
+func TestFailedWorkspaceRollbackNeverDeletesBranchWithoutWorktreeProof(t *testing.T) {
+	requireCommands(t, "git")
+	ctx := context.Background()
+	home := privateTestHome(t)
+	project := syntheticGitProject(t)
+	service, err := NewHostService(home, testInstanceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := "abcdef1234567890abcdef12"
+	projectID := mustID(t)
+	branch := "multicodex/collision-" + id[:8]
+	runTestCommand(t, "git", "-C", project, "branch", branch, "HEAD")
+	wantOID := commandOutput(t, "git", "-C", project, "rev-parse", branch)
+	commonDir, err := service.gitCommonDir(ctx, project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	workspace := Workspace{
+		ID: id, ProjectID: projectID, ProjectPath: project, Name: "Collision", Git: true,
+		GitCommonDir: commonDir, Branch: branch, BaseRef: "HEAD",
+		Path: filepath.Join(service.store.worktreeRoot, projectID, id), CreatedAt: now, LastUsedAt: now, CreatePending: true,
+	}
+	if err := service.store.withLock(func(registry *hostRegistry) error {
+		registry.Workspaces = append(registry.Workspaces, workspace)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	service.rollbackWorkspaceCreation(workspace, false)
+	if got := commandOutput(t, "git", "-C", project, "rev-parse", branch); got != wantOID {
+		t.Fatalf("unproved branch changed from %s to %s", wantOID, got)
+	}
+	if err := service.store.withReadLock(func(registry hostRegistry) error {
+		if len(registry.Workspaces) != 1 || registry.Workspaces[0].ID != id {
+			t.Fatal("uncertain pending ownership record was removed")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
 

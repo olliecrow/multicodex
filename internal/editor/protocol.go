@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -115,11 +116,7 @@ func RunHostProtocol(ctx context.Context, service *HostService, in io.Reader, ou
 }
 
 func dispatchHostRequest(parent context.Context, service *HostService, request protocolRequest) (any, error) {
-	timeout := 30 * time.Second
-	if request.Method == "create_workspace" {
-		timeout = 2 * time.Minute
-	}
-	ctx, cancel := context.WithTimeout(parent, timeout)
+	ctx, cancel := context.WithTimeout(parent, hostRequestTimeout(request.Method))
 	defer cancel()
 
 	switch request.Method {
@@ -190,6 +187,19 @@ func dispatchHostRequest(parent context.Context, service *HostService, request p
 	}
 }
 
+func hostRequestTimeout(method string) time.Duration {
+	timeout := 30 * time.Second
+	switch method {
+	case "hello", "snapshot", "touch_window", "copy_mode", "doctor":
+		timeout = 8 * time.Second
+	case "delete_window", "delete_workspace":
+		timeout = 25 * time.Second
+	case "create_workspace":
+		timeout = 2 * time.Minute
+	}
+	return timeout
+}
+
 func decodeParams(raw json.RawMessage, value any) error {
 	if len(raw) == 0 {
 		return errors.New("missing editor host protocol parameters")
@@ -237,6 +247,14 @@ type HostClient struct {
 }
 
 func StartHostClient(ctx context.Context, executable, multicodexHome, instanceID string, host Host) (*HostClient, error) {
+	return startHostClient(ctx, executable, multicodexHome, instanceID, host, true)
+}
+
+func startIsolatedHostClient(ctx context.Context, executable, multicodexHome, instanceID string, host Host) (*HostClient, error) {
+	return startHostClient(ctx, executable, multicodexHome, instanceID, host, false)
+}
+
+func startHostClient(ctx context.Context, executable, multicodexHome, instanceID string, host Host, sharedSSH bool) (*HostClient, error) {
 	if err := validateID(instanceID, "editor instance identifier"); err != nil {
 		return nil, err
 	}
@@ -249,12 +267,20 @@ func StartHostClient(ctx context.Context, executable, multicodexHome, instanceID
 			cancelProcess()
 			return nil, err
 		}
-		controlPath, err := prepareSSHControlPath(multicodexHome, instanceID, host.ID)
-		if err != nil {
-			cancelProcess()
-			return nil, err
+		var options []string
+		if sharedSSH {
+			controlPath, err := prepareSSHControlPath(multicodexHome, instanceID, host.ID)
+			if err != nil {
+				cancelProcess()
+				return nil, err
+			}
+			options = sshConnectionOptions("auto", "no", controlPath)
+		} else {
+			// Cleanup is intentionally independent from the long-lived protocol
+			// and terminal clients. Its timeout can never close their SSH master.
+			options = sshConnectionOptions("no", "no", "none")
 		}
-		args := append([]string{"-T"}, sshConnectionOptions("auto", "no", controlPath)...)
+		args := append([]string{"-T"}, options...)
 		args = append(args, host.SSHAlias, "multicodex", "__editor-host", "--instance", instanceID)
 		cmd = exec.CommandContext(processContext, "ssh", args...)
 	}
@@ -280,6 +306,7 @@ func StartHostClient(ctx context.Context, executable, multicodexHome, instanceID
 		return nil, errors.New("prepare editor host connection")
 	}
 	cmd.Stderr = &limitedWriter{remaining: 64 << 10}
+	cmd.WaitDelay = 2 * time.Second
 	if err := cmd.Start(); err != nil {
 		cancelProcess()
 		return nil, connectionStartError(host)
@@ -338,26 +365,22 @@ func buildIdentity(version, revision string, modified bool) string {
 	return ""
 }
 
-func prepareSSHControlPath(multicodexHome, instanceID, hostID string) (string, error) {
+func prepareSSHControlPath(_ string, instanceID, hostID string) (string, error) {
 	if err := validateID(instanceID, "editor instance identifier"); err != nil {
 		return "", err
 	}
 	if err := validateID(hostID, "host identifier"); err != nil {
 		return "", err
 	}
-	paths := []string{
-		filepath.Join(multicodexHome, "editor"),
-		filepath.Join(multicodexHome, "editor", "ssh"),
-		filepath.Join(multicodexHome, "editor", "ssh", instanceID),
-	}
+	paths := []string{sshControlRuntimeRoot(), filepath.Join(sshControlRuntimeRoot(), instanceID[:12])}
 	for _, path := range paths {
-		if err := ensurePrivateDir(path); err != nil {
+		if err := ensureOwnedPrivateRuntimeDir(path); err != nil {
 			return "", err
 		}
 	}
-	controlPath := filepath.Join(paths[len(paths)-1], hostID+".sock")
-	if len(controlPath) > 100 {
-		return "", errors.New("MULTICODEX_HOME path is too long for a reliable SSH control socket")
+	controlPath := filepath.Join(paths[len(paths)-1], hostID[:12]+".sock")
+	if len(controlPath) > 80 {
+		return "", errors.New("editor SSH control path is too long")
 	}
 	if info, err := os.Lstat(controlPath); err == nil && info.Mode()&os.ModeSocket == 0 {
 		return "", errors.New("editor SSH control path is not a socket")
@@ -365,6 +388,32 @@ func prepareSSHControlPath(multicodexHome, instanceID, hostID string) (string, e
 		return "", errors.New("inspect editor SSH control path")
 	}
 	return controlPath, nil
+}
+
+func sshControlRuntimeRoot() string {
+	return filepath.Join("/tmp", "multicodex-editor-"+strconv.Itoa(os.Getuid()))
+}
+
+func ensureOwnedPrivateRuntimeDir(path string) error {
+	if err := ensurePrivateDir(path); err != nil {
+		return err
+	}
+	return secureOwnedPrivateRuntimeDir(path)
+}
+
+func secureOwnedPrivateRuntimeDir(path string) error {
+	if err := secureExistingDir(path); err != nil {
+		return err
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return errors.New("inspect private editor runtime directory")
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || int(stat.Uid) != os.Getuid() {
+		return errors.New("editor runtime directory is not owned by the current user")
+	}
+	return nil
 }
 
 // OpenSSH expands percent tokens in ControlPath values. Doubling each percent
@@ -376,6 +425,11 @@ func sshControlPathOption(path string) string {
 func sshConnectionOptions(controlMaster, controlPersist, controlPath string) []string {
 	options := []string{
 		"-o", "BatchMode=yes",
+		"-o", "ClearAllForwardings=yes",
+		"-o", "ForwardAgent=no",
+		"-o", "ForwardX11=no",
+		"-o", "Tunnel=no",
+		"-o", "PermitLocalCommand=no",
 		"-o", "ConnectTimeout=8",
 		"-o", "ServerAliveInterval=5",
 		"-o", "ServerAliveCountMax=3",
@@ -387,14 +441,32 @@ func sshConnectionOptions(controlMaster, controlPersist, controlPath string) []s
 	return append(options, "-o", "ControlPath="+sshControlPathOption(controlPath))
 }
 
-func cleanupSSHControlPath(multicodexHome, instanceID, hostID string) error {
+func cleanupSSHControlPath(_ string, instanceID, hostID string) error {
 	if err := validateID(instanceID, "editor instance identifier"); err != nil {
 		return err
 	}
 	if err := validateID(hostID, "host identifier"); err != nil {
 		return err
 	}
-	path := filepath.Join(multicodexHome, "editor", "ssh", instanceID, hostID+".sock")
+	runtimeRoot := sshControlRuntimeRoot()
+	if _, err := os.Lstat(runtimeRoot); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return errors.New("inspect editor SSH runtime directory")
+	}
+	if err := secureOwnedPrivateRuntimeDir(runtimeRoot); err != nil {
+		return err
+	}
+	directory := filepath.Join(runtimeRoot, instanceID[:12])
+	if _, err := os.Lstat(directory); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return errors.New("inspect editor SSH directory")
+	}
+	if err := secureOwnedPrivateRuntimeDir(directory); err != nil {
+		return err
+	}
+	path := filepath.Join(directory, hostID[:12]+".sock")
 	info, err := os.Lstat(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -411,17 +483,29 @@ func cleanupSSHControlPath(multicodexHome, instanceID, hostID string) error {
 	return nil
 }
 
-func cleanupSSHControlPaths(multicodexHome, instanceID string) error {
+func cleanupSSHControlPaths(_ string, instanceID string) error {
 	if err := validateID(instanceID, "editor instance identifier"); err != nil {
 		return err
 	}
-	directory := filepath.Join(multicodexHome, "editor", "ssh", instanceID)
-	info, err := os.Lstat(directory)
-	if errors.Is(err, os.ErrNotExist) {
+	runtimeRoot := sshControlRuntimeRoot()
+	if _, err := os.Lstat(runtimeRoot); errors.Is(err, os.ErrNotExist) {
 		return nil
+	} else if err != nil {
+		return errors.New("inspect editor SSH runtime directory")
 	}
-	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0o077 != 0 {
-		return errors.New("refuse to clean an unsafe editor SSH directory")
+	if err := secureOwnedPrivateRuntimeDir(runtimeRoot); err != nil {
+		return err
+	}
+	directory := filepath.Join(runtimeRoot, instanceID[:12])
+	_, err := os.Lstat(directory)
+	if errors.Is(err, os.ErrNotExist) {
+		return removeEmptySSHRuntimeRoot(runtimeRoot)
+	}
+	if err != nil {
+		return errors.New("inspect editor SSH directory")
+	}
+	if err := secureOwnedPrivateRuntimeDir(directory); err != nil {
+		return err
 	}
 	entries, err := os.ReadDir(directory)
 	if err != nil {
@@ -429,15 +513,28 @@ func cleanupSSHControlPaths(multicodexHome, instanceID string) error {
 	}
 	for _, entry := range entries {
 		name := entry.Name()
-		if !strings.HasSuffix(name, ".sock") || validateID(strings.TrimSuffix(name, ".sock"), "host identifier") != nil {
+		shortID := strings.TrimSuffix(name, ".sock")
+		if !strings.HasSuffix(name, ".sock") || len(shortID) != 12 || !idPattern.MatchString(shortID+strings.Repeat("0", 12)) {
 			continue
 		}
-		if err := cleanupSSHControlPath(multicodexHome, instanceID, strings.TrimSuffix(name, ".sock")); err != nil {
+		path := filepath.Join(directory, name)
+		info, err := os.Lstat(path)
+		if err != nil || info.Mode()&os.ModeSocket == 0 {
+			return errors.New("refuse to remove an unsafe editor SSH control path")
+		}
+		if err := os.Remove(path); err != nil {
 			return errors.New("remove editor SSH control socket")
 		}
 	}
 	if err := os.Remove(directory); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil // Preserve a non-empty directory that contains anything unexpected.
+	}
+	return removeEmptySSHRuntimeRoot(runtimeRoot)
+}
+
+func removeEmptySSHRuntimeRoot(runtimeRoot string) error {
+	if err := os.Remove(runtimeRoot); err != nil && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, syscall.ENOTEMPTY) {
+		return errors.New("remove empty editor SSH runtime directory")
 	}
 	return nil
 }
