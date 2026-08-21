@@ -440,7 +440,7 @@ func (m tuiModel) handleKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.modal != nil {
 		return m.handleModalKey(key)
 	}
-	if key.Keystroke() == "f1" {
+	if isGlobalHelpKey(key) {
 		m.modal = &modal{kind: "help", title: "Controls"}
 		return m, nil
 	}
@@ -448,7 +448,7 @@ func (m tuiModel) handleKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.selectWindowSlot(slot)
 	}
 	if !m.controlMode {
-		if key.Keystroke() == "ctrl+g" {
+		if isSidebarFocusKey(key) {
 			m.controlMode = true
 			m.message = ""
 			return m, nil
@@ -460,9 +460,41 @@ func (m tuiModel) handleKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+	if isSidebarFocusKey(key) {
+		m.controlMode = false
+		m.message = ""
+		return m, nil
+	}
+	if isMacListEdgeKey(key, tea.KeyUp) {
+		m.selectSidebarEdge(false)
+		return m, nil
+	}
+	if isMacListEdgeKey(key, tea.KeyDown) {
+		m.selectSidebarEdge(true)
+		return m, nil
+	}
+	if isMacListPageKey(key, tea.KeyUp) {
+		m.moveSelectionPage(-1)
+		return m, nil
+	}
+	if isMacListPageKey(key, tea.KeyDown) {
+		m.moveSelectionPage(1)
+		return m, nil
+	}
+	if isCreateKey(key) {
+		return m.createForSelection()
+	}
+	if isRenameKey(key) {
+		m.openRename()
+		return m, nil
+	}
+	if isSidebarHelpKey(key) {
+		m.modal = &modal{kind: "help", title: "Controls"}
+		return m, nil
+	}
 
 	switch key.Keystroke() {
-	case "ctrl+g", "esc":
+	case "esc":
 		m.controlMode = false
 		m.message = ""
 	case "ctrl+c":
@@ -481,10 +513,6 @@ func (m tuiModel) handleKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.moveSelectionPage(1)
 	case "enter":
 		return m.selectCurrentRow()
-	case "ctrl+n":
-		return m.createForSelection()
-	case "f2":
-		m.openRename()
 	case "tab", "shift+tab", "right":
 		m.openActionMenu()
 	}
@@ -492,16 +520,32 @@ func (m tuiModel) handleKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) handleModalKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if key.Keystroke() == "esc" {
+	if isCancelKey(key) {
 		m.modal = nil
 		return m, nil
 	}
 	switch m.modal.kind {
 	case "help":
-		if key.Keystroke() == "enter" || key.Keystroke() == "f1" {
+		if key.Keystroke() == "enter" || isGlobalHelpKey(key) || isSidebarHelpKey(key) {
 			m.modal = nil
 		}
 	case "choice", "actions":
+		if isMacListEdgeKey(key, tea.KeyUp) {
+			m.modal.choice = 0
+			return m, nil
+		}
+		if isMacListEdgeKey(key, tea.KeyDown) {
+			m.modal.choice = max(0, len(m.modal.choices)-1)
+			return m, nil
+		}
+		if isMacListPageKey(key, tea.KeyUp) {
+			m.moveModalChoicePage(-1)
+			return m, nil
+		}
+		if isMacListPageKey(key, tea.KeyDown) {
+			m.moveModalChoicePage(1)
+			return m, nil
+		}
 		switch key.Keystroke() {
 		case "up":
 			m.modal.choice = max(0, m.modal.choice-1)
@@ -822,13 +866,13 @@ func (m tuiModel) View() tea.View {
 		}
 	}
 	bodyLines = append(bodyLines, frame("└"+strings.Repeat("─", layout.sidebarWidth)+"┴"+strings.Repeat("─", layout.terminalWidth)+"┘"))
-	footerLeft := "Terminal · Ctrl+G: sidebar · F1 Help"
+	footerLeft := "Terminal · ⌘B/Ctrl+G: sidebar · ⌘?: Help"
 	if m.controlMode {
 		footerLeft = m.sidebarFooter()
 	} else if len(m.rows) == 0 {
-		footerLeft = "No projects · Click Actions, or Ctrl+G then Tab · F1 Help"
+		footerLeft = "No projects · Click Actions, or ⌘B/Ctrl+G then Tab"
 	} else if m.attachment == nil {
-		footerLeft = "No terminal · Select a project or workspace, then Enter · F1 Help"
+		footerLeft = "No terminal · Select a project or workspace, then Enter"
 	}
 	footer := joinKeepRight(footerLeft, m.message, m.width)
 	content := header + "\n" + strings.Join(bodyLines, "\n") + "\n" + footer
@@ -886,7 +930,7 @@ func (m tuiModel) renderSidebar() string {
 		lines = append(lines, style.Render(label))
 	}
 	if len(lines) == 0 {
-		lines = append(lines, fitPlain(" No projects", width), fitPlain(" Ctrl+G → Tab: Actions", width))
+		lines = append(lines, fitPlain(" No projects", width), fitPlain(" Click Actions to begin", width))
 	}
 	start := min(m.sidebarOffset, len(lines))
 	end := min(len(lines), start+height)
@@ -903,13 +947,13 @@ func (m tuiModel) renderMain() string {
 		return renderModal(*m.modal, width, height)
 	}
 	if m.attachment == nil {
-		text := "Set up your first terminal\n\n1. Open Actions: click [ Actions ].\n   Keyboard: Ctrl+G, then Tab.\n2. Add a project.\n3. Create a named workspace.\n   Its first terminal opens automatically."
+		text := "Set up your first terminal\n\n1. Open Actions: click [ Actions ].\n   Keyboard: ⌘B or Ctrl+G, then Tab.\n2. Add a project.\n3. Create a named workspace.\n   Its first terminal opens automatically."
 		if row, ok := m.selectedSidebarRow(); ok {
 			switch row.kind {
 			case "project":
 				text = "Project selected\n\nPress Enter to create a named workspace.\nIts first terminal opens automatically.\n\nOr click Actions."
 			case "workspace":
-				text = "Workspace selected\n\nPress Enter to create and open a new terminal.\nPress F2 to rename the workspace."
+				text = "Workspace selected\n\nPress Enter to create and open a new terminal.\nChoose Rename from Actions to change its name."
 			case "window":
 				text = "No terminal is open\n\nPress Enter or click the selected window to open it.\nPress Ctrl+N for another terminal."
 			}
@@ -922,17 +966,17 @@ func (m tuiModel) renderMain() string {
 func (m tuiModel) sidebarFooter() string {
 	row, ok := m.selectedSidebarRow()
 	if !ok {
-		return "Sidebar · Tab: Actions · Esc: back"
+		return "Sidebar · ↑/↓: select · Tab: Actions · Esc: terminal"
 	}
 	switch row.kind {
 	case "project":
-		return "Project · Enter/Ctrl+N: new workspace · Tab: Actions · Esc: back"
+		return "Project · Enter: new workspace · Tab: Actions · Esc: terminal"
 	case "workspace":
-		return "Workspace · Enter/Ctrl+N: new window · F2: rename · Esc: back"
+		return "Workspace · Enter: new terminal · ⌘R: rename · Tab: Actions"
 	case "window":
-		return "Window · Enter: open · Ctrl+N: new window · F2: rename · Esc: back"
+		return "Window · Enter: open · ⌘N/Ctrl+N: new · ⌘R: rename"
 	default:
-		return "Sidebar · Tab: Actions · Esc: back"
+		return "Sidebar · ↑/↓: select · Tab: Actions · Esc: terminal"
 	}
 }
 
@@ -1017,22 +1061,20 @@ func renderModal(modal modal, width, height int) string {
 func helpModalContent() []string {
 	return []string{
 		"Mouse",
-		"  Click project, workspace, or window rows",
-		"  Click actions, fields, choices, and buttons",
+		"  Click rows, actions, fields, choices, and buttons",
 		"  Wheel: move lists or scroll terminal history",
 		"  Click terminal: return input to the terminal",
-		"Keyboard",
-		"  Ctrl+G: focus the sidebar",
-		"  ↑/↓: select · Enter: open or create · Tab: Actions",
-		"  Ctrl+N: create for selection",
-		"  F2: rename selection",
-		"  F1: Help · Esc: return to terminal",
+		"Keyboard · MacBook",
+		"  ⌘B or Ctrl+G: focus the sidebar",
+		"  ↑/↓: one row · ⌥↑/⌥↓: one screen",
+		"  ⌘↑/⌘↓: first/last · Enter: open/create",
+		"  Tab: Actions · ⌘N or Ctrl+N: create",
+		"  ⌘R: rename · ? or ⌘?: Help · Esc: terminal",
+		"  ⌘1–9 or ⌥1–9: open the numbered window",
 		"  In the sidebar, Ctrl+C: quit",
-		"  Home/End/Page Up/Page Down: move through list",
-		"  Alt/⌘+1–9: open the numbered window",
 		"Status: ● running · ○ stopped",
 		"Need terminal Ctrl+G? Use Actions → Send Ctrl+G.",
-		closeButtonLabel + " · Enter, F1, or Esc: close",
+		closeButtonLabel + " · Enter, ?, or Esc: close",
 	}
 }
 
@@ -1255,6 +1297,14 @@ func (m *tuiModel) moveSelectionPage(direction int) {
 		m.selectedRow = max(0, min(len(m.rows)-1, m.selectedRow+direction*max(1, m.sidebarHeight()-1)))
 	}
 	m.ensureSelectionVisible()
+}
+
+func (m *tuiModel) moveModalChoicePage(direction int) {
+	if m.modal == nil || len(m.modal.choices) == 0 {
+		return
+	}
+	page := max(1, modalContentHeight(m.bodyHeight())-5)
+	m.modal.choice = max(0, min(len(m.modal.choices)-1, m.modal.choice+direction*page))
 }
 
 func (m *tuiModel) selectSidebarEdge(last bool) {
@@ -1580,7 +1630,7 @@ func (m tuiModel) handleActionResult(msg actionResultMsg) (tea.Model, tea.Cmd) {
 		return m, m.startRefresh()
 	}
 	if msg.action == "copy_mode" {
-		m.message = "tmux scrollback: arrows/Page Up, q to leave"
+		m.message = "terminal history: arrows or Option+↑/↓, q to leave"
 	}
 	switch value := msg.value.(type) {
 	case Host:
@@ -1807,6 +1857,56 @@ func windowSlotKey(key tea.KeyPressMsg) int {
 		return int(key.Code - '0')
 	}
 	return 0
+}
+
+func isSidebarFocusKey(key tea.KeyPressMsg) bool {
+	return key.Keystroke() == "ctrl+g" || isCommandRune(key, 'b')
+}
+
+func isGlobalHelpKey(key tea.KeyPressMsg) bool {
+	if key.Keystroke() == "f1" {
+		return true
+	}
+	return hasCommandModifier(key) && (key.Code == '?' || key.BaseCode == '/' || key.Text == "?")
+}
+
+func isSidebarHelpKey(key tea.KeyPressMsg) bool {
+	return key.Mod&(tea.ModCtrl|tea.ModAlt|tea.ModMeta|tea.ModHyper|tea.ModSuper) == 0 && (key.Code == '?' || key.Text == "?")
+}
+
+func isCreateKey(key tea.KeyPressMsg) bool {
+	return key.Keystroke() == "ctrl+n" || isCommandRune(key, 'n')
+}
+
+func isRenameKey(key tea.KeyPressMsg) bool {
+	return key.Keystroke() == "f2" || isCommandRune(key, 'r')
+}
+
+func isCancelKey(key tea.KeyPressMsg) bool {
+	return key.Keystroke() == "esc" || isCommandRune(key, '.')
+}
+
+func isMacListPageKey(key tea.KeyPressMsg, code rune) bool {
+	return key.Code == code && key.Mod&tea.ModAlt != 0 && key.Mod&(tea.ModCtrl|tea.ModMeta|tea.ModHyper|tea.ModSuper) == 0
+}
+
+func isMacListEdgeKey(key tea.KeyPressMsg, code rune) bool {
+	return key.Code == code && hasCommandModifier(key)
+}
+
+func isCommandRune(key tea.KeyPressMsg, want rune) bool {
+	if !hasCommandModifier(key) {
+		return false
+	}
+	code := key.Code
+	if key.BaseCode != 0 {
+		code = key.BaseCode
+	}
+	return unicode.ToLower(code) == unicode.ToLower(want)
+}
+
+func hasCommandModifier(key tea.KeyPressMsg) bool {
+	return key.Mod&(tea.ModSuper|tea.ModMeta) != 0 && key.Mod&(tea.ModCtrl|tea.ModAlt|tea.ModHyper) == 0
 }
 
 func appendBounded(current, added string, limit int) string {
