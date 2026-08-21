@@ -469,7 +469,7 @@ func TestMinimumViewportShowsTitleUsageSidebarAndFooter(t *testing.T) {
 	state := ClientState{Version: stateVersion, InstanceID: testInstanceID, Hosts: []Host{{ID: localHostID, Name: localHostName}}}
 	model := tuiModel{manager: &Manager{state: state}, width: minimumWidth, height: minimumHeight, usage: accountUsageState{accounts: []accountUsage{{label: "alpha", usedPercent: 42, available: true}}}, message: "ready"}
 	view := ansi.Strip(model.View().Content)
-	for _, want := range []string{"multicodex editor", "[ Actions ]", "[ Help ]", "Codex weekly use", "alpha", "42% used", "Projects", "No projects", "Set up your first terminal", "ready", "┌", "┬", "├", "┤", "┴"} {
+	for _, want := range []string{"multicodex editor", "[ Actions ]", "[ Help ]", "Codex weekly use", "alpha", "42% used", "Projects", "No projects", "Set up your first terminal", "Click Actions, or Ctrl+G then Tab", "ready", "┌", "┬", "├", "┤", "┴"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("missing %q in view:\n%s", want, view)
 		}
@@ -543,6 +543,52 @@ func TestHelpOpensFromTerminalInputWithoutEditorFocus(t *testing.T) {
 	got := updated.(tuiModel)
 	if cmd != nil || got.modal == nil || got.modal.kind != "help" {
 		t.Fatalf("global F1 did not open help: %+v", got)
+	}
+}
+
+func TestHelpShowsEveryCoreControlAtMinimumSize(t *testing.T) {
+	model := tuiModel{width: minimumWidth, height: minimumHeight, modal: &modal{kind: "help", title: "Controls"}}
+	view := ansi.Strip(model.View().Content)
+	for _, want := range []string{
+		"Click project, workspace, or window rows",
+		"Ctrl+G: focus the sidebar",
+		"Enter: open or create",
+		"Ctrl+N: create for selection",
+		"F2: rename selection",
+		"Alt/⌘+1–9: open the numbered window",
+		"[ Close ]",
+	} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("minimum-size Help omitted %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestCommandVRemainsTerminalInput(t *testing.T) {
+	attachment := &Attachment{inputQueue: make(chan terminalInput, 1)}
+	model := tuiModel{width: minimumWidth, height: minimumHeight, attachment: attachment}
+	updated, cmd := model.handleKey(tea.KeyPressMsg{Code: 'v', Text: "v", Mod: tea.ModSuper})
+	got := updated.(tuiModel)
+	if cmd != nil || got.actionBusy || got.modal != nil || len(attachment.inputQueue) != 1 {
+		t.Fatalf("Command-V was treated as an editor action: %+v", got)
+	}
+	input := <-attachment.inputQueue
+	if input.kind != "raw" || input.text == "" {
+		t.Fatalf("Command-V terminal input = %+v", input)
+	}
+}
+
+func TestOrdinaryPasteGoesToTerminal(t *testing.T) {
+	attachment := &Attachment{inputQueue: make(chan terminalInput, 1)}
+	model := tuiModel{width: minimumWidth, height: minimumHeight, attachment: attachment}
+	updated, cmd := model.Update(tea.PasteMsg{Content: "normal paste"})
+	got := updated.(tuiModel)
+	if cmd != nil || got.actionBusy || len(attachment.inputQueue) != 1 {
+		t.Fatalf("ordinary paste was not sent to the terminal: %+v", got)
+	}
+	input := <-attachment.inputQueue
+	if input.kind != "paste" || input.text != "normal paste" {
+		t.Fatalf("terminal paste = %+v", input)
 	}
 }
 
