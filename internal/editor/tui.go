@@ -403,19 +403,29 @@ func (m tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.layout().fits() {
 			return m, nil
 		}
-		if m.modal != nil && m.modal.kind == "form" {
-			field := &m.modal.fields[m.modal.field]
-			plain := plainDisplayText(msg.Content)
-			field.value = appendBounded(field.value, plain, field.limit)
-			if plain != msg.Content {
-				m.message = "paste omitted terminal control characters"
+		if m.modal != nil {
+			if m.modal.kind == "form" {
+				field := &m.modal.fields[m.modal.field]
+				plain := plainDisplayText(msg.Content)
+				field.value = appendBounded(field.value, plain, field.limit)
+				if plain != msg.Content {
+					m.message = "paste omitted terminal control characters"
+				}
+			} else {
+				m.message = "close the dialog before pasting"
 			}
 			return m, nil
 		}
-		if !m.controlMode && m.attachment != nil {
-			if err := m.attachment.Paste(msg.Content); err != nil {
-				m.message = err.Error()
-			}
+		if m.attachment == nil {
+			m.message = "open a terminal before pasting"
+			return m, nil
+		}
+		wasControlMode := m.controlMode
+		m.controlMode = false
+		if err := m.attachment.Paste(msg.Content); err != nil {
+			m.message = err.Error()
+		} else if wasControlMode {
+			m.message = "pasted into terminal; terminal focused"
 		}
 	case tea.FocusMsg:
 		if m.attachment != nil {
@@ -870,7 +880,7 @@ func (m tuiModel) View() tea.View {
 		}
 	}
 	bodyLines = append(bodyLines, frame("└"+strings.Repeat("─", layout.sidebarWidth)+"┴"+strings.Repeat("─", layout.terminalWidth)+"┘"))
-	footerLeft := "Terminal · ⌘B/Ctrl+G: sidebar · ⌘?: Help"
+	footerLeft := terminalFooter()
 	if m.controlMode {
 		footerLeft = m.sidebarFooter()
 	} else if len(m.rows) == 0 {
@@ -889,6 +899,13 @@ func (m tuiModel) View() tea.View {
 		view.Cursor = tea.NewCursor(layout.terminalX+x, layout.bodyContent+y)
 	}
 	return view
+}
+
+func terminalFooter() string {
+	if os.Getenv("TERM_PROGRAM") == "iTerm.app" {
+		return "Terminal · ⌥-drag: select · ⌘C/⌘V: copy/paste · Ctrl+G: sidebar"
+	}
+	return "Terminal · ⌘B/Ctrl+G: sidebar · ⌘?: Help"
 }
 
 func (m tuiModel) renderSidebar() string {
@@ -1122,9 +1139,10 @@ func renderModal(modal modal, width, height int) string {
 func helpModalContent() []string {
 	return []string{
 		"Mouse",
-		"  Click rows, actions, fields, choices, and buttons",
+		"  Click rows, fields, buttons, or terminal to focus",
 		"  Wheel: move lists or scroll terminal history",
-		"  Click terminal: return input to the terminal",
+		"  Copy: iTerm2 ⌥-drag · others Shift-drag · ⌘C",
+		"  Paste: ⌘V · focuses the attached terminal",
 		"Keyboard · MacBook",
 		"  ⌘B or Ctrl+G: focus the sidebar",
 		"  ↑/↓: one row · ⌥↑/⌥↓: one screen",
