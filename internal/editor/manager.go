@@ -849,33 +849,93 @@ func sortedProjectsByActivity(state ClientState, statuses []HostStatus) []Projec
 		}
 		for _, project := range status.Host.Projects {
 			workspaces := workspaceByProject[project.ID]
-			location := ProjectLocation{Host: status.Host, Project: project, Workspaces: workspaces, HostError: status.Error}
+			location := ProjectLocation{Host: status.Host, Project: project, HostError: status.Error}
 			workspaceIDs := map[string]bool{}
+			windowsByWorkspace := map[string][]Window{}
 			for _, workspace := range workspaces {
 				workspaceIDs[workspace.ID] = true
 			}
 			for _, window := range status.Snapshot.Windows {
 				if workspaceIDs[window.WorkspaceID] {
-					location.Windows = append(location.Windows, window)
-					if changed := activities[status.Host.ID+"/"+window.ID]; changed.After(location.LastActivity) {
-						location.LastActivity = changed
+					windowsByWorkspace[window.WorkspaceID] = append(windowsByWorkspace[window.WorkspaceID], window)
+				}
+			}
+			type workspaceScore struct {
+				workspace Workspace
+				windows   []Window
+				activity  time.Time
+			}
+			workspaceScores := make([]workspaceScore, 0, len(workspaces))
+			for _, workspace := range workspaces {
+				windows := windowsByWorkspace[workspace.ID]
+				sort.SliceStable(windows, func(i, j int) bool {
+					left := windowActivity(status.Host.ID, windows[i], activities)
+					right := windowActivity(status.Host.ID, windows[j], activities)
+					if !left.Equal(right) {
+						return left.After(right)
 					}
+					if windows[i].Name != windows[j].Name {
+						return windows[i].Name < windows[j].Name
+					}
+					return windows[i].ID < windows[j].ID
+				})
+				activity := workspace.LastUsedAt
+				if len(windows) > 0 {
+					activity = windowActivity(status.Host.ID, windows[0], activities)
+				}
+				workspaceScores = append(workspaceScores, workspaceScore{workspace: workspace, windows: windows, activity: activity})
+			}
+			sort.SliceStable(workspaceScores, func(i, j int) bool {
+				if !workspaceScores[i].activity.Equal(workspaceScores[j].activity) {
+					return workspaceScores[i].activity.After(workspaceScores[j].activity)
+				}
+				if workspaceScores[i].workspace.Name != workspaceScores[j].workspace.Name {
+					return workspaceScores[i].workspace.Name < workspaceScores[j].workspace.Name
+				}
+				return workspaceScores[i].workspace.ID < workspaceScores[j].workspace.ID
+			})
+			for _, workspace := range workspaceScores {
+				location.Workspaces = append(location.Workspaces, workspace.workspace)
+				location.Windows = append(location.Windows, workspace.windows...)
+				if workspace.activity.After(location.LastActivity) {
+					location.LastActivity = workspace.activity
 				}
 			}
 			scored = append(scored, score{location: location, activity: location.LastActivity})
 		}
 	}
 	sort.SliceStable(scored, func(i, j int) bool {
-		if scored[i].activity.Equal(scored[j].activity) {
+		leftHasWorkspaces := len(scored[i].location.Workspaces) > 0
+		rightHasWorkspaces := len(scored[j].location.Workspaces) > 0
+		if leftHasWorkspaces != rightHasWorkspaces {
+			return leftHasWorkspaces
+		}
+		if !scored[i].activity.Equal(scored[j].activity) {
+			return scored[i].activity.After(scored[j].activity)
+		}
+		if scored[i].location.Project.Name != scored[j].location.Project.Name {
 			return scored[i].location.Project.Name < scored[j].location.Project.Name
 		}
-		return scored[i].activity.After(scored[j].activity)
+		if scored[i].location.Host.Name != scored[j].location.Host.Name {
+			return scored[i].location.Host.Name < scored[j].location.Host.Name
+		}
+		return scored[i].location.Project.ID < scored[j].location.Project.ID
 	})
 	result := make([]ProjectLocation, len(scored))
 	for i := range scored {
 		result[i] = scored[i].location
 	}
 	return result
+}
+
+func windowActivity(hostID string, window Window, activities map[string]time.Time) time.Time {
+	if changed := activities[hostID+"/"+window.ID]; !changed.IsZero() {
+		return changed
+	}
+	if !window.LastUsedAt.IsZero() {
+		return window.LastUsedAt
+	}
+	return window.CreatedAt
 }
 
 type ProjectLocation struct {
