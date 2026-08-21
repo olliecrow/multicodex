@@ -204,7 +204,7 @@ func TestEditorControlsUseNavigationAndAVisibleActionMenu(t *testing.T) {
 		}
 	}
 	help := ansi.Strip(renderModal(modal{kind: "help", title: "Controls"}, helpWidth, (tuiModel{width: minimumWidth, height: minimumHeight}).bodyHeight()))
-	for _, want := range []string{"Click rows, actions, fields, choices, and buttons", "⌘B or Ctrl+G: focus the sidebar", "⌥↑/⌥↓: one screen", "scroll terminal history", "In the sidebar, Ctrl+C: quit", "● running · ○ stopped", "Need terminal Ctrl+G?", "[ Close ]"} {
+	for _, want := range []string{"Click rows, fields, buttons, or terminal to focus", "⌘B or Ctrl+G: focus the sidebar", "⌥↑/⌥↓: one screen", "scroll terminal history", "In the sidebar, Ctrl+C: quit", "● running · ○ stopped", "Need terminal Ctrl+G?", "[ Close ]"} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("minimum-width help truncated %q:\n%s", want, help)
 		}
@@ -724,13 +724,15 @@ func TestHelpShowsEveryCoreControlAtMinimumSize(t *testing.T) {
 	model := tuiModel{width: minimumWidth, height: minimumHeight, modal: &modal{kind: "help", title: "Controls"}}
 	view := ansi.Strip(model.View().Content)
 	for _, want := range []string{
-		"Click rows, actions, fields, choices, and buttons",
+		"Click rows, fields, buttons, or terminal to focus",
 		"⌘B or Ctrl+G: focus the sidebar",
 		"⌥↑/⌥↓: one screen",
 		"⌘↑/⌘↓: first/last",
 		"⌘N or Ctrl+N: create",
 		"⌘R: rename",
 		"⌘1–9 or ⌥1–9: open the numbered window",
+		"Copy: iTerm2 ⌥-drag",
+		"Paste: ⌘V",
 		"[ Close ]",
 	} {
 		if !strings.Contains(view, want) {
@@ -755,15 +757,45 @@ func TestCommandVRemainsTerminalInput(t *testing.T) {
 
 func TestOrdinaryPasteGoesToTerminal(t *testing.T) {
 	attachment := &Attachment{inputQueue: make(chan terminalInput, 1)}
-	model := tuiModel{width: minimumWidth, height: minimumHeight, attachment: attachment}
+	model := tuiModel{width: minimumWidth, height: minimumHeight, attachment: attachment, controlMode: true}
 	updated, cmd := model.Update(tea.PasteMsg{Content: "normal paste"})
 	got := updated.(tuiModel)
-	if cmd != nil || got.actionBusy || len(attachment.inputQueue) != 1 {
+	if cmd != nil || got.actionBusy || got.controlMode || got.message != "pasted into terminal; terminal focused" || len(attachment.inputQueue) != 1 {
 		t.Fatalf("ordinary paste was not sent to the terminal: %+v", got)
 	}
 	input := <-attachment.inputQueue
 	if input.kind != "paste" || input.text != "normal paste" {
 		t.Fatalf("terminal paste = %+v", input)
+	}
+}
+
+func TestPasteDoesNotPassThroughADialog(t *testing.T) {
+	attachment := &Attachment{inputQueue: make(chan terminalInput, 1)}
+	model := tuiModel{width: minimumWidth, height: minimumHeight, attachment: attachment, modal: &modal{kind: "help"}}
+	updated, cmd := model.Update(tea.PasteMsg{Content: "hidden paste"})
+	got := updated.(tuiModel)
+	if cmd != nil || got.modal == nil || got.message != "close the dialog before pasting" || len(attachment.inputQueue) != 0 {
+		t.Fatalf("dialog paste was not blocked clearly: %+v", got)
+	}
+}
+
+func TestPasteWithoutATerminalExplainsWhatToDo(t *testing.T) {
+	model := tuiModel{width: minimumWidth, height: minimumHeight, controlMode: true}
+	updated, cmd := model.Update(tea.PasteMsg{Content: "unused paste"})
+	got := updated.(tuiModel)
+	if cmd != nil || got.message != "open a terminal before pasting" {
+		t.Fatalf("missing-terminal paste guidance = %+v", got)
+	}
+}
+
+func TestITermFooterShowsNativeCopyAndPasteControls(t *testing.T) {
+	t.Setenv("TERM_PROGRAM", "iTerm.app")
+	if got := terminalFooter(); !strings.Contains(got, "⌥-drag: select") || !strings.Contains(got, "⌘C/⌘V: copy/paste") {
+		t.Fatalf("iTerm footer = %q", got)
+	}
+	t.Setenv("TERM_PROGRAM", "unknown")
+	if got := terminalFooter(); strings.Contains(got, "⌥-drag") || !strings.Contains(got, "Ctrl+G: sidebar") {
+		t.Fatalf("generic terminal footer = %q", got)
 	}
 }
 
