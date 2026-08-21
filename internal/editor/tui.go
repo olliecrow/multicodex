@@ -46,6 +46,7 @@ const (
 	confirmationWarning = "This cannot be undone. Cancel is selected by default."
 	modalInsetX         = 1
 	modalInsetY         = 1
+	recentOutputWindow  = 5 * time.Second
 )
 
 var (
@@ -101,6 +102,7 @@ type sidebarRow struct {
 	window    Window
 	slot      int
 	offline   bool
+	changedAt time.Time
 }
 
 type formField struct {
@@ -171,6 +173,7 @@ type tuiModel struct {
 	sidebarOffset     int
 	controlMode       bool
 	refreshing        bool
+	refreshPulse      bool
 	actionBusy        bool
 	cleanupBusy       bool
 	usageBusy         bool
@@ -300,6 +303,7 @@ func (m tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case refreshMsg:
 		m.refreshing = false
+		m.refreshPulse = !m.refreshPulse
 		m.mergeStatuses(msg.statuses)
 		m.rebuildRows()
 		m.flushPendingPaste(m.attachedID)
@@ -853,7 +857,7 @@ func (m tuiModel) View() tea.View {
 	sidebarLines, mainLines := strings.Split(sidebar, "\n"), strings.Split(main, "\n")
 	usageLines := m.renderUsageLines(layout.sidebarWidth)
 	bodyLines := []string{
-		frame("┌") + styledTitledSegment("Projects", layout.sidebarWidth) + frame("┬") + styledTitledSegment(m.mainTitle(), layout.terminalWidth) + frame("┐"),
+		frame("┌") + styledTitledSegment(m.sidebarTitle(), layout.sidebarWidth) + frame("┬") + styledTitledSegment(m.mainTitle(), layout.terminalWidth) + frame("┐"),
 	}
 	for i := 0; i < layout.bodyHeight; i++ {
 		switch {
@@ -899,12 +903,15 @@ func (m tuiModel) renderSidebar() string {
 				label += " · offline"
 			}
 		case "workspace":
-			label = "  ◇ " + row.workspace.Name
-		case "window":
-			marker := "●"
-			if !row.window.Alive {
-				marker = "○"
+			marker := "◇"
+			if row.offline {
+				marker = "?"
+			} else if row.workspace.Unavailable {
+				marker = "!"
 			}
+			label = "  " + marker + " " + row.workspace.Name
+		case "window":
+			marker := m.windowStatusMarker(row)
 			slot := "  "
 			if row.slot > 0 && row.slot <= 9 {
 				slot = fmt.Sprintf("%d ", row.slot)
@@ -921,11 +928,12 @@ func (m tuiModel) renderSidebar() string {
 			style = style.Reverse(true).Bold(true)
 		} else if index == m.selectedRow {
 			style = style.Foreground(lipgloss.Cyan).Bold(true)
+		} else if row.offline || row.workspace.Unavailable {
+			style = style.Foreground(lipgloss.Yellow)
+		} else if row.kind == "window" && m.windowStatusMarker(row) == "◉" {
+			style = style.Foreground(lipgloss.Cyan)
 		} else if row.kind == "project" {
 			style = style.Foreground(lipgloss.Cyan).Bold(true)
-			if row.offline {
-				style = style.Foreground(lipgloss.Yellow)
-			}
 		}
 		lines = append(lines, style.Render(label))
 	}
@@ -953,9 +961,17 @@ func (m tuiModel) renderMain() string {
 			case "project":
 				text = "Project selected\n\nPress Enter to create a named workspace.\nIts first terminal opens automatically.\n\nOr click Actions."
 			case "workspace":
-				text = "Workspace selected\n\nPress Enter to create and open a new terminal.\nChoose Rename from Actions to change its name."
+				if row.workspace.Unavailable {
+					text = "Workspace directory is unavailable\n\nIts terminals remain managed for recovery.\nDelete this workspace when you no longer need it."
+				} else {
+					text = "Workspace selected\n\nPress Enter to create and open a new terminal.\nChoose Rename from Actions to change its name."
+				}
 			case "window":
-				text = "No terminal is open\n\nPress Enter or click the selected window to open it.\nPress Ctrl+N for another terminal."
+				if row.workspace.Unavailable {
+					text = "Workspace directory is unavailable\n\nOpen this terminal to recover what remains.\nDelete the workspace when you no longer need it."
+				} else {
+					text = "No terminal is open\n\nPress Enter or click the selected window to open it.\nPress Ctrl+N for another terminal."
+				}
 			}
 		}
 		return padInsetBlock(text, width, height, 1, 1)
@@ -998,9 +1014,54 @@ func (m tuiModel) mainTitle() string {
 		return "Dialog"
 	}
 	if row, ok := m.currentAttachedRow(); ok {
+		if row.workspace.Unavailable {
+			return "Terminal · workspace unavailable"
+		}
 		return "Terminal · " + row.window.Name
 	}
 	return "Terminal"
+}
+
+func (m tuiModel) sidebarTitle() string {
+	if len(m.statuses) == 0 {
+		if m.refreshing {
+			return "Projects · connecting"
+		}
+		return "Projects"
+	}
+	if m.refreshing {
+		return "Projects · checking"
+	}
+	offline := 0
+	for _, status := range m.statuses {
+		if status.Error != "" {
+			offline++
+		}
+	}
+	if offline > 0 {
+		pulse := "·"
+		if m.refreshPulse {
+			pulse = "•"
+		}
+		return fmt.Sprintf("Projects · %d offline %s", offline, pulse)
+	}
+	if m.refreshPulse {
+		return "Projects · live •"
+	}
+	return "Projects · live ·"
+}
+
+func (m tuiModel) windowStatusMarker(row sidebarRow) string {
+	switch {
+	case row.offline:
+		return "?"
+	case !row.window.Alive:
+		return "○"
+	case !row.changedAt.IsZero() && time.Since(row.changedAt) <= recentOutputWindow:
+		return "◉"
+	default:
+		return "●"
+	}
 }
 
 func renderModal(modal modal, width, height int) string {
@@ -1072,7 +1133,8 @@ func helpModalContent() []string {
 		"  ⌘R: rename · ? or ⌘?: Help · Esc: terminal",
 		"  ⌘1–9 or ⌥1–9: open the numbered window",
 		"  In the sidebar, Ctrl+C: quit",
-		"Status: ● running · ○ stopped",
+		"Windows: ◉ output · ● running · ○ stopped · ? offline",
+		"Workspace: ! directory unavailable",
 		"Need terminal Ctrl+G? Use Actions → Send Ctrl+G.",
 		closeButtonLabel + " · Enter, ?, or Esc: close",
 	}
@@ -1117,6 +1179,10 @@ func modalChoiceButtonLine() string {
 func (m *tuiModel) rebuildRows() {
 	state := m.manager.State()
 	locations := sortedProjectsByActivity(state, m.statuses)
+	activities := make(map[string]time.Time, len(state.Activities))
+	for _, activity := range state.Activities {
+		activities[activity.HostID+"/"+activity.WindowID] = activity.ChangedAt
+	}
 	selectedID := ""
 	if m.selectedRow >= 0 && m.selectedRow < len(m.rows) {
 		selectedID = rowIdentity(m.rows[m.selectedRow])
@@ -1126,13 +1192,13 @@ func (m *tuiModel) rebuildRows() {
 	for _, location := range locations {
 		rows = append(rows, sidebarRow{kind: "project", host: location.Host, project: location.Project, offline: location.HostError != ""})
 		for _, workspace := range location.Workspaces {
-			rows = append(rows, sidebarRow{kind: "workspace", host: location.Host, project: location.Project, workspace: workspace})
+			rows = append(rows, sidebarRow{kind: "workspace", host: location.Host, project: location.Project, workspace: workspace, offline: location.HostError != ""})
 			for _, window := range location.Windows {
 				if window.WorkspaceID != workspace.ID {
 					continue
 				}
 				slot++
-				rows = append(rows, sidebarRow{kind: "window", host: location.Host, project: location.Project, workspace: workspace, window: window, slot: slot})
+				rows = append(rows, sidebarRow{kind: "window", host: location.Host, project: location.Project, workspace: workspace, window: window, slot: slot, offline: location.HostError != "", changedAt: activities[location.Host.ID+"/"+window.ID]})
 			}
 		}
 	}

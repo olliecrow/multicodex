@@ -174,6 +174,9 @@ func (s *hostStore) validateRegistry(registry hostRegistry) error {
 			}
 			nonGitProjects[workspace.ProjectID] = true
 		}
+		if workspace.Unavailable {
+			return errors.New("editor host state contains transient workspace metadata")
+		}
 		if workspace.CreatePending && workspace.DeletePending {
 			return errors.New("editor host state contains invalid workspace deletion metadata")
 		}

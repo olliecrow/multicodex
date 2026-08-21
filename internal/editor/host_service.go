@@ -163,6 +163,8 @@ func (s *HostService) Snapshot(ctx context.Context) (HostSnapshot, error) {
 	snapshot := HostSnapshot{Protocol: hostProtocol}
 	for _, workspace := range registry.Workspaces {
 		if !workspace.CreatePending {
+			info, err := os.Stat(workspace.Path)
+			workspace.Unavailable = err != nil || !info.IsDir()
 			snapshot.Workspaces = append(snapshot.Workspaces, workspace)
 		}
 	}
