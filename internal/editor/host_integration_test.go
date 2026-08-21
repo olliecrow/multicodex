@@ -236,6 +236,41 @@ func TestHostServiceGitWindowReconnectAndSafeDeletion(t *testing.T) {
 	}
 }
 
+func TestSnapshotKeepsAWindowVisibleWhenItsWorkspaceDirectoryIsMissing(t *testing.T) {
+	requireCommands(t, "git", "tmux")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	project := syntheticGitProject(t)
+	service, err := NewHostService(privateTestHome(t), mustID(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer killTestServer(service)
+	workspace, err := service.CreateWorkspace(ctx, CreateWorkspaceRequest{ProjectID: mustID(t), ProjectPath: project, Name: "Missing directory"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	window, err := service.CreateWindow(ctx, CreateWindowRequest{WorkspaceID: workspace.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runTestCommand(t, "git", "-C", project, "worktree", "remove", "--force", workspace.Path)
+
+	snapshot, err := service.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Workspaces) != 1 || !snapshot.Workspaces[0].Unavailable {
+		t.Fatalf("missing workspace was not reported as unavailable: %+v", snapshot.Workspaces)
+	}
+	if len(snapshot.Windows) != 1 || snapshot.Windows[0].ID != window.ID || !snapshot.Windows[0].Alive || snapshot.Windows[0].PaneHash == "" {
+		t.Fatalf("live terminal was not retained for recovery: %+v", snapshot.Windows)
+	}
+	if result, err := service.DeleteWorkspace(ctx, DeleteRequest{ID: workspace.ID, Force: true}); err != nil || !result.Deleted {
+		t.Fatalf("cleanup missing workspace: %+v, %v", result, err)
+	}
+}
+
 func TestGitWorkspaceUsesCachedRemoteBranchWhenFetchIsUnavailable(t *testing.T) {
 	requireCommands(t, "git")
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)

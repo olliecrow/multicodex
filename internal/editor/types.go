@@ -82,6 +82,7 @@ type Workspace struct {
 	LastUsedAt    time.Time `json:"last_used_at"`
 	CreatePending bool      `json:"create_pending,omitempty"`
 	DeletePending bool      `json:"delete_pending,omitempty"`
+	Unavailable   bool      `json:"unavailable,omitempty"`
 }
 
 type Window struct {

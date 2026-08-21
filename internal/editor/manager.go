@@ -531,7 +531,7 @@ func validateHostSnapshot(host Host, snapshot HostSnapshot) error {
 }
 
 func validateCreatedWorkspace(request CreateWorkspaceRequest, workspace Workspace) error {
-	if validateID(workspace.ID, "workspace identifier") != nil || workspace.ProjectID != request.ProjectID || workspace.ProjectPath != request.ProjectPath || workspace.Name != request.Name || validateRemotePath(workspace.Path) != nil || workspace.CreatePending || workspace.DeletePending {
+	if validateID(workspace.ID, "workspace identifier") != nil || workspace.ProjectID != request.ProjectID || workspace.ProjectPath != request.ProjectPath || workspace.Name != request.Name || validateRemotePath(workspace.Path) != nil || workspace.CreatePending || workspace.DeletePending || workspace.Unavailable {
 		return errors.New("editor host returned unsafe workspace metadata")
 	}
 	if workspace.Git {
