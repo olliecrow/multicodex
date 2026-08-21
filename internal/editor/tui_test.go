@@ -66,6 +66,72 @@ func TestSidebarShowsProjectsGroupsWorkspacesAndUsesDynamicSlots(t *testing.T) {
 	}
 }
 
+func TestSidebarHasNoManagedWindowLimit(t *testing.T) {
+	hostID := "111111111111111111111111"
+	projectID := "222222222222222222222222"
+	workspaceID := "333333333333333333333333"
+	project := Project{ID: projectID, Name: "Project", Path: "/srv/project"}
+	host := Host{ID: hostID, Name: "Host", Projects: []Project{project}}
+	windows := make([]Window, 12)
+	for i := range windows {
+		windows[i] = Window{ID: fmt.Sprintf("%024d", i+1), WorkspaceID: workspaceID, Name: fmt.Sprintf("Terminal %d", i+1), Alive: true}
+	}
+	model := tuiModel{
+		manager: &Manager{state: ClientState{Version: stateVersion, InstanceID: testInstanceID, Hosts: []Host{host}}},
+		statuses: []HostStatus{{Host: host, Snapshot: HostSnapshot{
+			Workspaces: []Workspace{{ID: workspaceID, ProjectID: projectID, Name: "Work"}},
+			Windows:    windows,
+		}}},
+		selectedRow: -1,
+	}
+	model.rebuildRows()
+	if len(model.rows) != 14 {
+		t.Fatalf("sidebar has %d rows for 12 windows, want 14: %+v", len(model.rows), model.rows)
+	}
+	if got := model.rows[len(model.rows)-1].slot; got != 12 {
+		t.Fatalf("last dynamic slot = %d, want 12", got)
+	}
+}
+
+func TestSidebarStatusShowsLiveOutputRunningStoppedAndFailures(t *testing.T) {
+	now := time.Now()
+	model := tuiModel{}
+	tests := []struct {
+		row  sidebarRow
+		want string
+	}{
+		{sidebarRow{window: Window{Alive: true}, changedAt: now}, "◉"},
+		{sidebarRow{window: Window{Alive: true}}, "●"},
+		{sidebarRow{window: Window{}}, "○"},
+		{sidebarRow{offline: true, window: Window{Alive: true}}, "?"},
+		{sidebarRow{workspace: Workspace{Unavailable: true}, window: Window{Alive: true}}, "●"},
+	}
+	for _, test := range tests {
+		if got := model.windowStatusMarker(test.row); got != test.want {
+			t.Fatalf("window status marker = %q, want %q for %+v", got, test.want, test.row)
+		}
+	}
+}
+
+func TestSidebarLivePulseAdvancesAfterEachRefresh(t *testing.T) {
+	host := Host{ID: localHostID, Name: localHostName}
+	model := tuiModel{manager: &Manager{state: ClientState{Version: stateVersion, InstanceID: testInstanceID, Hosts: []Host{host}}}, refreshing: true}
+	updated, _ := model.Update(refreshMsg{statuses: []HostStatus{{Host: host}}})
+	first := updated.(tuiModel)
+	if title := first.sidebarTitle(); title != "Projects · live •" {
+		t.Fatalf("first completed refresh title = %q", title)
+	}
+	updated, _ = first.Update(refreshMsg{statuses: []HostStatus{{Host: host}}})
+	second := updated.(tuiModel)
+	if title := second.sidebarTitle(); title != "Projects · live ·" {
+		t.Fatalf("second completed refresh title = %q", title)
+	}
+	second.statuses[0].Error = "offline"
+	if title := second.sidebarTitle(); title != "Projects · 1 offline ·" {
+		t.Fatalf("offline refresh title = %q", title)
+	}
+}
+
 func TestWindowSlotShortcutsAreDynamicAndDoNotStealPlainTerminalDigits(t *testing.T) {
 	if got := windowSlotKey(tea.KeyPressMsg{Code: '3'}); got != 0 {
 		t.Fatalf("plain terminal digit selected slot %d", got)
@@ -909,8 +975,8 @@ func TestOfflineHostRemainsVisibleWithLastSnapshot(t *testing.T) {
 	state := ClientState{Version: stateVersion, InstanceID: testInstanceID, Hosts: []Host{{ID: localHostID, Name: localHostName}, host}}
 	model := tuiModel{manager: &Manager{state: state}, statuses: []HostStatus{{Host: host, Error: "offline", Snapshot: HostSnapshot{Workspaces: []Workspace{{ID: "333333333333333333333333", ProjectID: host.Projects[0].ID, Name: "Work"}}}}}}
 	model.rebuildRows()
-	if len(model.rows) < 1 || !model.rows[0].offline {
-		t.Fatalf("offline project not retained: %+v", model.rows)
+	if len(model.rows) != 2 || !model.rows[0].offline || !model.rows[1].offline {
+		t.Fatalf("offline project and workspace were not retained and marked: %+v", model.rows)
 	}
 }
 
