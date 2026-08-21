@@ -31,13 +31,6 @@ jobs:
           go-version: '1.26.6'
           cache: true
 
-      - name: Set up Homebrew
-        if: runner.os == 'macOS'
-        uses: Homebrew/actions/setup-homebrew@fd832223f9f99ebf0244dd20658680e5d4aca049 # 2026.08.03.2
-        with:
-          core: true
-          cask: false
-
       - name: Install tmux integration-test prerequisite (Linux)
         if: runner.os == 'Linux'
         run: |
