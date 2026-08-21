@@ -3,11 +3,103 @@ package editor
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 	"unicode/utf8"
 )
+
+func TestActivityOrderingKeepsPopulatedProjectsFirst(t *testing.T) {
+	hostID := "111111111111111111111111"
+	oldProjectID := "222222222222222222222222"
+	newProjectID := "333333333333333333333333"
+	emptyProjectID := "444444444444444444444444"
+	oldWorkspaceID := "555555555555555555555555"
+	newWorkspaceID := "666666666666666666666666"
+	oldWindowID := "777777777777777777777777"
+	newWindowID := "888888888888888888888888"
+	oldActivity := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	newActivity := oldActivity.Add(time.Hour)
+	host := Host{ID: hostID, Name: "Build", Projects: []Project{
+		{ID: emptyProjectID, Name: "A empty", Path: "/srv/empty"},
+		{ID: oldProjectID, Name: "B older", Path: "/srv/older"},
+		{ID: newProjectID, Name: "Z newer", Path: "/srv/newer"},
+	}}
+	status := HostStatus{Host: host, Snapshot: HostSnapshot{
+		Workspaces: []Workspace{
+			{ID: oldWorkspaceID, ProjectID: oldProjectID, Name: "Old work", LastUsedAt: oldActivity},
+			{ID: newWorkspaceID, ProjectID: newProjectID, Name: "New work", LastUsedAt: newActivity},
+		},
+		Windows: []Window{
+			{ID: oldWindowID, WorkspaceID: oldWorkspaceID, Name: "Old terminal", LastUsedAt: oldActivity},
+			{ID: newWindowID, WorkspaceID: newWorkspaceID, Name: "New terminal", LastUsedAt: newActivity},
+		},
+	}}
+	state := ClientState{Activities: []Activity{
+		{HostID: hostID, WindowID: oldWindowID, ChangedAt: oldActivity},
+		{HostID: hostID, WindowID: newWindowID, ChangedAt: newActivity},
+	}}
+
+	locations := sortedProjectsByActivity(state, []HostStatus{status})
+	got := []string{locations[0].Project.Name, locations[1].Project.Name, locations[2].Project.Name}
+	want := []string{"Z newer", "B older", "A empty"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("project order = %v, want %v", got, want)
+	}
+}
+
+func TestActivityOrderingSortsWorkspacesAndWindowsWithoutMutatingSnapshot(t *testing.T) {
+	hostID := "111111111111111111111111"
+	projectID := "222222222222222222222222"
+	oldWorkspaceID := "333333333333333333333333"
+	newWorkspaceID := "444444444444444444444444"
+	emptyWorkspaceID := "555555555555555555555555"
+	oldWindowID := "666666666666666666666666"
+	newWindowID := "777777777777777777777777"
+	newestWindowID := "888888888888888888888888"
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	status := HostStatus{
+		Host: Host{ID: hostID, Name: "Build", Projects: []Project{{ID: projectID, Name: "Project", Path: "/srv/project"}}},
+		Snapshot: HostSnapshot{
+			Workspaces: []Workspace{
+				{ID: oldWorkspaceID, ProjectID: projectID, Name: "Old work", LastUsedAt: base},
+				{ID: emptyWorkspaceID, ProjectID: projectID, Name: "Empty work", LastUsedAt: base.Add(4 * time.Hour)},
+				{ID: newWorkspaceID, ProjectID: projectID, Name: "New work", LastUsedAt: base.Add(time.Hour)},
+			},
+			Windows: []Window{
+				{ID: oldWindowID, WorkspaceID: oldWorkspaceID, Name: "Old terminal", LastUsedAt: base},
+				{ID: newWindowID, WorkspaceID: newWorkspaceID, Name: "Second terminal", LastUsedAt: base.Add(time.Hour)},
+				{ID: newestWindowID, WorkspaceID: newWorkspaceID, Name: "First terminal", LastUsedAt: base.Add(2 * time.Hour)},
+			},
+		},
+	}
+	originalWorkspaces := append([]Workspace(nil), status.Snapshot.Workspaces...)
+	originalWindows := append([]Window(nil), status.Snapshot.Windows...)
+	state := ClientState{Activities: []Activity{
+		{HostID: hostID, WindowID: oldWindowID, ChangedAt: base},
+		{HostID: hostID, WindowID: newWindowID, ChangedAt: base.Add(time.Hour)},
+		{HostID: hostID, WindowID: newestWindowID, ChangedAt: base.Add(2 * time.Hour)},
+	}}
+
+	locations := sortedProjectsByActivity(state, []HostStatus{status})
+	if len(locations) != 1 {
+		t.Fatalf("locations = %+v", locations)
+	}
+	gotWorkspaces := []string{locations[0].Workspaces[0].ID, locations[0].Workspaces[1].ID, locations[0].Workspaces[2].ID}
+	wantWorkspaces := []string{emptyWorkspaceID, newWorkspaceID, oldWorkspaceID}
+	if !reflect.DeepEqual(gotWorkspaces, wantWorkspaces) {
+		t.Fatalf("workspace order = %v, want %v", gotWorkspaces, wantWorkspaces)
+	}
+	gotWindows := []string{locations[0].Windows[0].ID, locations[0].Windows[1].ID, locations[0].Windows[2].ID}
+	wantWindows := []string{newestWindowID, newWindowID, oldWindowID}
+	if !reflect.DeepEqual(gotWindows, wantWindows) {
+		t.Fatalf("window order = %v, want %v", gotWindows, wantWindows)
+	}
+	if !reflect.DeepEqual(status.Snapshot.Workspaces, originalWorkspaces) || !reflect.DeepEqual(status.Snapshot.Windows, originalWindows) {
+		t.Fatal("activity ordering mutated the host snapshot")
+	}
+}
 
 func TestCleanupResultValidationRejectsUnsafeHostData(t *testing.T) {
 	if err := validateCleanupResult(CleanupResult{Skipped: []string{"busy but safe"}}); err != nil {
