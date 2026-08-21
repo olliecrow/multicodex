@@ -94,6 +94,15 @@ func TestHostServiceGitWindowReconnectAndSafeDeletion(t *testing.T) {
 	if got := commandOutput(t, "tmux", "-L", service.socketName(), "show-options", "-g", "-v", "mouse"); got != "on" {
 		t.Fatalf("mouse = %q, want on", got)
 	}
+	if got := commandOutput(t, "tmux", "-L", service.socketName(), "show-options", "-g", "-v", "mode-keys"); got != "emacs" {
+		t.Fatalf("mode-keys = %q, want emacs", got)
+	}
+	copyKeys := commandOutput(t, "tmux", "-L", service.socketName(), "list-keys", "-T", "copy-mode")
+	for _, want := range []string{"M-Up", "send-keys -X page-up", "M-Down", "send-keys -X page-down"} {
+		if !strings.Contains(copyKeys, want) {
+			t.Fatalf("copy-mode keys omit %q", want)
+		}
+	}
 	for _, option := range []string{"prefix", "prefix2"} {
 		if got := commandOutput(t, "tmux", "-L", service.socketName(), "show-options", "-g", "-v", option); got != "None" {
 			t.Fatalf("%s = %q, want None", option, got)

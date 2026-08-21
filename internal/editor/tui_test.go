@@ -103,9 +103,10 @@ func TestEditorControlsUseNavigationAndAVisibleActionMenu(t *testing.T) {
 	}
 	updated, cmd = got.handleKey(tea.KeyPressMsg{Code: '?', Text: "?"})
 	got = updated.(tuiModel)
-	if cmd != nil || got.modal != nil {
-		t.Fatalf("legacy help key opened an action: %+v", got)
+	if cmd != nil || got.modal == nil || got.modal.kind != "help" {
+		t.Fatalf("sidebar ? did not open Help: %+v", got)
 	}
+	got.modal = nil
 	updated, cmd = got.handleKey(tea.KeyPressMsg{Code: '3', Text: "3"})
 	got = updated.(tuiModel)
 	if cmd != nil || got.modal != nil {
@@ -137,10 +138,76 @@ func TestEditorControlsUseNavigationAndAVisibleActionMenu(t *testing.T) {
 		}
 	}
 	help := ansi.Strip(renderModal(modal{kind: "help", title: "Controls"}, helpWidth, (tuiModel{width: minimumWidth, height: minimumHeight}).bodyHeight()))
-	for _, want := range []string{"Click project, workspace, or window rows", "Ctrl+N: create for selection", "scroll terminal history", "In the sidebar, Ctrl+C: quit", "● running · ○ stopped", "Need terminal Ctrl+G?", "[ Close ]"} {
+	for _, want := range []string{"Click rows, actions, fields, choices, and buttons", "⌘B or Ctrl+G: focus the sidebar", "⌥↑/⌥↓: one screen", "scroll terminal history", "In the sidebar, Ctrl+C: quit", "● running · ○ stopped", "Need terminal Ctrl+G?", "[ Close ]"} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("minimum-width help truncated %q:\n%s", want, help)
 		}
+	}
+}
+
+func TestMacBookSidebarNavigationNeedsNoFunctionOrNavigationKeys(t *testing.T) {
+	rows := make([]sidebarRow, 30)
+	for i := range rows {
+		rows[i] = sidebarRow{kind: "project", project: Project{ID: fmt.Sprintf("%024d", i+1), Name: fmt.Sprintf("Project %d", i+1)}}
+	}
+	model := tuiModel{width: 100, height: 30, controlMode: true, rows: rows, selectedRow: 10}
+	page := max(1, model.sidebarHeight()-1)
+
+	updated, cmd := model.handleKey(tea.KeyPressMsg{Code: tea.KeyDown, Mod: tea.ModAlt})
+	got := updated.(tuiModel)
+	want := min(len(rows)-1, 10+page)
+	if cmd != nil || got.selectedRow != want {
+		t.Fatalf("Option+Down selected row %d, want %d", got.selectedRow, want)
+	}
+
+	updated, cmd = got.handleKey(tea.KeyPressMsg{Code: tea.KeyDown, Mod: tea.ModSuper})
+	got = updated.(tuiModel)
+	if cmd != nil || got.selectedRow != len(rows)-1 {
+		t.Fatalf("Command+Down selected row %d", got.selectedRow)
+	}
+
+	updated, cmd = got.handleKey(tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModSuper})
+	got = updated.(tuiModel)
+	if cmd != nil || got.selectedRow != 0 {
+		t.Fatalf("Command+Up selected row %d", got.selectedRow)
+	}
+}
+
+func TestMacBookEditorShortcutsHaveVisibleKeyFallbacks(t *testing.T) {
+	model := tuiModel{width: minimumWidth, height: minimumHeight}
+	updated, cmd := model.handleKey(tea.KeyPressMsg{Code: 'b', Text: "b", Mod: tea.ModSuper})
+	got := updated.(tuiModel)
+	if cmd != nil || !got.controlMode {
+		t.Fatalf("Command+B did not focus sidebar: %+v", got)
+	}
+
+	updated, cmd = got.handleKey(tea.KeyPressMsg{Code: '?', BaseCode: '/', Text: "?", Mod: tea.ModShift})
+	got = updated.(tuiModel)
+	if cmd != nil || got.modal == nil || got.modal.kind != "help" {
+		t.Fatalf("sidebar ? did not open Help: %+v", got)
+	}
+
+	updated, cmd = got.handleModalKey(tea.KeyPressMsg{Code: '.', Text: ".", Mod: tea.ModSuper})
+	got = updated.(tuiModel)
+	if cmd != nil || got.modal != nil {
+		t.Fatalf("Command+Period did not close dialog: %+v", got)
+	}
+
+	workspace := Workspace{ID: "222222222222222222222222", Name: "Work"}
+	got.rows = []sidebarRow{{kind: "workspace", workspace: workspace}}
+	got.selectedRow = 0
+	updated, cmd = got.handleKey(tea.KeyPressMsg{Code: 'r', Text: "r", Mod: tea.ModSuper})
+	got = updated.(tuiModel)
+	if cmd != nil || got.modal == nil || got.modal.action != "rename_workspace" {
+		t.Fatalf("Command+R did not open Rename: %+v", got)
+	}
+
+	terminal := &Attachment{inputQueue: make(chan terminalInput, 1)}
+	model = tuiModel{width: minimumWidth, height: minimumHeight, attachment: terminal}
+	updated, cmd = model.handleKey(tea.KeyPressMsg{Code: 'n', Text: "n", Mod: tea.ModSuper})
+	got = updated.(tuiModel)
+	if cmd != nil || len(terminal.inputQueue) != 1 || got.controlMode {
+		t.Fatalf("terminal Command+N was stolen by editor controls: %+v", got)
 	}
 }
 
@@ -193,7 +260,7 @@ func TestSidebarSelectionProvidesContextualCreateAndRename(t *testing.T) {
 	model.selectedRow = 2
 	model.openRename()
 	if model.modal == nil || model.modal.action != "rename_window" || len(model.modal.fields) != 1 || model.modal.fields[0].value != "Terminal" {
-		t.Fatalf("F2 rename was not prefilled from the selected window: %+v", model.modal)
+		t.Fatalf("rename was not prefilled from the selected window: %+v", model.modal)
 	}
 
 	model.modal = nil
@@ -510,7 +577,7 @@ func TestMinimumViewportShowsTitleUsageSidebarAndFooter(t *testing.T) {
 	state := ClientState{Version: stateVersion, InstanceID: testInstanceID, Hosts: []Host{{ID: localHostID, Name: localHostName}}}
 	model := tuiModel{manager: &Manager{state: state}, width: minimumWidth, height: minimumHeight, usage: accountUsageState{accounts: []accountUsage{{label: "alpha", usedPercent: 42, available: true}}}, message: "ready"}
 	view := ansi.Strip(model.View().Content)
-	for _, want := range []string{"multicodex editor", "[ Actions ]", "[ Help ]", "Codex weekly use", "alpha", "42% used", "Projects", "No projects", "Set up your first terminal", "Click Actions, or Ctrl+G then Tab", "ready", "┌", "┬", "├", "┤", "┴"} {
+	for _, want := range []string{"multicodex editor", "[ Actions ]", "[ Help ]", "Codex weekly use", "alpha", "42% used", "Projects", "No projects", "Set up your first terminal", "Click Actions, or ⌘B/Ctrl+G then Tab", "ready", "┌", "┬", "├", "┤", "┴"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("missing %q in view:\n%s", want, view)
 		}
@@ -580,10 +647,10 @@ func TestLongFocusLabelNeverHidesHeaderButtons(t *testing.T) {
 
 func TestHelpOpensFromTerminalInputWithoutEditorFocus(t *testing.T) {
 	model := tuiModel{width: minimumWidth, height: minimumHeight}
-	updated, cmd := model.handleKey(tea.KeyPressMsg{Code: tea.KeyF1})
+	updated, cmd := model.handleKey(tea.KeyPressMsg{Code: '?', BaseCode: '/', Text: "?", Mod: tea.ModShift | tea.ModSuper})
 	got := updated.(tuiModel)
 	if cmd != nil || got.modal == nil || got.modal.kind != "help" {
-		t.Fatalf("global F1 did not open help: %+v", got)
+		t.Fatalf("global Command+? did not open help: %+v", got)
 	}
 }
 
@@ -591,12 +658,13 @@ func TestHelpShowsEveryCoreControlAtMinimumSize(t *testing.T) {
 	model := tuiModel{width: minimumWidth, height: minimumHeight, modal: &modal{kind: "help", title: "Controls"}}
 	view := ansi.Strip(model.View().Content)
 	for _, want := range []string{
-		"Click project, workspace, or window rows",
-		"Ctrl+G: focus the sidebar",
-		"Enter: open or create",
-		"Ctrl+N: create for selection",
-		"F2: rename selection",
-		"Alt/⌘+1–9: open the numbered window",
+		"Click rows, actions, fields, choices, and buttons",
+		"⌘B or Ctrl+G: focus the sidebar",
+		"⌥↑/⌥↓: one screen",
+		"⌘↑/⌘↓: first/last",
+		"⌘N or Ctrl+N: create",
+		"⌘R: rename",
+		"⌘1–9 or ⌥1–9: open the numbered window",
 		"[ Close ]",
 	} {
 		if !strings.Contains(view, want) {

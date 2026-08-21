@@ -1321,6 +1321,11 @@ func (s *HostService) configureTmux(ctx context.Context) error {
 			return errors.New("configure tmux session")
 		}
 	}
+	for _, binding := range [][2]string{{"M-Up", "page-up"}, {"M-Down", "page-down"}} {
+		if _, err := s.tmux(ctx, "bind-key", "-T", "copy-mode", binding[0], "send-keys", "-X", binding[1]); err != nil {
+			return errors.New("configure tmux history keys")
+		}
+	}
 	if _, err := s.tmux(ctx, "set-option", "-s", "extended-keys", "on"); err != nil {
 		return errors.New("configure tmux extended keys")
 	}
@@ -1338,6 +1343,7 @@ func tmuxGlobalSettings() [][2]string {
 		{"prefix2", "None"},
 		{"status", "off"},
 		{"history-limit", strconv.Itoa(historyLimit)},
+		{"mode-keys", "emacs"},
 		{"remain-on-exit", "on"},
 		{"mouse", "on"},
 		{"focus-events", "on"},
