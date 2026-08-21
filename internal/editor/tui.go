@@ -1098,7 +1098,7 @@ func (m *tuiModel) rebuildRows() {
 	m.selectedRow = -1
 	if m.selectOnRefreshID != "" {
 		for i, row := range rows {
-			if row.window.ID == m.selectOnRefreshID {
+			if rowIdentity(row) == m.selectOnRefreshID {
 				m.selectedRow = i
 				m.selectOnRefreshID = ""
 				break
@@ -1561,16 +1561,18 @@ func (m tuiModel) handleActionResult(msg actionResultMsg) (tea.Model, tea.Cmd) {
 		m.message = "added host " + value.Name
 	case Project:
 		m.message = "added project " + value.Name
+		m.selectOnRefreshID = "p/" + value.ID
+		m.controlMode = true
 	case createdWorkspace:
 		m.message = "created workspace " + value.workspace.Name + " with " + value.window.Name
-		m.selectOnRefreshID = value.window.ID
+		m.selectOnRefreshID = "w/" + value.window.ID
 		if host, ok := m.manager.findHost(msg.hostID); ok {
 			cmd := m.requestAttach(sidebarRow{kind: "window", host: host, workspace: value.workspace, window: value.window})
 			return m, tea.Batch(m.startRefresh(), cmd)
 		}
 	case Window:
 		m.message = "created window " + value.Name
-		m.selectOnRefreshID = value.ID
+		m.selectOnRefreshID = "w/" + value.ID
 		if host, ok := m.manager.findHost(msg.hostID); ok {
 			cmd := m.requestAttach(sidebarRow{kind: "window", host: host, window: value})
 			return m, tea.Batch(m.startRefresh(), cmd)
