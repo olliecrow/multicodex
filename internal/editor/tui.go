@@ -444,9 +444,6 @@ func (m tuiModel) handleKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.modal = &modal{kind: "help", title: "Controls"}
 		return m, nil
 	}
-	if key.Keystroke() == "super+v" || key.Keystroke() == "shift+super+v" {
-		return m.startClipboardAttachment()
-	}
 	if slot := windowSlotKey(key); slot > 0 {
 		return m.selectWindowSlot(slot)
 	}
@@ -828,6 +825,8 @@ func (m tuiModel) View() tea.View {
 	footerLeft := "Terminal · Ctrl+G: sidebar · F1 Help"
 	if m.controlMode {
 		footerLeft = m.sidebarFooter()
+	} else if len(m.rows) == 0 {
+		footerLeft = "No projects · Click Actions, or Ctrl+G then Tab · F1 Help"
 	} else if m.attachment == nil {
 		footerLeft = "No terminal · Select a project or workspace, then Enter · F1 Help"
 	}
@@ -1025,7 +1024,8 @@ func helpModalContent() []string {
 		"Keyboard",
 		"  Ctrl+G: focus the sidebar",
 		"  ↑/↓: select · Enter: open or create · Tab: Actions",
-		"  Ctrl+N: create for selection · F2: rename selection",
+		"  Ctrl+N: create for selection",
+		"  F2: rename selection",
 		"  F1: Help · Esc: return to terminal",
 		"  In the sidebar, Ctrl+C: quit",
 		"  Home/End/Page Up/Page Down: move through list",

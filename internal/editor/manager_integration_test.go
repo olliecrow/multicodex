@@ -96,6 +96,76 @@ func TestManagerUsesLongLivedLocalProtocolAndRecoversSnapshot(t *testing.T) {
 	}
 }
 
+func TestManagerRestartKeepsSelectionAndRunningTerminal(t *testing.T) {
+	requireCommands(t, "git", "tmux")
+	home := privateTestHome(t)
+	t.Setenv("MULTICODEX_HOME", home)
+	projectPath := filepath.Join(t.TempDir(), "notes")
+	if err := os.Mkdir(projectPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewManager(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close()
+	instanceID := manager.State().InstanceID
+	service, err := NewHostService(home, instanceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer killTestServer(service)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if err := manager.CheckLocal(ctx); err != nil {
+		t.Fatal(err)
+	}
+	project, err := manager.AddProject(ctx, localHostID, "Notes", projectPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace, window, err := manager.CreateWorkspaceWithWindow(ctx, localHostID, CreateWorkspaceRequest{ProjectID: project.ID, ProjectPath: project.Path, Name: "Upgrade check"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.SetSelectedWindow(window.ID); err != nil {
+		t.Fatal(err)
+	}
+	panePID := commandOutput(t, "tmux", "-L", service.socketName(), "display-message", "-p", "-t", window.Session, "#{pane_pid}")
+	if err := manager.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	restarted, err := NewManager(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restarted.Close()
+	if err := restarted.CheckLocal(ctx); err != nil {
+		t.Fatal(err)
+	}
+	statuses := restarted.Refresh(ctx)
+	if len(statuses) != 1 || statuses[0].Error != "" || len(statuses[0].Snapshot.Windows) != 1 || statuses[0].Snapshot.Windows[0].ID != window.ID {
+		t.Fatalf("restart snapshot = %+v", statuses)
+	}
+	if restarted.State().SelectedWindowID != window.ID {
+		t.Fatalf("restart selection = %q, want %q", restarted.State().SelectedWindowID, window.ID)
+	}
+	if got := commandOutput(t, "tmux", "-L", service.socketName(), "display-message", "-p", "-t", window.Session, "#{pane_pid}"); got != panePID {
+		t.Fatalf("terminal process changed across restart: %s -> %s", panePID, got)
+	}
+	attachment, err := restarted.AttachWindow(ctx, localHostID, statuses[0].Snapshot.Windows[0], 80, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := attachment.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if result, err := restarted.DeleteWorkspace(ctx, localHostID, DeleteRequest{ID: workspace.ID, Force: true}); err != nil || !result.Deleted {
+		t.Fatalf("delete restarted workspace = %+v, %v", result, err)
+	}
+}
+
 func TestBackgroundCleanupDoesNotQueueBehindInteractiveHostConnection(t *testing.T) {
 	requireCommands(t, "git", "tmux")
 	home := privateTestHome(t)

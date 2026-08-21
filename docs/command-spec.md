@@ -194,6 +194,7 @@ Multicodex intentionally has no command for changing the shared default Codex ac
 - Deletes a workspace and all its exact owned terminal windows as one action. It combines live-terminal and Git-work risks into one final confirmation and refuses uncertain, unowned, or altered resources.
 - Runs safe cleanup at startup and hourly. The seven-day cleanup removes only exact owned dead windows, worktrees without tracked, untracked, or ignored changes, branches with no commits beyond their recorded base, and expired attachments. It never removes live, dirty, unique, uncertain, unowned, or altered resources.
 - Records workspace and window create or delete intent before changing tmux or Git. Attachment changes are rollback-safe or idempotent. Cleanup resumes or safely reconciles interrupted operations. Manual force deletion requires a second confirmation and stays limited to exact owned resources.
+- Preserves client navigation state, host ownership registries, worktrees, tmux sessions, pane processes, and scrollback when binaries are replaced. Install the same exact release or clean revision on the client and every host before restarting only the outer editor. A mixed or incompatible build leaves the host offline and leaves its sessions unchanged.
 - Refuses a second editor process that uses the same client state.
 
 `multicodex doctor`
