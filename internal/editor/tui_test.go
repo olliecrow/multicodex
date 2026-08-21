@@ -221,8 +221,30 @@ func TestCreatedWorkspaceSelectsAndOpensItsAutomaticWindow(t *testing.T) {
 	model := tuiModel{manager: manager, width: minimumWidth, height: minimumHeight, actionBusy: true}
 	updated, cmd := model.handleActionResult(actionResultMsg{action: "create_workspace", hostID: host.ID, value: createdWorkspace{workspace: workspace, window: window}})
 	got := updated.(tuiModel)
-	if cmd == nil || got.actionBusy || got.selectOnRefreshID != window.ID || got.attachingID != window.ID || !strings.Contains(got.message, host.Name) {
+	if cmd == nil || got.actionBusy || got.selectOnRefreshID != "w/"+window.ID || got.attachingID != window.ID || !strings.Contains(got.message, host.Name) {
 		t.Fatalf("created workspace did not select and open its automatic window: %+v", got)
+	}
+}
+
+func TestAddedProjectSelectsItAndFocusesSidebarAfterRefresh(t *testing.T) {
+	oldProject := Project{ID: "111111111111111111111111", Name: "Old", Path: "/tmp/old"}
+	newProject := Project{ID: "222222222222222222222222", Name: "New", Path: "/tmp/new"}
+	host := Host{ID: localHostID, Name: localHostName, Projects: []Project{oldProject, newProject}}
+	manager := &Manager{ctx: context.Background(), state: ClientState{Version: stateVersion, InstanceID: testInstanceID, Hosts: []Host{host}}}
+	model := tuiModel{
+		manager: manager, width: minimumWidth, height: minimumHeight, actionBusy: true,
+		statuses: []HostStatus{{Host: host}},
+		rows:     []sidebarRow{{kind: "project", host: host, project: oldProject}},
+	}
+
+	updated, cmd := model.handleActionResult(actionResultMsg{action: "add_project", hostID: host.ID, value: newProject})
+	got := updated.(tuiModel)
+	if cmd == nil || got.actionBusy || !got.controlMode || got.selectOnRefreshID != "p/"+newProject.ID {
+		t.Fatalf("added project did not request focused sidebar selection: %+v", got)
+	}
+	got.rebuildRows()
+	if got.selectedRow < 0 || got.rows[got.selectedRow].project.ID != newProject.ID || got.selectOnRefreshID != "" {
+		t.Fatalf("added project selection = %+v", got)
 	}
 }
 
@@ -965,7 +987,7 @@ func TestCreatedWindowBecomesSidebarSelectionAfterRefresh(t *testing.T) {
 	host := Host{ID: localHostID, Name: localHostName, Projects: []Project{project}}
 	manager := &Manager{state: ClientState{Version: stateVersion, InstanceID: testInstanceID, Hosts: []Host{host}}}
 	model := tuiModel{
-		manager: manager, selectedRow: 2, selectOnRefreshID: newWindowID,
+		manager: manager, selectedRow: 2, selectOnRefreshID: "w/" + newWindowID,
 		rows: []sidebarRow{
 			{kind: "project", project: project},
 			{kind: "workspace", workspace: Workspace{ID: workspaceID}},
