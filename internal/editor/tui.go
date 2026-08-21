@@ -1285,7 +1285,19 @@ func (m *tuiModel) ensureSelectionVisible() {
 
 func (m *tuiModel) openActionMenu() {
 	choices := []choice{}
-	if row, ok := m.selectedSidebarRow(); ok {
+	hasProject := false
+	hasWorkspace := false
+	for _, row := range m.rows {
+		switch row.kind {
+		case "project":
+			hasProject = true
+		case "workspace":
+			hasWorkspace = true
+		}
+	}
+	selectedRow, hasSelection := m.selectedSidebarRow()
+	if hasSelection {
+		row := selectedRow
 		switch row.kind {
 		case "project":
 			choices = append(choices, choice{label: "New workspace in " + row.project.Name + "…", action: "new_workspace_selected", host: row.host, project: row.project})
@@ -1301,17 +1313,31 @@ func (m *tuiModel) openActionMenu() {
 			)
 		}
 	}
+	if hasProject {
+		choices = append(choices, choice{label: "New workspace…", action: "new_workspace"})
+	}
+	if hasWorkspace {
+		choices = append(choices, choice{label: "New window…", action: "new_window"})
+	}
 	choices = append(choices,
-		choice{label: "New workspace…", action: "new_workspace"},
-		choice{label: "New window…", action: "new_window"},
 		choice{label: "Add project…", action: "add_project"},
 		choice{label: "Add SSH host…", action: "add_host"},
-		choice{label: "Attach file…", action: "attach_file"},
-		choice{label: "Attach clipboard image", action: "attach_clipboard"},
-		choice{label: "Open terminal history", action: "scrollback"},
-		choice{label: "Delete selected window or workspace…", action: "delete"},
-		choice{label: "Run safe cleanup", action: "cleanup"},
-		choice{label: "Send Ctrl+G to terminal", action: "send_control_g"},
+	)
+	if _, ok := m.currentAttachedRow(); ok {
+		choices = append(choices,
+			choice{label: "Attach file…", action: "attach_file"},
+			choice{label: "Attach clipboard image", action: "attach_clipboard"},
+			choice{label: "Open terminal history", action: "scrollback"},
+		)
+	}
+	if hasSelection && (selectedRow.kind == "workspace" || selectedRow.kind == "window") {
+		choices = append(choices, choice{label: "Delete selected window or workspace…", action: "delete"})
+	}
+	choices = append(choices, choice{label: "Run safe cleanup", action: "cleanup"})
+	if m.attachment != nil {
+		choices = append(choices, choice{label: "Send Ctrl+G to terminal", action: "send_control_g"})
+	}
+	choices = append(choices,
 		choice{label: "Help", action: "help"},
 		choice{label: "Quit multicodex editor", action: "quit"},
 	)

@@ -116,10 +116,18 @@ func TestEditorControlsUseNavigationAndAVisibleActionMenu(t *testing.T) {
 	if cmd != nil || got.modal == nil || got.modal.kind != "actions" {
 		t.Fatalf("Tab did not open the action menu: %+v", got)
 	}
+	if got.modal.choices[0].action != "add_project" {
+		t.Fatalf("empty editor first action = %q, want add_project", got.modal.choices[0].action)
+	}
 	rendered := ansi.Strip(renderModal(*got.modal, 60, 24))
-	for _, want := range []string{"Editor actions", "New window…", "Add SSH host…", "Run safe cleanup", "[ Cancel ]", "Enter: run", "Esc: cancel"} {
+	for _, want := range []string{"Editor actions", "Add project…", "Add SSH host…", "Run safe cleanup", "[ Cancel ]", "Enter: run", "Esc: cancel"} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("action menu is missing %q:\n%s", want, rendered)
+		}
+	}
+	for _, unavailable := range []string{"New workspace…", "New window…", "Attach file…", "Open terminal history", "Delete selected", "Send Ctrl+G"} {
+		if strings.Contains(rendered, unavailable) {
+			t.Fatalf("empty editor shows unavailable action %q:\n%s", unavailable, rendered)
 		}
 	}
 	helpWidth := (tuiModel{width: minimumWidth, height: minimumHeight}).terminalWidth()
@@ -189,9 +197,20 @@ func TestSidebarSelectionProvidesContextualCreateAndRename(t *testing.T) {
 	}
 
 	model.modal = nil
+	model.attachedID = window.ID
+	model.attachment = &Attachment{}
 	model.openActionMenu()
 	if len(model.modal.choices) < 2 || model.modal.choices[0].action != "new_window_selected" || model.modal.choices[1].action != "rename_selected" {
 		t.Fatalf("selected-window actions are not contextual: %+v", model.modal.choices)
+	}
+	available := map[string]bool{}
+	for _, item := range model.modal.choices {
+		available[item.action] = true
+	}
+	for _, action := range []string{"attach_file", "attach_clipboard", "scrollback", "delete", "send_control_g"} {
+		if !available[action] {
+			t.Fatalf("connected-window action %q is missing: %+v", action, model.modal.choices)
+		}
 	}
 	model.selectedRow = 0 // A refresh may move selection while this menu stays open.
 	selectEditorAction(t, &model, "new_window_selected")
@@ -683,7 +702,7 @@ func TestDirectMouseUpdatePreservesInputOrder(t *testing.T) {
 	current = updated.(tuiModel)
 	updated, cmd = current.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	current = updated.(tuiModel)
-	if cmd != nil || current.modal == nil || current.modal.kind != "form" || current.modal.action != "add_host" {
+	if cmd != nil || current.modal == nil || current.modal.kind != "help" {
 		t.Fatalf("wheel then Enter chose the wrong action: %+v", current)
 	}
 }
