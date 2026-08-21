@@ -100,7 +100,7 @@ func attachWindowPTY(ctx context.Context, host Host, controlPath, instanceID str
 	}
 	terminal := vt.NewSafeEmulator(width, height)
 	// Tmux is the only scrollback owner. Keep the renderer's private history at
-	// one line so sustained output does not duplicate the 50,000-line tmux log.
+	// one line so sustained output does not duplicate the long tmux scrollback.
 	terminal.SetScrollbackSize(1)
 	inputPipe, ok := terminal.InputPipe().(io.WriteCloser)
 	if !ok {

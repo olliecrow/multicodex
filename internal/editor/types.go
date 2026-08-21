@@ -16,7 +16,7 @@ import (
 const (
 	stateVersion      = 1
 	hostProtocol      = 1
-	historyLimit      = 50000
+	historyLimit      = 60000
 	activityRows      = 100
 	cleanupAfter      = 7 * 24 * time.Hour
 	maxAttachment     = 16 << 20

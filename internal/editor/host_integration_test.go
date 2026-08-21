@@ -85,7 +85,7 @@ func TestHostServiceGitWindowReconnectAndSafeDeletion(t *testing.T) {
 	if len(renamed.Workspaces) != 1 || renamed.Workspaces[0].Name != "Parser work" || renamed.Workspaces[0].Branch != branch || len(renamed.Windows) != 1 || renamed.Windows[0].Name != "Main terminal" {
 		t.Fatalf("display rename changed ownership identity: %+v", renamed)
 	}
-	if got := commandOutput(t, "tmux", "-L", service.socketName(), "show-options", "-g", "-v", "history-limit"); got != "50000" {
+	if got := commandOutput(t, "tmux", "-L", service.socketName(), "show-options", "-g", "-v", "history-limit"); got != "60000" {
 		t.Fatalf("history-limit = %q", got)
 	}
 	if got := commandOutput(t, "tmux", "-L", service.socketName(), "show-options", "-g", "-v", "set-clipboard"); got != "off" {
