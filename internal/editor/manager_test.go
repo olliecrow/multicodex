@@ -101,6 +101,46 @@ func TestActivityOrderingSortsWorkspacesAndWindowsWithoutMutatingSnapshot(t *tes
 	}
 }
 
+func TestActivityMonitoringUpdatesEveryWindowWithoutOpeningIt(t *testing.T) {
+	hostID := "111111111111111111111111"
+	changingID := "222222222222222222222222"
+	quietID := "333333333333333333333333"
+	newID := "444444444444444444444444"
+	old := time.Now().UTC().Add(-time.Hour)
+	manager := &Manager{
+		lastSave: time.Now(),
+		state: ClientState{Activities: []Activity{
+			{HostID: hostID, WindowID: changingID, PaneHash: strings.Repeat("a", 64), ChangedAt: old},
+			{HostID: hostID, WindowID: quietID, PaneHash: strings.Repeat("b", 64), ChangedAt: old},
+		}},
+	}
+	manager.updateActivities([]HostStatus{{
+		Host: Host{ID: hostID},
+		Snapshot: HostSnapshot{Windows: []Window{
+			{ID: changingID, PaneHash: strings.Repeat("c", 64)},
+			{ID: quietID, PaneHash: strings.Repeat("b", 64)},
+			{ID: newID, PaneHash: strings.Repeat("d", 64)},
+		}},
+	}})
+
+	activities := map[string]Activity{}
+	for _, activity := range manager.state.Activities {
+		activities[activity.WindowID] = activity
+	}
+	if len(activities) != 3 {
+		t.Fatalf("monitored activities = %+v", manager.state.Activities)
+	}
+	if !activities[changingID].ChangedAt.After(old) || activities[changingID].PaneHash != strings.Repeat("c", 64) {
+		t.Fatalf("changing window was not updated: %+v", activities[changingID])
+	}
+	if !activities[quietID].ChangedAt.Equal(old) {
+		t.Fatalf("quiet window was reported as changing: %+v", activities[quietID])
+	}
+	if activities[newID].ChangedAt.IsZero() || activities[newID].PaneHash != strings.Repeat("d", 64) {
+		t.Fatalf("new unselected window was not monitored: %+v", activities[newID])
+	}
+}
+
 func TestCleanupResultValidationRejectsUnsafeHostData(t *testing.T) {
 	if err := validateCleanupResult(CleanupResult{Skipped: []string{"busy but safe"}}); err != nil {
 		t.Fatal(err)

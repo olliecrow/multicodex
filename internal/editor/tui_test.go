@@ -100,15 +100,29 @@ func TestSidebarStatusShowsLiveOutputRunningStoppedAndFailures(t *testing.T) {
 		row  sidebarRow
 		want string
 	}{
-		{sidebarRow{window: Window{Alive: true}, changedAt: now}, "◉"},
-		{sidebarRow{window: Window{Alive: true}}, "●"},
-		{sidebarRow{window: Window{}}, "○"},
+		{sidebarRow{window: Window{Alive: true}, changedAt: now}, "●"},
+		{sidebarRow{window: Window{Alive: true}}, "·"},
+		{sidebarRow{window: Window{}}, "×"},
 		{sidebarRow{offline: true, window: Window{Alive: true}}, "?"},
-		{sidebarRow{workspace: Workspace{Unavailable: true}, window: Window{Alive: true}}, "●"},
+		{sidebarRow{workspace: Workspace{Unavailable: true}, window: Window{Alive: true}}, "·"},
 	}
 	for _, test := range tests {
 		if got := model.windowStatusMarker(test.row); got != test.want {
 			t.Fatalf("window status marker = %q, want %q for %+v", got, test.want, test.row)
+		}
+	}
+	labels := []struct {
+		row  sidebarRow
+		want string
+	}{
+		{sidebarRow{window: Window{Alive: true}, changedAt: now}, "changing now"},
+		{sidebarRow{window: Window{Alive: true}}, "quiet · monitored live"},
+		{sidebarRow{window: Window{}}, "stopped"},
+		{sidebarRow{offline: true}, "host offline"},
+	}
+	for _, test := range labels {
+		if got := model.windowStatusLabel(test.row); got != test.want {
+			t.Fatalf("window status label = %q, want %q for %+v", got, test.want, test.row)
 		}
 	}
 }
@@ -204,7 +218,7 @@ func TestEditorControlsUseNavigationAndAVisibleActionMenu(t *testing.T) {
 		}
 	}
 	help := ansi.Strip(renderModal(modal{kind: "help", title: "Controls"}, helpWidth, (tuiModel{width: minimumWidth, height: minimumHeight}).bodyHeight()))
-	for _, want := range []string{"Click project/workspace: options · window: open", "⌘B or Ctrl+G: focus the sidebar", "⌥↑/⌥↓: one screen", "scroll terminal history", "In the sidebar, Ctrl+C: quit", "● running · ○ stopped", "Need terminal Ctrl+G?", "[ Close ]"} {
+	for _, want := range []string{"Click project/workspace: options · window: open", "⌘B or Ctrl+G: focus the sidebar", "⌥↑/⌥↓: one screen", "scroll terminal history", "In the sidebar, Ctrl+C: quit", "● changing · · quiet · × stopped", "Need terminal Ctrl+G?", "[ Close ]"} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("minimum-width help truncated %q:\n%s", want, help)
 		}
