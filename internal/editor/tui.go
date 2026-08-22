@@ -697,7 +697,7 @@ func (m tuiModel) handleMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
 			}
 			m.selectedRow = index
 			m.controlMode = true
-			if m.rows[index].kind == "window" {
+			if m.rows[index].kind == "window" || m.rows[index].kind == "project" {
 				return m.selectCurrentRow()
 			}
 			return m, nil
@@ -959,8 +959,15 @@ func (m tuiModel) renderSidebar() string {
 		var label string
 		switch row.kind {
 		case "project":
-			label = row.project.Name + " · " + row.host.Name
-			if row.offline {
+			marker, slot := "", ""
+			if row.window.ID != "" {
+				marker = m.windowStatusMarker(row) + " "
+				if row.slot > 0 && row.slot <= 9 {
+					slot = fmt.Sprintf("%d ", row.slot)
+				}
+			}
+			label = slot + marker + row.project.Name + " · " + row.host.Name
+			if row.offline && row.window.ID == "" {
 				label += " · offline"
 			}
 		case "workspace":
@@ -991,9 +998,9 @@ func (m tuiModel) renderSidebar() string {
 			style = style.Foreground(lipgloss.Cyan).Bold(true)
 		} else if row.offline || row.workspace.Unavailable {
 			style = style.Foreground(lipgloss.Yellow)
-		} else if row.kind == "window" && m.windowStatusMarker(row) == "●" {
+		} else if row.window.ID != "" && m.windowStatusMarker(row) == "●" {
 			style = style.Foreground(lipgloss.Cyan)
-		} else if row.kind == "window" && m.windowStatusMarker(row) == "×" {
+		} else if row.window.ID != "" && m.windowStatusMarker(row) == "×" {
 			style = style.Foreground(lipgloss.Yellow)
 		} else if row.kind == "project" {
 			style = style.Foreground(lipgloss.Cyan).Bold(true)
@@ -1040,7 +1047,7 @@ func (m tuiModel) renderMain() string {
 			}
 			switch row.kind {
 			case "project":
-				text = "Project selected\n\nPress Enter to create a named workspace.\nIts first terminal opens automatically.\n\nOr click Actions."
+				text = "Project selected\n\nPress Enter or click the project to open its terminal in the original project directory.\nPress Ctrl+N to create a named workspace."
 			case "workspace":
 				if row.workspace.Unavailable {
 					text = "Workspace directory is unavailable\n\nIts terminals remain available for recovery, but commands that use the missing directory can fail.\nUse Actions → Delete selected when you no longer need it."
@@ -1075,7 +1082,7 @@ func (m tuiModel) selectedContextActions() (sidebarRow, []choice, bool) {
 func renderContextPanel(row sidebarRow, choices []choice, width, height int) string {
 	title := "Project selected"
 	detail := row.project.Name + " · " + row.host.Name
-	hint := "Enter: new workspace · Tab: all actions"
+	hint := "Enter: open project terminal · Ctrl+N: new workspace · Tab: all actions"
 	if row.kind == "workspace" {
 		title = "Workspace selected"
 		detail = row.workspace.Name + " · " + row.project.Name + " · " + row.host.Name
@@ -1084,7 +1091,7 @@ func renderContextPanel(row sidebarRow, choices []choice, width, height int) str
 			hint = "Directory unavailable · use Delete only when recovery is complete"
 		}
 	}
-	if row.offline {
+	if row.offline && row.window.ID == "" {
 		hint = "Reconnect is automatic · existing tmux sessions are left unchanged"
 	}
 	lines := []string{accentStyle.Render(title), plainDisplayText(detail), "", "Choose an action"}
@@ -1102,6 +1109,8 @@ func renderContextPanel(row sidebarRow, choices []choice, width, height int) str
 func contextActionButton(item choice) string {
 	label := "Action"
 	switch item.action {
+	case "open_project_window":
+		label = "Open project terminal"
 	case "new_workspace_selected":
 		label = "New workspace…"
 	case "list_tmux_sessions":
@@ -1130,7 +1139,7 @@ func (m tuiModel) sidebarFooter() string {
 	if !ok {
 		return "Sidebar · ↑/↓: select · Tab: Actions · Esc: terminal"
 	}
-	if row.offline {
+	if row.offline && row.window.ID == "" {
 		reason := safeClientText(row.hostError, 100)
 		if reason == "" {
 			reason = "connection unavailable"
@@ -1139,7 +1148,7 @@ func (m tuiModel) sidebarFooter() string {
 	}
 	switch row.kind {
 	case "project":
-		return "Project · Choose an option on the right · Enter: new workspace"
+		return "Project · Enter/click: open project terminal · Ctrl+N: new workspace"
 	case "workspace":
 		return "Workspace · Choose an option on the right · ⌘R: rename"
 	case "window":
@@ -1294,19 +1303,19 @@ func renderModal(modal modal, width, height int) string {
 func helpModalContent() []string {
 	return []string{
 		"Mouse",
-		"  Click project/workspace: options · window: open",
+		"  Click project/window: open · workspace: options",
 		"  Wheel: move lists or scroll terminal history",
 		"  Copy: iTerm2 ⌥-drag · others Shift-drag · ⌘C",
 		"  Paste: ⌘V · focuses the attached terminal",
 		"Keyboard · MacBook",
 		"  ⌘B or Ctrl+G: focus the sidebar",
-		"  ↑/↓: one row · ⌥↑/⌥↓: previous/next window",
-		"  ⌘↑/⌘↓: first/last · Enter: focus/create",
+		"  ↑/↓: one row · ⌥↑/⌥↓: previous/next terminal",
+		"  ⌘↑/⌘↓: first/last · Enter: open/focus/create",
 		"  Tab: Actions · ⌘N/Ctrl+N: create · ?: Help",
 		"  ⌘R: rename · ⌘⌫: delete · Esc: terminal",
-		"  ⌘1–9 or ⌥1–9: open the numbered window",
+		"  ⌘1–9 or ⌥1–9: open the numbered terminal",
 		"  In the sidebar, Ctrl+C: quit",
-		"Windows: ● changing · · quiet · × stopped · ? offline",
+		"Terminals: ● active · · quiet · × stopped · ? offline",
 		"Workspace: ! directory unavailable",
 		"Need terminal Ctrl+G? Use Actions → Send Ctrl+G.",
 		closeButtonLabel + " · Enter, ?, or Esc: close",
@@ -1365,7 +1374,13 @@ func (m *tuiModel) rebuildRows() {
 	rows := []sidebarRow{}
 	slot := 0
 	for _, location := range locations {
-		rows = append(rows, sidebarRow{kind: "project", host: location.Host, project: location.Project, offline: location.HostError != "", hostError: location.HostError})
+		projectRow := sidebarRow{kind: "project", host: location.Host, project: location.Project, window: location.ProjectWindow, offline: location.HostError != "", hostError: location.HostError}
+		if projectRow.window.ID != "" {
+			slot++
+			projectRow.slot = slot
+			projectRow.changedAt = activities[location.Host.ID+"/"+projectRow.window.ID]
+		}
+		rows = append(rows, projectRow)
 		for _, workspace := range location.Workspaces {
 			rows = append(rows, sidebarRow{kind: "workspace", host: location.Host, project: location.Project, workspace: workspace, offline: location.HostError != "", hostError: location.HostError})
 			for _, window := range location.Windows {
@@ -1427,12 +1442,12 @@ func (m *tuiModel) mergeStatuses(incoming []HostStatus) {
 func (m tuiModel) preferredWindow() (sidebarRow, bool) {
 	state := m.manager.State()
 	for _, row := range m.rows {
-		if row.kind == "window" && row.window.ID == state.SelectedWindowID {
+		if row.window.ID != "" && row.window.ID == state.SelectedWindowID {
 			return row, true
 		}
 	}
 	for _, row := range m.rows {
-		if row.kind == "window" {
+		if row.window.ID != "" {
 			return row, true
 		}
 	}
@@ -1441,7 +1456,7 @@ func (m tuiModel) preferredWindow() (sidebarRow, bool) {
 
 func (m tuiModel) selectWindowSlot(slot int) (tea.Model, tea.Cmd) {
 	for i, row := range m.rows {
-		if row.kind == "window" && row.slot == slot {
+		if row.window.ID != "" && row.slot == slot {
 			m.selectedRow = i
 			m.ensureSelectionVisible()
 			return m.selectCurrentRow()
@@ -1456,14 +1471,19 @@ func (m tuiModel) selectCurrentRow() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	row := m.rows[m.selectedRow]
-	if row.offline && row.kind != "window" {
+	if row.offline && row.window.ID == "" {
 		m.message = offlineStatusMessage(row)
 		return m, nil
 	}
 	switch row.kind {
 	case "project":
-		m.openWorkspaceName(row.host, row.project)
-		return m, nil
+		if row.window.ID == "" {
+			if !m.beginAction("opening project terminal…") {
+				return m, nil
+			}
+			m.controlMode = false
+			return m, m.track(openProjectWindowCmd(m.manager, row.host, row.project))
+		}
 	case "workspace":
 		return m.startCreateWindow(row)
 	case "window":
@@ -1492,7 +1512,7 @@ func (m tuiModel) selectCurrentRow() (tea.Model, tea.Cmd) {
 
 func (m tuiModel) openSelectedWindowFromSidebar() (tea.Model, tea.Cmd) {
 	row, ok := m.selectedSidebarRow()
-	if !ok || row.kind != "window" || row.window.ID == m.attachedID {
+	if !ok || row.window.ID == "" || row.window.ID == m.attachedID {
 		return m, nil
 	}
 	m.keepSidebarAttach = row.window.ID
@@ -1565,7 +1585,7 @@ func (m tuiModel) selectAdjacentWindow(direction int) (tea.Model, tea.Cmd) {
 	current := -1
 	original := m.selectedRow
 	for index, row := range m.rows {
-		if row.kind != "window" {
+		if row.window.ID == "" {
 			continue
 		}
 		if index == m.selectedRow {
@@ -1693,6 +1713,7 @@ func (m tuiModel) primaryActions(row sidebarRow) []choice {
 	}
 	switch row.kind {
 	case "project":
+		choices = append(choices, choice{label: "Open project terminal", action: "open_project_window", host: row.host, project: row.project, window: row.window})
 		choices = append(choices, choice{label: "New workspace in " + row.project.Name + "…", action: "new_workspace_selected", host: row.host, project: row.project})
 		if !row.offline {
 			choices = append(choices, choice{label: "Adopt existing tmux session…", action: "list_tmux_sessions", host: row.host, project: row.project})
@@ -1712,11 +1733,13 @@ func (m tuiModel) primaryActions(row sidebarRow) []choice {
 }
 
 func (m tuiModel) deleteAction(row sidebarRow) (choice, bool) {
-	if row.offline || row.kind != "workspace" && row.kind != "window" {
+	if row.offline || row.kind == "project" && row.window.ID == "" || row.kind != "project" && row.kind != "workspace" && row.kind != "window" {
 		return choice{}, false
 	}
 	label := "Delete selected window or workspace…"
-	if row.window.Adopted {
+	if row.kind == "project" {
+		label = "Delete project terminal…"
+	} else if row.window.Adopted {
 		label = "Release selected tmux session…"
 	} else if row.workspace.External {
 		label = "Remove preserved workspace…"
@@ -1740,6 +1763,20 @@ func (m tuiModel) activateEditorChoice(selected choice) (tea.Model, tea.Cmd) {
 		return m.startCreateWindow(sidebarRow{kind: "workspace", host: selected.host, project: selected.project, workspace: selected.workspace})
 	case "new_workspace_selected":
 		m.openWorkspaceName(selected.host, selected.project)
+	case "open_project_window":
+		row := sidebarRow{kind: "project", host: selected.host, project: selected.project, window: selected.window}
+		if row.window.ID != "" {
+			for i := range m.rows {
+				if m.rows[i].kind == "project" && m.rows[i].project.ID == row.project.ID && m.rows[i].host.ID == row.host.ID {
+					m.selectedRow = i
+					return m.selectCurrentRow()
+				}
+			}
+		}
+		if !m.beginAction("opening project terminal…") {
+			return m, nil
+		}
+		return m, m.track(openProjectWindowCmd(m.manager, selected.host, selected.project))
 	case "rename_selected":
 		kind := "workspace"
 		if selected.window.ID != "" {
@@ -1765,7 +1802,7 @@ func (m tuiModel) activateEditorChoice(selected choice) (tea.Model, tea.Cmd) {
 				m.message = "this window already has an attachment waiting to paste"
 				return m, nil
 			}
-			m.modal = &modal{kind: "form", action: "put_file", title: "Attach file to " + row.window.Name, host: row.host, workspace: row.workspace, window: row.window,
+			m.modal = &modal{kind: "form", action: "put_file", title: "Attach file to " + row.window.Name, host: row.host, project: row.project, workspace: row.workspace, window: row.window,
 				fields: []formField{{label: "Absolute client file path (16 MiB max)", limit: 4096}}}
 		} else {
 			m.message = "select a window before attaching a file"
@@ -1968,6 +2005,14 @@ func (m *tuiModel) openDeleteConfirmation() {
 	}
 	current := &modal{kind: "confirm", host: row.host, project: row.project, workspace: row.workspace, delete: DeleteRequest{Force: false}}
 	switch row.kind {
+	case "project":
+		if row.window.ID == "" {
+			m.message = "this project has no project terminal to delete"
+			return
+		}
+		current.action, current.title = "delete_window", "Delete project terminal?"
+		current.reason = "Delete the project terminal and its tmux session? The project directory stays unchanged."
+		current.delete.ID = row.window.ID
 	case "window":
 		current.action, current.title, current.reason = "delete_window", "Delete window?", "Delete “"+row.window.Name+"” and its tmux session?"
 		if row.window.Adopted {
@@ -2050,6 +2095,18 @@ func (m tuiModel) handleActionResult(msg actionResultMsg) (tea.Model, tea.Cmd) {
 		m.selectOnRefreshID = "w/" + value.ID
 		if host, ok := m.manager.findHost(msg.hostID); ok {
 			cmd := m.requestAttach(sidebarRow{kind: "window", host: host, window: value})
+			return m, tea.Batch(m.startRefresh(), cmd)
+		}
+	case OpenProjectWindowResult:
+		if value.Created {
+			m.message = "created project terminal"
+		} else {
+			m.message = "opened project terminal"
+		}
+		m.selectOnRefreshID = "p/" + value.Window.ProjectID
+		if host, ok := m.manager.findHost(msg.hostID); ok {
+			project, _ := findProject(host, value.Window.ProjectID)
+			cmd := m.requestAttach(sidebarRow{kind: "project", host: host, project: project, window: value.Window})
 			return m, tea.Batch(m.startRefresh(), cmd)
 		}
 	case []TmuxSessionCandidate:
@@ -2195,7 +2252,7 @@ func (m tuiModel) rowIndexForWindow(id string) int {
 
 func (m tuiModel) currentAttachedRow() (sidebarRow, bool) {
 	for _, row := range m.rows {
-		if row.kind == "window" && row.window.ID == m.attachedID {
+		if row.window.ID == m.attachedID {
 			return row, true
 		}
 	}
@@ -2215,7 +2272,7 @@ func (m tuiModel) startClipboardAttachment() (tea.Model, tea.Cmd) {
 	if !m.beginAction("reading the client clipboard…") {
 		return m, nil
 	}
-	return m, m.track(clipboardAttachmentCmd(m.manager, row.host.ID, row.workspace.ID, row.window.ID))
+	return m, m.track(clipboardAttachmentCmd(m.manager, row.host.ID, row.workspace.ID, row.project.ID, row.window.ID))
 }
 
 func (m *tuiModel) flushPendingPaste(windowID string) bool {
@@ -2737,7 +2794,11 @@ func submitFormCmd(manager *Manager, form modal) tea.Cmd {
 				break
 			}
 			result.targetID = form.window.ID
-			result.value, result.err = manager.PutAttachment(ctx, form.host.ID, PutAttachmentRequest{WorkspaceID: form.workspace.ID, Extension: extension, Data: data})
+			request := PutAttachmentRequest{WorkspaceID: form.workspace.ID, Extension: extension, Data: data}
+			if request.WorkspaceID == "" {
+				request.ProjectID = form.project.ID
+			}
+			result.value, result.err = manager.PutAttachment(ctx, form.host.ID, request)
 		case "adopt_tmux_session":
 			result.value, result.err = manager.AdoptTmuxSession(ctx, form.host.ID, AdoptTmuxSessionRequest{ProjectID: form.project.ID, ProjectPath: form.project.Path, WorkspaceName: form.fields[0].value, Session: form.session.Name})
 		}
@@ -2772,7 +2833,16 @@ func createWindowCmd(manager *Manager, hostID, workspaceID string) tea.Cmd {
 	}
 }
 
-func clipboardAttachmentCmd(manager *Manager, hostID, workspaceID, windowID string) tea.Cmd {
+func openProjectWindowCmd(manager *Manager, host Host, project Project) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(manager.Context(), 30*time.Second)
+		defer cancel()
+		value, err := manager.OpenProjectWindow(ctx, host.ID, OpenProjectWindowRequest{ProjectID: project.ID, ProjectPath: project.Path})
+		return actionResultMsg{action: "open_project_window", hostID: host.ID, value: value, err: err}
+	}
+}
+
+func clipboardAttachmentCmd(manager *Manager, hostID, workspaceID, projectID, windowID string) tea.Cmd {
 	return func() tea.Msg {
 		captureContext, cancelCapture := context.WithTimeout(manager.Context(), 30*time.Second)
 		data, extension, err := CaptureClipboardImage(captureContext)
@@ -2780,7 +2850,11 @@ func clipboardAttachmentCmd(manager *Manager, hostID, workspaceID, windowID stri
 		result := actionResultMsg{action: "put_clipboard", hostID: hostID, targetID: windowID, err: err}
 		if err == nil {
 			uploadContext, cancelUpload := context.WithTimeout(manager.Context(), 35*time.Second)
-			result.value, result.err = manager.PutAttachment(uploadContext, hostID, PutAttachmentRequest{WorkspaceID: workspaceID, Extension: extension, Data: data, Image: true})
+			request := PutAttachmentRequest{WorkspaceID: workspaceID, Extension: extension, Data: data, Image: true}
+			if request.WorkspaceID == "" {
+				request.ProjectID = projectID
+			}
+			result.value, result.err = manager.PutAttachment(uploadContext, hostID, request)
 			cancelUpload()
 		}
 		return result

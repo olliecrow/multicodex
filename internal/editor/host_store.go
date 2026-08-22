@@ -198,16 +198,25 @@ func (s *hostStore) validateRegistry(registry hostRegistry) error {
 
 	windowIDs := make(map[string]bool, len(registry.Windows))
 	windowNames := make(map[string]bool)
+	projectWindows := make(map[string]bool)
 	adoptedSessions := make(map[string]bool)
 	for _, window := range registry.Windows {
-		if err := validateID(window.ID, "window identifier"); err != nil || windowIDs[window.ID] || !workspaceIDs[window.WorkspaceID] {
+		workspaceWindow := window.WorkspaceID != "" && window.ProjectID == "" && window.ProjectPath == "" && workspaceIDs[window.WorkspaceID]
+		projectWindow := window.WorkspaceID == "" && validateID(window.ProjectID, "project identifier") == nil && validateAbsolutePath(window.ProjectPath, "project path") == nil && !projectWindows[window.ProjectID]
+		if err := validateID(window.ID, "window identifier"); err != nil || windowIDs[window.ID] || !workspaceWindow && !projectWindow {
 			return errors.New("editor host state contains invalid window ownership metadata")
 		}
 		windowIDs[window.ID] = true
+		if projectWindow {
+			if window.Name != projectWindowName || window.Adopted {
+				return errors.New("editor host state contains invalid project terminal metadata")
+			}
+			projectWindows[window.ProjectID] = true
+		}
 		if err := validateName(window.Name, "window name"); err != nil {
 			return errors.New("editor host state contains invalid window ownership metadata")
 		}
-		windowName := window.WorkspaceID + "\x00" + window.Name
+		windowName := windowTargetID(window) + "\x00" + window.Name
 		if windowNames[windowName] {
 			return errors.New("editor host state contains a duplicate window name")
 		}
@@ -231,11 +240,13 @@ func (s *hostStore) validateRegistry(registry hostRegistry) error {
 
 	attachmentIDs := make(map[string]bool, len(registry.Attachments))
 	for _, attachment := range registry.Attachments {
-		if err := validateID(attachment.ID, "attachment identifier"); err != nil || attachmentIDs[attachment.ID] || !workspaceIDs[attachment.WorkspaceID] {
+		workspaceTarget := attachment.WorkspaceID != "" && attachment.ProjectID == "" && workspaceIDs[attachment.WorkspaceID]
+		projectTarget := attachment.WorkspaceID == "" && attachment.ProjectID != "" && projectWindows[attachment.ProjectID]
+		if err := validateID(attachment.ID, "attachment identifier"); err != nil || attachmentIDs[attachment.ID] || !workspaceTarget && !projectTarget {
 			return errors.New("editor host state contains invalid attachment ownership metadata")
 		}
 		attachmentIDs[attachment.ID] = true
-		root := filepath.Join(s.base, "editor", "attachments", s.instanceID, attachment.WorkspaceID)
+		root := filepath.Join(s.base, "editor", "attachments", s.instanceID, attachmentTargetID(attachment))
 		base := filepath.Base(attachment.Path)
 		extension := strings.TrimPrefix(base, attachment.ID)
 		if filepath.Dir(attachment.Path) != root || base != attachment.ID+extension || extension == "" || normalizeExtension(extension) != extension {

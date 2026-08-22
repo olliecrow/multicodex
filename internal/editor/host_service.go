@@ -431,24 +431,8 @@ func (s *HostService) CreateWindow(ctx context.Context, request CreateWindowRequ
 	}); err != nil {
 		return Window{}, err
 	}
-	args := []string{"-f", "/dev/null", "-L", s.socketName(), "start-server"}
-	for _, setting := range tmuxGlobalSettings() {
-		args = append(args, ";", "set-option", "-g", setting[0], setting[1])
-	}
-	args = append(args, ";", "new-session", "-d", "-s", window.Session, "-c", workspacePath, "-x", "100", "-y", "30",
-		"-e", "MCE_INSTANCE="+s.store.instanceID, "-e", "MCE_WINDOW="+window.ID, "-e", "MCE_WORKSPACE="+window.WorkspaceID)
-	if _, err := s.runner.run(ctx, "tmux", args...); err != nil {
-		s.rollbackWindowCreation(window)
-		return Window{}, errors.New("create tmux session: tmux is unavailable or rejected the session")
-	}
-	if err := s.configureTmux(ctx); err != nil {
-		s.rollbackWindowCreation(window)
+	if err := s.createWindowSession(ctx, window, workspacePath); err != nil {
 		return Window{}, err
-	}
-	owned, err := s.ownsSession(ctx, window)
-	if err != nil || !owned {
-		s.rollbackWindowCreation(window)
-		return Window{}, errors.New("verify tmux session ownership")
 	}
 	if err := s.store.withLock(func(registry *hostRegistry) error {
 		for i := range registry.Windows {
@@ -469,6 +453,108 @@ func (s *HostService) CreateWindow(ctx context.Context, request CreateWindowRequ
 	}
 	window.CreatePending = false
 	return window, nil
+}
+
+func (s *HostService) OpenProjectWindow(ctx context.Context, request OpenProjectWindowRequest) (OpenProjectWindowResult, error) {
+	if err := validateID(request.ProjectID, "project identifier"); err != nil {
+		return OpenProjectWindowResult{}, err
+	}
+	if err := validateAbsolutePath(request.ProjectPath, "project path"); err != nil {
+		return OpenProjectWindowResult{}, err
+	}
+	info, err := os.Stat(request.ProjectPath)
+	if err != nil || !info.IsDir() {
+		return OpenProjectWindowResult{}, errors.New("project directory is unavailable")
+	}
+	id, err := newID()
+	if err != nil {
+		return OpenProjectWindowResult{}, err
+	}
+	now := s.now().UTC()
+	window := Window{
+		ID: id, ProjectID: request.ProjectID, ProjectPath: request.ProjectPath, Name: projectWindowName,
+		Session: s.sessionName(id), CreatedAt: now, LastUsedAt: now, Alive: true, CreatePending: true,
+	}
+	var existingWindow *Window
+	if err := s.store.withLock(func(registry *hostRegistry) error {
+		for _, existing := range registry.Windows {
+			if existing.ProjectID != request.ProjectID {
+				continue
+			}
+			if existing.ProjectPath != request.ProjectPath {
+				return errors.New("project terminal path no longer matches the configured project")
+			}
+			if existing.CreatePending || existing.DeletePending {
+				return errors.New("project terminal recovery or deletion is pending; retry cleanup")
+			}
+			existingCopy := existing
+			existingWindow = &existingCopy
+			return nil
+		}
+		registry.Windows = append(registry.Windows, window)
+		return nil
+	}); err != nil {
+		return OpenProjectWindowResult{}, err
+	}
+	if existingWindow != nil {
+		state, _, inspectErr := s.inspectSession(ctx, *existingWindow)
+		if inspectErr != nil {
+			return OpenProjectWindowResult{}, inspectErr
+		}
+		if state == sessionAltered {
+			return OpenProjectWindowResult{}, errors.New("project terminal tmux ownership changed; no session was opened")
+		}
+		if state == sessionAbsent {
+			if err := s.createWindowSession(ctx, *existingWindow, request.ProjectPath); err != nil {
+				return OpenProjectWindowResult{}, err
+			}
+		}
+		if err := s.TouchWindow(ctx, existingWindow.ID); err != nil {
+			return OpenProjectWindowResult{}, err
+		}
+		existingWindow.Alive = true
+		return OpenProjectWindowResult{Window: *existingWindow}, nil
+	}
+	if err := s.createWindowSession(ctx, window, request.ProjectPath); err != nil {
+		return OpenProjectWindowResult{}, err
+	}
+	if err := s.store.withLock(func(registry *hostRegistry) error {
+		for i := range registry.Windows {
+			if registry.Windows[i].ID == window.ID {
+				registry.Windows[i].CreatePending = false
+				return nil
+			}
+		}
+		return errors.New("project terminal creation record disappeared")
+	}); err != nil {
+		s.rollbackWindowCreation(window)
+		return OpenProjectWindowResult{}, err
+	}
+	window.CreatePending = false
+	return OpenProjectWindowResult{Window: window, Created: true}, nil
+}
+
+func (s *HostService) createWindowSession(ctx context.Context, window Window, directory string) error {
+	args := []string{"-f", "/dev/null", "-L", s.socketName(), "start-server"}
+	for _, setting := range tmuxGlobalSettings() {
+		args = append(args, ";", "set-option", "-g", setting[0], setting[1])
+	}
+	args = append(args, ";", "new-session", "-d", "-s", window.Session, "-c", directory, "-x", "100", "-y", "30",
+		"-e", "MCE_INSTANCE="+s.store.instanceID, "-e", "MCE_WINDOW="+window.ID, "-e", "MCE_WORKSPACE="+window.WorkspaceID, "-e", "MCE_PROJECT="+window.ProjectID)
+	if _, err := s.runner.run(ctx, "tmux", args...); err != nil {
+		s.rollbackWindowCreation(window)
+		return errors.New("create tmux session: tmux is unavailable or rejected the session")
+	}
+	if err := s.configureTmux(ctx); err != nil {
+		s.rollbackWindowCreation(window)
+		return err
+	}
+	owned, err := s.ownsSession(ctx, window)
+	if err != nil || !owned {
+		s.rollbackWindowCreation(window)
+		return errors.New("verify tmux session ownership")
+	}
+	return nil
 }
 
 func (s *HostService) ListTmuxSessions(ctx context.Context, request ListTmuxSessionsRequest) ([]TmuxSessionCandidate, error) {
@@ -618,13 +704,13 @@ func (s *HostService) AdoptTmuxSession(ctx context.Context, request AdoptTmuxSes
 }
 
 func (s *HostService) verifyAdoptedSession(ctx context.Context, window Window, projectPath, panePID string) error {
-	format := "#{session_name}\t#{MCE_INSTANCE}\t#{MCE_WINDOW}\t#{MCE_WORKSPACE}\t#{pane_dead}\t#{session_windows}\t#{window_panes}\t#{session_grouped}\t#{session_attached}\t#{pane_current_path}\t#{pane_pid}"
+	format := "#{session_name}\t#{MCE_INSTANCE}\t#{MCE_WINDOW}\t#{MCE_WORKSPACE}\t#{MCE_PROJECT}\t#{pane_dead}\t#{session_windows}\t#{window_panes}\t#{session_grouped}\t#{session_attached}\t#{pane_current_path}\t#{pane_pid}"
 	out, err := s.systemTmux(ctx, "display-message", "-p", "-t", window.TmuxSessionID, format)
 	if err != nil {
 		return err
 	}
 	fields := strings.Split(strings.TrimSuffix(string(out), "\n"), "\t")
-	if len(fields) != 11 || fields[0] != window.Session || fields[1] != s.store.instanceID || fields[2] != window.ID || fields[3] != window.WorkspaceID || fields[4] != "0" || fields[5] != "1" || fields[6] != "1" || fields[7] != "0" || fields[8] != "0" || !sameDirectory(fields[9], projectPath) || fields[10] != panePID {
+	if len(fields) != 12 || fields[0] != window.Session || fields[1] != s.store.instanceID || fields[2] != window.ID || fields[3] != window.WorkspaceID || fields[4] != "" || fields[5] != "0" || fields[6] != "1" || fields[7] != "1" || fields[8] != "0" || fields[9] != "0" || !sameDirectory(fields[10], projectPath) || fields[11] != panePID {
 		return errors.New("adopted tmux session changed during registration")
 	}
 	return nil
@@ -635,7 +721,7 @@ func (s *HostService) inspectTmuxCandidate(ctx context.Context, projectPath, ses
 	if err != nil || !present {
 		return TmuxSessionCandidate{}, false, err
 	}
-	format := "#{session_name}\t#{session_id}\t#{MCE_INSTANCE}\t#{MCE_WINDOW}\t#{MCE_WORKSPACE}\t#{pane_dead}\t#{session_windows}\t#{window_panes}\t#{session_grouped}\t#{session_attached}\t#{pane_current_path}\t#{pane_current_command}\t#{pane_pid}"
+	format := "#{session_name}\t#{session_id}\t#{MCE_INSTANCE}\t#{MCE_WINDOW}\t#{MCE_WORKSPACE}\t#{MCE_PROJECT}\t#{pane_dead}\t#{session_windows}\t#{window_panes}\t#{session_grouped}\t#{session_attached}\t#{pane_current_path}\t#{pane_current_command}\t#{pane_pid}"
 	out, err := s.systemTmux(ctx, "display-message", "-p", "-t", session, format)
 	if err != nil {
 		var failure commandFailure
@@ -645,10 +731,10 @@ func (s *HostService) inspectTmuxCandidate(ctx context.Context, projectPath, ses
 		return TmuxSessionCandidate{}, false, errors.New("inspect tmux session for adoption")
 	}
 	fields := strings.Split(strings.TrimSuffix(string(out), "\n"), "\t")
-	if len(fields) != 13 || fields[0] != session || !tmuxIDPattern.MatchString(fields[1]) || fields[2] != "" || fields[3] != "" || fields[4] != "" || fields[5] != "0" || fields[6] != "1" || fields[7] != "1" || fields[8] != "0" || fields[9] != "0" || !sameDirectory(fields[10], projectPath) || validateName(fields[11], "tmux command") != nil || !positiveDecimal(fields[12]) {
+	if len(fields) != 14 || fields[0] != session || !tmuxIDPattern.MatchString(fields[1]) || fields[2] != "" || fields[3] != "" || fields[4] != "" || fields[5] != "" || fields[6] != "0" || fields[7] != "1" || fields[8] != "1" || fields[9] != "0" || fields[10] != "0" || !sameDirectory(fields[11], projectPath) || validateName(fields[12], "tmux command") != nil || !positiveDecimal(fields[13]) {
 		return TmuxSessionCandidate{}, false, nil
 	}
-	return TmuxSessionCandidate{Name: session, Command: fields[11], SessionID: fields[1], PanePID: fields[12]}, true, nil
+	return TmuxSessionCandidate{Name: session, Command: fields[12], SessionID: fields[1], PanePID: fields[13]}, true, nil
 }
 
 func positiveDecimal(value string) bool {
@@ -657,7 +743,7 @@ func positiveDecimal(value string) bool {
 }
 
 func (s *HostService) setAdoptedMarkers(ctx context.Context, window Window) error {
-	values := [][2]string{{"MCE_INSTANCE", s.store.instanceID}, {"MCE_WINDOW", window.ID}, {"MCE_WORKSPACE", window.WorkspaceID}}
+	values := [][2]string{{"MCE_INSTANCE", s.store.instanceID}, {"MCE_WINDOW", window.ID}, {"MCE_WORKSPACE", window.WorkspaceID}, {"MCE_PROJECT", ""}}
 	for _, value := range values {
 		if _, err := s.systemTmux(ctx, "set-environment", "-t", window.TmuxSessionID, value[0], value[1]); err != nil {
 			return errors.New("mark tmux session for editor adoption")
@@ -667,7 +753,7 @@ func (s *HostService) setAdoptedMarkers(ctx context.Context, window Window) erro
 }
 
 func (s *HostService) clearAdoptedMarkers(ctx context.Context, window Window) error {
-	format := "#{MCE_INSTANCE}\t#{MCE_WINDOW}\t#{MCE_WORKSPACE}"
+	format := "#{MCE_INSTANCE}\t#{MCE_WINDOW}\t#{MCE_WORKSPACE}\t#{MCE_PROJECT}"
 	out, err := s.systemTmux(ctx, "display-message", "-p", "-t", window.TmuxSessionID, format)
 	if err != nil {
 		present, inspectErr := s.systemTmuxSessionIDPresent(ctx, window.TmuxSessionID)
@@ -677,8 +763,8 @@ func (s *HostService) clearAdoptedMarkers(ctx context.Context, window Window) er
 		return errors.New("inspect adopted tmux markers before release")
 	}
 	fields := strings.Split(strings.TrimSuffix(string(out), "\n"), "\t")
-	expected := []string{s.store.instanceID, window.ID, window.WorkspaceID}
-	keys := []string{"MCE_INSTANCE", "MCE_WINDOW", "MCE_WORKSPACE"}
+	expected := []string{s.store.instanceID, window.ID, window.WorkspaceID, ""}
+	keys := []string{"MCE_INSTANCE", "MCE_WINDOW", "MCE_WORKSPACE", "MCE_PROJECT"}
 	if len(fields) != len(expected) {
 		return errors.New("refuse to clear uncertain tmux ownership markers")
 	}
@@ -818,7 +904,11 @@ func (s *HostService) rollbackWindowCreation(window Window) {
 }
 
 func (s *HostService) PutAttachment(_ context.Context, request PutAttachmentRequest) (AttachmentFile, error) {
-	if err := validateID(request.WorkspaceID, "workspace identifier"); err != nil {
+	targetID := attachmentRequestTargetID(request)
+	if (request.WorkspaceID == "") == (request.ProjectID == "") {
+		return AttachmentFile{}, errors.New("attachment must target exactly one workspace or project terminal")
+	}
+	if err := validateID(targetID, "attachment target identifier"); err != nil {
 		return AttachmentFile{}, err
 	}
 	if len(request.Data) == 0 || len(request.Data) > maxAttachment {
@@ -846,27 +936,44 @@ func (s *HostService) PutAttachment(_ context.Context, request PutAttachmentRequ
 	if err != nil {
 		return AttachmentFile{}, err
 	}
-	attachment := AttachmentFile{ID: id, WorkspaceID: request.WorkspaceID, CreatedAt: s.now().UTC(), CreatePending: true}
+	attachment := AttachmentFile{ID: id, WorkspaceID: request.WorkspaceID, ProjectID: request.ProjectID, CreatedAt: s.now().UTC(), CreatePending: true}
 	err = s.store.withLock(func(registry *hostRegistry) error {
-		workspaceFound := false
-		for i, workspace := range registry.Workspaces {
-			if workspace.ID == request.WorkspaceID {
-				if workspace.CreatePending || workspace.DeletePending {
-					return errors.New("workspace recovery or deletion is pending; retry cleanup before adding an attachment")
+		if request.WorkspaceID != "" {
+			workspaceFound := false
+			for i, workspace := range registry.Workspaces {
+				if workspace.ID == request.WorkspaceID {
+					if workspace.CreatePending || workspace.DeletePending {
+						return errors.New("workspace recovery or deletion is pending; retry cleanup before adding an attachment")
+					}
+					workspaceFound = true
+					registry.Workspaces[i].LastUsedAt = attachment.CreatedAt
+					break
 				}
-				workspaceFound = true
-				registry.Workspaces[i].LastUsedAt = attachment.CreatedAt
-				break
 			}
-		}
-		if !workspaceFound {
-			return errors.New("workspace no longer exists")
+			if !workspaceFound {
+				return errors.New("workspace no longer exists")
+			}
+		} else {
+			projectWindowFound := false
+			for i := range registry.Windows {
+				if registry.Windows[i].ProjectID == request.ProjectID {
+					if registry.Windows[i].CreatePending || registry.Windows[i].DeletePending {
+						return errors.New("project terminal recovery or deletion is pending; retry cleanup before adding an attachment")
+					}
+					registry.Windows[i].LastUsedAt = attachment.CreatedAt
+					projectWindowFound = true
+					break
+				}
+			}
+			if !projectWindowFound {
+				return errors.New("project terminal no longer exists")
+			}
 		}
 		paths := []string{
 			filepath.Join(s.store.base, "editor"),
 			filepath.Join(s.store.base, "editor", "attachments"),
 			filepath.Join(s.store.base, "editor", "attachments", s.store.instanceID),
-			filepath.Join(s.store.base, "editor", "attachments", s.store.instanceID, request.WorkspaceID),
+			filepath.Join(s.store.base, "editor", "attachments", s.store.instanceID, targetID),
 		}
 		for _, path := range paths {
 			if err := ensurePrivateDir(path); err != nil {
@@ -933,7 +1040,7 @@ func (s *HostService) rollbackAttachmentCreation(attachment AttachmentFile) {
 		registry.Attachments = kept
 		return nil
 	}); err == nil {
-		s.removeEmptyAttachmentDirs(attachment.WorkspaceID)
+		s.removeEmptyAttachmentDirs(attachmentTargetID(attachment))
 	}
 }
 
@@ -1071,16 +1178,46 @@ func (s *HostService) deleteWindow(ctx context.Context, request DeleteRequest, r
 	} else if err := s.cleanupUnusedTmuxSocket(ctx); err != nil {
 		return DeleteResult{}, err
 	}
+	var projectAttachments []AttachmentFile
+	if window.ProjectID != "" {
+		if err := s.store.withReadLock(func(registry hostRegistry) error {
+			for _, attachment := range registry.Attachments {
+				if attachment.ProjectID == window.ProjectID {
+					projectAttachments = append(projectAttachments, attachment)
+				}
+			}
+			return nil
+		}); err != nil {
+			return DeleteResult{}, err
+		}
+		for _, attachment := range projectAttachments {
+			if err := s.removeOwnedAttachment(attachment); err != nil {
+				return DeleteResult{}, err
+			}
+		}
+	}
 	if err := s.store.withLock(func(registry *hostRegistry) error {
 		for i := range registry.Windows {
 			if registry.Windows[i].ID == window.ID {
 				registry.Windows = append(registry.Windows[:i], registry.Windows[i+1:]...)
+				if window.ProjectID != "" {
+					kept := registry.Attachments[:0]
+					for _, attachment := range registry.Attachments {
+						if attachment.ProjectID != window.ProjectID {
+							kept = append(kept, attachment)
+						}
+					}
+					registry.Attachments = kept
+				}
 				return nil
 			}
 		}
 		return nil
 	}); err != nil {
 		return DeleteResult{}, err
+	}
+	if window.ProjectID != "" {
+		s.removeEmptyAttachmentDirs(window.ProjectID)
 	}
 	return DeleteResult{Deleted: true}, nil
 }
@@ -1135,17 +1272,17 @@ func (s *HostService) releaseAdoptedWindow(ctx context.Context, window Window) (
 }
 
 func (s *HostService) adoptedMarkerState(ctx context.Context, window Window) (exists, exact, empty bool, err error) {
-	format := "#{MCE_INSTANCE}\t#{MCE_WINDOW}\t#{MCE_WORKSPACE}\t#{session_windows}\t#{window_panes}"
+	format := "#{MCE_INSTANCE}\t#{MCE_WINDOW}\t#{MCE_WORKSPACE}\t#{MCE_PROJECT}\t#{session_windows}\t#{window_panes}"
 	out, runErr := s.systemTmux(ctx, "display-message", "-p", "-t", window.TmuxSessionID, format)
 	if runErr != nil {
 		return s.classifyUnresponsiveAdoptedMarkers(ctx, window)
 	}
 	fields := strings.Split(strings.TrimSuffix(string(out), "\n"), "\t")
-	if len(fields) != 5 || fields[3] != "1" || fields[4] != "1" {
+	if len(fields) != 6 || fields[4] != "1" || fields[5] != "1" {
 		return s.classifyUnresponsiveAdoptedMarkers(ctx, window)
 	}
-	exact = fields[0] == s.store.instanceID && fields[1] == window.ID && fields[2] == window.WorkspaceID
-	empty = fields[0] == "" && fields[1] == "" && fields[2] == ""
+	exact = fields[0] == s.store.instanceID && fields[1] == window.ID && fields[2] == window.WorkspaceID && fields[3] == ""
+	empty = fields[0] == "" && fields[1] == "" && fields[2] == "" && fields[3] == ""
 	return true, exact, empty, nil
 }
 
@@ -1501,7 +1638,7 @@ func (s *HostService) Cleanup(ctx context.Context) (CleanupResult, error) {
 		}); err != nil {
 			return result, err
 		}
-		s.removeEmptyAttachmentDirs(attachment.WorkspaceID)
+		s.removeEmptyAttachmentDirs(attachmentTargetID(attachment))
 		result.AttachmentsDeleted++
 	}
 	if err := s.cleanupUnusedTmuxSocket(ctx); err != nil {
@@ -1598,7 +1735,7 @@ func (s *HostService) reconcilePendingCreates(ctx context.Context) ([]string, er
 				keptWindows = append(keptWindows, window)
 				continue
 			}
-			if !workspaceReady[window.WorkspaceID] {
+			if window.WorkspaceID != "" && !workspaceReady[window.WorkspaceID] {
 				notes = append(notes, window.Name+": parent workspace recovery is pending")
 				keptWindows = append(keptWindows, window)
 				continue
@@ -1669,7 +1806,7 @@ func (s *HostService) reconcilePendingCreates(ctx context.Context) ([]string, er
 				notes = append(notes, "attachment: pending upload recovery is uncertain")
 				keptAttachments = append(keptAttachments, attachment)
 			} else {
-				prunedAttachmentWorkspaces = append(prunedAttachmentWorkspaces, attachment.WorkspaceID)
+				prunedAttachmentWorkspaces = append(prunedAttachmentWorkspaces, attachmentTargetID(attachment))
 			}
 		}
 		registry.Attachments = keptAttachments
@@ -1917,7 +2054,7 @@ func (s *HostService) inspectSession(ctx context.Context, window Window) (tmuxSe
 	} else if window.Session != s.sessionName(window.ID) {
 		return sessionAltered, false, nil
 	}
-	format := "#{session_name}\t#{MCE_INSTANCE}\t#{MCE_WINDOW}\t#{MCE_WORKSPACE}\t#{pane_dead}\t#{session_windows}\t#{window_panes}"
+	format := "#{session_name}\t#{MCE_INSTANCE}\t#{MCE_WINDOW}\t#{MCE_WORKSPACE}\t#{MCE_PROJECT}\t#{pane_dead}\t#{session_windows}\t#{window_panes}"
 	target := s.tmuxTarget(window)
 	out, err := s.tmuxForWindow(ctx, window, "display-message", "-p", "-t", target, format)
 	if err != nil {
@@ -1931,22 +2068,22 @@ func (s *HostService) inspectSession(ctx context.Context, window Window) (tmuxSe
 		return sessionAbsent, false, errors.New("inspect tmux session ownership")
 	}
 	fields := strings.Split(strings.TrimSpace(string(out)), "\t")
-	if len(fields) != 7 {
+	if len(fields) != 8 {
 		if window.Adopted {
 			return s.classifyUnresponsiveAdoptedSession(ctx, window)
 		}
 		return sessionAbsent, false, errors.New("inspect tmux session ownership")
 	}
-	if fields[0] != window.Session || fields[1] != s.store.instanceID || fields[2] != window.ID || fields[3] != window.WorkspaceID {
+	if fields[0] != window.Session || fields[1] != s.store.instanceID || fields[2] != window.ID || fields[3] != window.WorkspaceID || fields[4] != window.ProjectID {
 		return sessionAltered, false, nil
 	}
-	if fields[4] != "0" && fields[4] != "1" {
+	if fields[5] != "0" && fields[5] != "1" {
 		return sessionAbsent, false, errors.New("inspect tmux process state")
 	}
-	if fields[5] != "1" || fields[6] != "1" {
+	if fields[6] != "1" || fields[7] != "1" {
 		return sessionAltered, false, nil
 	}
-	return sessionOwned, fields[4] == "0", nil
+	return sessionOwned, fields[5] == "0", nil
 }
 
 func (s *HostService) classifyUnresponsiveAdoptedSession(ctx context.Context, window Window) (tmuxSessionState, bool, error) {
@@ -2636,10 +2773,11 @@ func (s *HostService) removeOwnedAttachment(attachment AttachmentFile) error {
 	if err := validateID(attachment.ID, "attachment identifier"); err != nil {
 		return errors.New("refuse to delete attachment with invalid ownership metadata")
 	}
-	if err := validateID(attachment.WorkspaceID, "workspace identifier"); err != nil {
+	targetID := attachmentTargetID(attachment)
+	if (attachment.WorkspaceID == "") == (attachment.ProjectID == "") || validateID(targetID, "attachment target identifier") != nil {
 		return errors.New("refuse to delete attachment with invalid ownership metadata")
 	}
-	root := filepath.Join(s.store.base, "editor", "attachments", s.store.instanceID, attachment.WorkspaceID)
+	root := filepath.Join(s.store.base, "editor", "attachments", s.store.instanceID, targetID)
 	rel, err := filepath.Rel(root, attachment.Path)
 	if err != nil || rel == "." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
 		return errors.New("refuse to delete attachment outside the owned attachment directory")
@@ -2660,12 +2798,12 @@ func (s *HostService) removeOwnedAttachment(attachment AttachmentFile) error {
 	return nil
 }
 
-func (s *HostService) removeEmptyAttachmentDirs(workspaceID string) {
-	if validateID(workspaceID, "workspace identifier") != nil {
+func (s *HostService) removeEmptyAttachmentDirs(targetID string) {
+	if validateID(targetID, "attachment target identifier") != nil {
 		return
 	}
 	instanceRoot := filepath.Join(s.store.base, "editor", "attachments", s.store.instanceID)
-	_ = os.Remove(filepath.Join(instanceRoot, workspaceID))
+	_ = os.Remove(filepath.Join(instanceRoot, targetID))
 	_ = os.Remove(instanceRoot)
 }
 

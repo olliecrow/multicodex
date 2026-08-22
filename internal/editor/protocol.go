@@ -144,6 +144,12 @@ func dispatchHostRequest(parent context.Context, service *HostService, request p
 			return nil, err
 		}
 		return service.CreateWindow(ctx, params)
+	case "open_project_window":
+		var params OpenProjectWindowRequest
+		if err := decodeParams(request.Params, &params); err != nil {
+			return nil, err
+		}
+		return service.OpenProjectWindow(ctx, params)
 	case "list_tmux_sessions":
 		var params ListTmuxSessionsRequest
 		if err := decodeParams(request.Params, &params); err != nil {

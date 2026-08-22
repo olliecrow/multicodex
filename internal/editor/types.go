@@ -15,7 +15,7 @@ import (
 
 const (
 	stateVersion      = 1
-	hostProtocol      = 2
+	hostProtocol      = 3
 	historyLimit      = 60000
 	activityRows      = 100
 	cleanupAfter      = 7 * 24 * time.Hour
@@ -25,6 +25,7 @@ const (
 	localHostID       = "local"
 	localHostName     = "Local"
 	defaultWindowName = "Terminal"
+	projectWindowName = "Project terminal"
 )
 
 var (
@@ -91,7 +92,9 @@ type Workspace struct {
 
 type Window struct {
 	ID            string    `json:"id"`
-	WorkspaceID   string    `json:"workspace_id"`
+	WorkspaceID   string    `json:"workspace_id,omitempty"`
+	ProjectID     string    `json:"project_id,omitempty"`
+	ProjectPath   string    `json:"project_path,omitempty"`
 	Name          string    `json:"name"`
 	Session       string    `json:"session"`
 	TmuxSessionID string    `json:"tmux_session_id,omitempty"`
@@ -114,6 +117,16 @@ type CreateWorkspaceRequest struct {
 
 type CreateWindowRequest struct {
 	WorkspaceID string `json:"workspace_id"`
+}
+
+type OpenProjectWindowRequest struct {
+	ProjectID   string `json:"project_id"`
+	ProjectPath string `json:"project_path"`
+}
+
+type OpenProjectWindowResult struct {
+	Window  Window `json:"window"`
+	Created bool   `json:"created"`
 }
 
 type RenameRequest struct {
@@ -147,17 +160,40 @@ type DoctorResult struct {
 
 type AttachmentFile struct {
 	ID            string    `json:"id"`
-	WorkspaceID   string    `json:"workspace_id"`
+	WorkspaceID   string    `json:"workspace_id,omitempty"`
+	ProjectID     string    `json:"project_id,omitempty"`
 	Path          string    `json:"path"`
 	CreatedAt     time.Time `json:"created_at"`
 	CreatePending bool      `json:"create_pending,omitempty"`
 }
 
 type PutAttachmentRequest struct {
-	WorkspaceID string `json:"workspace_id"`
+	WorkspaceID string `json:"workspace_id,omitempty"`
+	ProjectID   string `json:"project_id,omitempty"`
 	Extension   string `json:"extension,omitempty"`
 	Data        []byte `json:"data"`
 	Image       bool   `json:"image,omitempty"`
+}
+
+func windowTargetID(window Window) string {
+	if window.WorkspaceID != "" {
+		return window.WorkspaceID
+	}
+	return window.ProjectID
+}
+
+func attachmentTargetID(attachment AttachmentFile) string {
+	if attachment.WorkspaceID != "" {
+		return attachment.WorkspaceID
+	}
+	return attachment.ProjectID
+}
+
+func attachmentRequestTargetID(request PutAttachmentRequest) string {
+	if request.WorkspaceID != "" {
+		return request.WorkspaceID
+	}
+	return request.ProjectID
 }
 
 type ProjectInfo struct {

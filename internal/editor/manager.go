@@ -329,6 +329,29 @@ func (m *Manager) CreateWindow(ctx context.Context, hostID string, request Creat
 	return window, nil
 }
 
+func (m *Manager) OpenProjectWindow(ctx context.Context, hostID string, request OpenProjectWindowRequest) (OpenProjectWindowResult, error) {
+	host, ok := m.findHost(hostID)
+	if !ok {
+		return OpenProjectWindowResult{}, errors.New("host no longer exists")
+	}
+	project, ok := findProject(host, request.ProjectID)
+	if !ok || project.Path != request.ProjectPath {
+		return OpenProjectWindowResult{}, errors.New("project no longer exists or its path changed")
+	}
+	client, err := m.client(ctx, host)
+	if err != nil {
+		return OpenProjectWindowResult{}, err
+	}
+	var result OpenProjectWindowResult
+	if err := client.Call(ctx, "open_project_window", request, &result); err != nil {
+		return OpenProjectWindowResult{}, err
+	}
+	if err := validateOpenedProjectWindow(request, result.Window); err != nil {
+		return OpenProjectWindowResult{}, err
+	}
+	return result, nil
+}
+
 func (m *Manager) ListTmuxSessions(ctx context.Context, hostID string, request ListTmuxSessionsRequest) ([]TmuxSessionCandidate, error) {
 	host, ok := m.findHost(hostID)
 	if !ok {
@@ -583,10 +606,16 @@ func validateHostSnapshot(host Host, snapshot HostSnapshot) error {
 		externalWorkspaces[workspace.ID] = workspace.External
 	}
 	windowIDs := make(map[string]bool, len(snapshot.Windows))
+	projectWindows := make(map[string]bool)
 	adoptedSessions := make(map[string]bool)
 	for _, window := range snapshot.Windows {
-		if validateID(window.ID, "window identifier") != nil || windowIDs[window.ID] || !workspaceIDs[window.WorkspaceID] || validateName(window.Name, "window name") != nil || window.CreatePending || window.PaneHash != "" && !paneHashPattern.MatchString(window.PaneHash) {
+		workspaceWindow := window.WorkspaceID != "" && window.ProjectID == "" && window.ProjectPath == "" && workspaceIDs[window.WorkspaceID]
+		projectWindow := window.WorkspaceID == "" && projectPaths[window.ProjectID] != "" && window.ProjectPath == projectPaths[window.ProjectID] && !projectWindows[window.ProjectID] && window.Name == projectWindowName && !window.Adopted
+		if validateID(window.ID, "window identifier") != nil || windowIDs[window.ID] || !workspaceWindow && !projectWindow || validateName(window.Name, "window name") != nil || window.CreatePending || window.PaneHash != "" && !paneHashPattern.MatchString(window.PaneHash) {
 			return errors.New("editor host returned unsafe window metadata")
+		}
+		if projectWindow {
+			projectWindows[window.ProjectID] = true
 		}
 		if window.Adopted {
 			if !externalWorkspaces[window.WorkspaceID] || validateTmuxSessionName(window.Session) != nil || !tmuxIDPattern.MatchString(window.TmuxSessionID) || adoptedSessions[window.Session] || adoptedSessions[window.TmuxSessionID] {
@@ -620,8 +649,15 @@ func validateCreatedWorkspace(request CreateWorkspaceRequest, workspace Workspac
 }
 
 func validateCreatedWindow(request CreateWindowRequest, window Window) error {
-	if validateID(window.ID, "window identifier") != nil || window.WorkspaceID != request.WorkspaceID || validateName(window.Name, "window name") != nil || window.Session != "mce-"+window.ID || window.TmuxSessionID != "" || window.Adopted || window.CreatePending || window.DeletePending {
+	if validateID(window.ID, "window identifier") != nil || window.WorkspaceID != request.WorkspaceID || window.ProjectID != "" || window.ProjectPath != "" || validateName(window.Name, "window name") != nil || window.Session != "mce-"+window.ID || window.TmuxSessionID != "" || window.Adopted || window.CreatePending || window.DeletePending {
 		return errors.New("editor host returned unsafe window metadata")
+	}
+	return nil
+}
+
+func validateOpenedProjectWindow(request OpenProjectWindowRequest, window Window) error {
+	if validateID(window.ID, "window identifier") != nil || window.WorkspaceID != "" || window.ProjectID != request.ProjectID || window.ProjectPath != request.ProjectPath || window.Name != projectWindowName || window.Session != "mce-"+window.ID || window.TmuxSessionID != "" || window.Adopted || window.CreatePending || window.DeletePending {
+		return errors.New("editor host returned unsafe project terminal metadata")
 	}
 	return nil
 }
@@ -645,7 +681,7 @@ func validateAdoptedTmuxSession(request AdoptTmuxSessionRequest, adopted Adopted
 }
 
 func validateAttachmentResult(request PutAttachmentRequest, attachment AttachmentFile) error {
-	if validateID(attachment.ID, "attachment identifier") != nil || attachment.WorkspaceID != request.WorkspaceID || validateRemotePath(attachment.Path) != nil || attachment.CreatePending {
+	if validateID(attachment.ID, "attachment identifier") != nil || attachment.WorkspaceID != request.WorkspaceID || attachment.ProjectID != request.ProjectID || (request.WorkspaceID == "") == (request.ProjectID == "") || validateRemotePath(attachment.Path) != nil || attachment.CreatePending {
 		return errors.New("editor host returned unsafe attachment metadata")
 	}
 	return nil
@@ -952,6 +988,11 @@ func sortedProjectsByActivity(state ClientState, statuses []HostStatus) []Projec
 				workspaceIDs[workspace.ID] = true
 			}
 			for _, window := range status.Snapshot.Windows {
+				if window.ProjectID == project.ID {
+					location.ProjectWindow = window
+					location.LastActivity = windowActivity(status.Host.ID, window, activities)
+					continue
+				}
 				if workspaceIDs[window.WorkspaceID] {
 					windowsByWorkspace[window.WorkspaceID] = append(windowsByWorkspace[window.WorkspaceID], window)
 				}
@@ -1001,10 +1042,10 @@ func sortedProjectsByActivity(state ClientState, statuses []HostStatus) []Projec
 		}
 	}
 	sort.SliceStable(scored, func(i, j int) bool {
-		leftHasWorkspaces := len(scored[i].location.Workspaces) > 0
-		rightHasWorkspaces := len(scored[j].location.Workspaces) > 0
-		if leftHasWorkspaces != rightHasWorkspaces {
-			return leftHasWorkspaces
+		leftActive := len(scored[i].location.Workspaces) > 0 || scored[i].location.ProjectWindow.ID != ""
+		rightActive := len(scored[j].location.Workspaces) > 0 || scored[j].location.ProjectWindow.ID != ""
+		if leftActive != rightActive {
+			return leftActive
 		}
 		if !scored[i].activity.Equal(scored[j].activity) {
 			return scored[i].activity.After(scored[j].activity)
@@ -1035,10 +1076,11 @@ func windowActivity(hostID string, window Window, activities map[string]time.Tim
 }
 
 type ProjectLocation struct {
-	Host         Host
-	Project      Project
-	Workspaces   []Workspace
-	Windows      []Window
-	LastActivity time.Time
-	HostError    string
+	Host          Host
+	Project       Project
+	ProjectWindow Window
+	Workspaces    []Workspace
+	Windows       []Window
+	LastActivity  time.Time
+	HostError     string
 }
