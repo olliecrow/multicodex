@@ -80,6 +80,45 @@ func TestInspectAdoptedSessionClassifiesEmptyTmuxReplyByExactID(t *testing.T) {
 	}
 }
 
+func TestAdoptedMarkerStateClassifiesEmptyTmuxReplyByExactID(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		ids        string
+		wantExists bool
+	}{
+		{name: "absent", ids: "$5\n", wantExists: false},
+		{name: "still present", ids: "$4\n", wantExists: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			service, err := NewHostService(privateTestHome(t), mustID(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			window := Window{
+				ID: mustID(t), WorkspaceID: mustID(t), Name: "Terminal",
+				Session: "ended-session", TmuxSessionID: "$4", Adopted: true,
+			}
+			service.runner = runnerFunc(func(_ context.Context, name string, args ...string) ([]byte, error) {
+				if name != "tmux" {
+					t.Fatalf("unexpected command %q", name)
+				}
+				if slices.Contains(args, "display-message") {
+					return []byte("\t\t\t\t\n"), nil
+				}
+				if slices.Contains(args, "list-sessions") {
+					return []byte(test.ids), nil
+				}
+				t.Fatalf("unexpected tmux arguments: %v", args)
+				return nil, errors.New("unexpected call")
+			})
+			exists, exact, empty, err := service.adoptedMarkerState(context.Background(), window)
+			if err != nil || exists != test.wantExists || exact || empty {
+				t.Fatalf("adopted marker state = %v, %v, %v, %v; want exists %v", exists, exact, empty, err, test.wantExists)
+			}
+		})
+	}
+}
+
 func TestSnapshotKeepsOtherHostStateWhenWindowDisappearsDuringCapture(t *testing.T) {
 	home := privateTestHome(t)
 	service, err := NewHostService(home, mustID(t))
