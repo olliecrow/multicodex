@@ -219,8 +219,8 @@ func TestSSHConnectionOptionsBoundDeadConnections(t *testing.T) {
 func TestHostRequestTimeoutsFinishBeforeClientDeadlines(t *testing.T) {
 	for method, want := range map[string]time.Duration{
 		"hello": 8 * time.Second, "snapshot": 8 * time.Second, "touch_window": 8 * time.Second,
-		"copy_mode": 8 * time.Second, "doctor": 8 * time.Second,
-		"delete_window": 25 * time.Second, "delete_workspace": 25 * time.Second,
+		"copy_mode": 8 * time.Second, "doctor": 8 * time.Second, "list_tmux_sessions": 8 * time.Second,
+		"delete_window": 25 * time.Second, "delete_workspace": 25 * time.Second, "adopt_tmux_session": 25 * time.Second,
 		"create_workspace": 2 * time.Minute, "put_attachment": 30 * time.Second,
 	} {
 		if got := hostRequestTimeout(method); got != want {

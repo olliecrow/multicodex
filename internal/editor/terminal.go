@@ -61,12 +61,10 @@ func attachWindowPTY(ctx context.Context, host Host, controlPath, instanceID str
 	if err := validateID(window.ID, "window identifier"); err != nil {
 		return nil, err
 	}
-	socket := "mce-" + instanceID[:12]
-	session := "mce-" + window.ID
-	if window.Session != session {
-		return nil, errors.New("refuse to attach to a non-deterministic tmux session")
+	args, err := tmuxAttachArgs(instanceID, window)
+	if err != nil {
+		return nil, err
 	}
-	args := []string{"-L", socket, "attach-session", "-t", session}
 	var cmd *exec.Cmd
 	if host.ID == localHostID {
 		cmd = exec.CommandContext(ctx, "tmux", args...)
@@ -78,8 +76,11 @@ func attachWindowPTY(ctx context.Context, host Host, controlPath, instanceID str
 			return nil, errors.New("remote terminal is missing its private SSH control path")
 		}
 		sshArgs := append([]string{"-tt"}, sshConnectionOptions("no", "", controlPath)...)
-		sshArgs = append(sshArgs, host.SSHAlias, "env", "-u", "TMUX", "-u", "TMUX_TMPDIR", "tmux")
-		sshArgs = append(sshArgs, args...)
+		sshArgs = append(sshArgs, host.SSHAlias)
+		remoteArgs := append([]string{"env", "-u", "TMUX", "-u", "TMUX_TMPDIR", "tmux"}, args...)
+		for _, arg := range remoteArgs {
+			sshArgs = append(sshArgs, quoteRemoteShellArg(arg))
+		}
 		cmd = exec.CommandContext(ctx, "ssh", sshArgs...)
 	}
 	cmd.Env = replaceEnvironment(sanitizedCommandEnvironment(os.Environ(), cmd.Path), "TERM", "xterm-256color")
@@ -177,6 +178,30 @@ func attachWindowPTY(ctx context.Context, host Host, controlPath, instanceID str
 		}
 	}()
 	return a, nil
+}
+
+func tmuxAttachArgs(instanceID string, window Window) ([]string, error) {
+	if err := validateID(instanceID, "editor instance identifier"); err != nil {
+		return nil, err
+	}
+	if err := validateID(window.ID, "window identifier"); err != nil {
+		return nil, err
+	}
+	if window.Adopted {
+		if validateTmuxSessionName(window.Session) != nil || !tmuxIDPattern.MatchString(window.TmuxSessionID) {
+			return nil, errors.New("refuse to attach to an unsafe adopted tmux session")
+		}
+		return []string{"-L", "default", "attach-session", "-t", window.TmuxSessionID}, nil
+	}
+	session := "mce-" + window.ID
+	if window.Session != session {
+		return nil, errors.New("refuse to attach to a non-deterministic tmux session")
+	}
+	return []string{"-L", "mce-" + instanceID[:12], "attach-session", "-t", session}, nil
+}
+
+func quoteRemoteShellArg(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
 
 func (a *Attachment) Resize(width, height int) error {

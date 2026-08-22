@@ -125,9 +125,10 @@ func (w *limitedWriter) Write(p []byte) (int, error) {
 }
 
 type HostService struct {
-	store  *hostStore
-	runner commandRunner
-	now    func() time.Time
+	store        *hostStore
+	runner       commandRunner
+	now          func() time.Time
+	systemSocket string
 }
 
 func NewHostService(multicodexHome, instanceID string) (*HostService, error) {
@@ -135,7 +136,7 @@ func NewHostService(multicodexHome, instanceID string) (*HostService, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &HostService{store: store, runner: execRunner{}, now: time.Now}, nil
+	return &HostService{store: store, runner: execRunner{}, now: time.Now, systemSocket: "default"}, nil
 }
 
 func (s *HostService) socketName() string {
@@ -151,6 +152,9 @@ func (s *HostService) sessionName(windowID string) string {
 }
 
 func (s *HostService) Snapshot(ctx context.Context) (HostSnapshot, error) {
+	if err := s.ensureOwnedWorktreeLocks(ctx); err != nil {
+		return HostSnapshot{}, err
+	}
 	var registry hostRegistry
 	if err := s.store.withReadLock(func(current hostRegistry) error {
 		registry = current
@@ -183,7 +187,7 @@ func (s *HostService) Snapshot(ctx context.Context) (HostSnapshot, error) {
 			continue
 		}
 		window.Alive = alive
-		capture, err := s.tmux(ctx, "capture-pane", "-p", "-J", "-S", "-"+strconv.Itoa(activityRows), "-t", window.Session)
+		capture, err := s.tmuxForWindow(ctx, window, "capture-pane", "-p", "-J", "-S", "-"+strconv.Itoa(activityRows), "-t", s.tmuxTarget(window))
 		if err != nil {
 			currentState, currentAlive, inspectErr := s.inspectSession(ctx, window)
 			if inspectErr != nil || currentState == sessionOwned && currentAlive {
@@ -276,10 +280,16 @@ func (s *HostService) CreateWorkspace(ctx context.Context, request CreateWorkspa
 			s.rollbackWorkspaceCreation(workspace, false)
 			return Workspace{}, err
 		}
+		if err := s.ensureGitWorktreeLock(ctx, workspace); err != nil {
+			s.rollbackWorkspaceCreation(workspace, true)
+			return Workspace{}, err
+		}
+		workspace.WorktreeLocked = true
 		if err := s.store.withLock(func(registry *hostRegistry) error {
 			for i := range registry.Workspaces {
 				if registry.Workspaces[i].ID == workspace.ID {
 					registry.Workspaces[i].CreatePending = false
+					registry.Workspaces[i].WorktreeLocked = true
 					return nil
 				}
 			}
@@ -298,15 +308,17 @@ func (s *HostService) rollbackWorkspaceCreation(workspace Workspace, branchOwned
 	if workspace.Git {
 		rollbackContext, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		if branchOwned {
-			clean = s.removeGitWorktree(rollbackContext, workspace, true) == nil
-		} else if _, err := os.Lstat(workspace.Path); err == nil {
-			// An exact worktree on the recorded branch proves that the failed Git
-			// invocation created the resource. Otherwise preserve all state.
-			clean = s.verifyGitWorktree(rollbackContext, workspace) == nil && s.removeGitWorktree(rollbackContext, workspace, true) == nil
+		if _, err := os.Lstat(workspace.Path); err == nil {
+			// The destination did not exist before creation. Remove it only while
+			// its Git identity and initial branch still prove this exact attempt.
+			clean = s.removeCreatedGitWorktree(rollbackContext, workspace) == nil
 		} else if errors.Is(err, os.ErrNotExist) {
-			exists, branchErr := s.gitBranchExists(rollbackContext, workspace.ProjectPath, workspace.Branch)
-			clean = branchErr == nil && !exists
+			if branchOwned {
+				clean = s.removeInitialBranch(rollbackContext, workspace, true) == nil
+			} else {
+				exists, branchErr := s.gitBranchExists(rollbackContext, workspace.ProjectPath, workspace.Branch)
+				clean = branchErr == nil && !exists
+			}
 		} else {
 			clean = false
 		}
@@ -326,6 +338,35 @@ func (s *HostService) rollbackWorkspaceCreation(workspace Workspace, branchOwned
 	}); err == nil {
 		s.removeEmptyWorktreeDirs(workspace.ProjectID)
 	}
+}
+
+func (s *HostService) removeCreatedGitWorktree(ctx context.Context, workspace Workspace) error {
+	if err := s.verifyGitWorktreeIdentity(ctx, workspace); err != nil {
+		return err
+	}
+	branch, err := s.runner.run(ctx, "git", "-C", workspace.Path, "branch", "--show-current")
+	if err != nil || strings.TrimSpace(string(branch)) != workspace.Branch {
+		return errors.New("refuse to roll back a changed Git worktree")
+	}
+	locked, reason, err := s.gitWorktreeLock(ctx, workspace)
+	if err != nil {
+		return err
+	}
+	if locked {
+		if reason != s.worktreeLockReason(workspace) {
+			return errors.New("refuse to roll back a worktree with a changed lock")
+		}
+		if _, err := s.runner.run(ctx, "git", "-C", workspace.ProjectPath, "worktree", "unlock", workspace.Path); err != nil {
+			return errors.New("unlock failed worktree creation")
+		}
+	}
+	if _, err := s.runner.run(ctx, "git", "-c", "core.hooksPath=/dev/null", "-C", workspace.ProjectPath, "worktree", "remove", "--force", workspace.Path); err != nil {
+		if locked {
+			_ = s.ensureGitWorktreeLock(ctx, workspace)
+		}
+		return errors.New("remove failed worktree creation")
+	}
+	return s.removeInitialBranch(ctx, workspace, true)
 }
 
 func (s *HostService) InspectProject(ctx context.Context, path string) (ProjectInfo, error) {
@@ -428,6 +469,258 @@ func (s *HostService) CreateWindow(ctx context.Context, request CreateWindowRequ
 	}
 	window.CreatePending = false
 	return window, nil
+}
+
+func (s *HostService) ListTmuxSessions(ctx context.Context, request ListTmuxSessionsRequest) ([]TmuxSessionCandidate, error) {
+	if err := validateID(request.ProjectID, "project identifier"); err != nil {
+		return nil, err
+	}
+	if err := validateAbsolutePath(request.ProjectPath, "project path"); err != nil {
+		return nil, err
+	}
+	info, err := s.InspectProject(ctx, request.ProjectPath)
+	if err != nil || info.Path != request.ProjectPath {
+		return nil, errors.New("project path is unavailable or changed")
+	}
+	names, err := s.systemTmuxSessions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(names) > 100 {
+		return nil, errors.New("too many system tmux sessions to inspect safely")
+	}
+	var candidates []TmuxSessionCandidate
+	for _, name := range names {
+		if validateTmuxSessionName(name) != nil {
+			continue
+		}
+		candidate, eligible, err := s.inspectTmuxCandidate(ctx, request.ProjectPath, name)
+		if err != nil {
+			return nil, err
+		}
+		if eligible {
+			candidates = append(candidates, candidate)
+		}
+	}
+	return candidates, nil
+}
+
+func (s *HostService) AdoptTmuxSession(ctx context.Context, request AdoptTmuxSessionRequest) (AdoptedTmuxSession, error) {
+	if err := validateID(request.ProjectID, "project identifier"); err != nil {
+		return AdoptedTmuxSession{}, err
+	}
+	if err := validateAbsolutePath(request.ProjectPath, "project path"); err != nil {
+		return AdoptedTmuxSession{}, err
+	}
+	if err := validateName(request.WorkspaceName, "workspace name"); err != nil {
+		return AdoptedTmuxSession{}, err
+	}
+	if err := validateTmuxSessionName(request.Session); err != nil {
+		return AdoptedTmuxSession{}, err
+	}
+	candidate, eligible, err := s.inspectTmuxCandidate(ctx, request.ProjectPath, request.Session)
+	if err != nil {
+		return AdoptedTmuxSession{}, err
+	} else if !eligible {
+		return AdoptedTmuxSession{}, errors.New("tmux session is no longer eligible for adoption")
+	}
+	root, isGit, err := s.gitRoot(ctx, request.ProjectPath)
+	if err != nil || isGit && !sameDirectory(root, request.ProjectPath) {
+		return AdoptedTmuxSession{}, errors.New("project identity changed before tmux adoption")
+	}
+	commonDir := ""
+	if isGit {
+		commonDir, err = s.gitCommonDir(ctx, request.ProjectPath)
+		if err != nil {
+			return AdoptedTmuxSession{}, err
+		}
+	}
+	workspaceID, err := newID()
+	if err != nil {
+		return AdoptedTmuxSession{}, err
+	}
+	windowID, err := newID()
+	if err != nil {
+		return AdoptedTmuxSession{}, err
+	}
+	now := s.now().UTC()
+	workspace := Workspace{ID: workspaceID, ProjectID: request.ProjectID, ProjectPath: request.ProjectPath, Name: request.WorkspaceName, Path: request.ProjectPath, Git: isGit, External: true, GitCommonDir: commonDir, CreatedAt: now, LastUsedAt: now, CreatePending: true}
+	window := Window{ID: windowID, WorkspaceID: workspaceID, Session: request.Session, TmuxSessionID: candidate.SessionID, Adopted: true, CreatedAt: now, LastUsedAt: now, Alive: true, CreatePending: true}
+	createdWorkspace := true
+	if err := s.store.withLock(func(registry *hostRegistry) error {
+		for _, existing := range registry.Windows {
+			if existing.Adopted && (existing.Session == request.Session || existing.TmuxSessionID == candidate.SessionID) {
+				return errors.New("tmux session is already managed by this editor")
+			}
+		}
+		for _, existing := range registry.Workspaces {
+			if existing.ProjectID != request.ProjectID {
+				continue
+			}
+			if existing.Name == request.WorkspaceName && existing.Path != request.ProjectPath {
+				return errors.New("a workspace with this name already exists in the project")
+			}
+			if existing.Path == request.ProjectPath {
+				if existing.Name != request.WorkspaceName || existing.Git != isGit || !existing.External {
+					return errors.New("the project checkout is already represented by a different workspace")
+				}
+				workspace = existing
+				workspace.LastUsedAt = now
+				workspaceID = existing.ID
+				window.WorkspaceID = existing.ID
+				createdWorkspace = false
+				break
+			}
+		}
+		names := map[string]bool{}
+		for _, existing := range registry.Windows {
+			if existing.WorkspaceID == window.WorkspaceID {
+				names[existing.Name] = true
+			}
+		}
+		window.Name = nextDefaultName(defaultWindowName, names)
+		if createdWorkspace {
+			registry.Workspaces = append(registry.Workspaces, workspace)
+		}
+		registry.Windows = append(registry.Windows, window)
+		return nil
+	}); err != nil {
+		return AdoptedTmuxSession{}, err
+	}
+	if err := s.setAdoptedMarkers(ctx, window); err != nil {
+		s.rollbackAdoption(ctx, workspace, window, createdWorkspace)
+		return AdoptedTmuxSession{}, err
+	}
+	if err := s.verifyAdoptedSession(ctx, window, request.ProjectPath, candidate.PanePID); err != nil {
+		s.rollbackAdoption(ctx, workspace, window, createdWorkspace)
+		return AdoptedTmuxSession{}, errors.New("verify adopted tmux session ownership")
+	}
+	if err := s.store.withLock(func(registry *hostRegistry) error {
+		for i := range registry.Windows {
+			if registry.Windows[i].ID == window.ID {
+				registry.Windows[i].CreatePending = false
+				window = registry.Windows[i]
+			}
+		}
+		for i := range registry.Workspaces {
+			if registry.Workspaces[i].ID == window.WorkspaceID {
+				registry.Workspaces[i].CreatePending = false
+				registry.Workspaces[i].LastUsedAt = now
+				workspace = registry.Workspaces[i]
+				return nil
+			}
+		}
+		return errors.New("adopted workspace record disappeared")
+	}); err != nil {
+		return AdoptedTmuxSession{}, err
+	}
+	return AdoptedTmuxSession{Workspace: workspace, Window: window}, nil
+}
+
+func (s *HostService) verifyAdoptedSession(ctx context.Context, window Window, projectPath, panePID string) error {
+	format := "#{session_name}\t#{MCE_INSTANCE}\t#{MCE_WINDOW}\t#{MCE_WORKSPACE}\t#{pane_dead}\t#{session_windows}\t#{window_panes}\t#{session_grouped}\t#{session_attached}\t#{pane_current_path}\t#{pane_pid}"
+	out, err := s.systemTmux(ctx, "display-message", "-p", "-t", window.TmuxSessionID, format)
+	if err != nil {
+		return err
+	}
+	fields := strings.Split(strings.TrimSuffix(string(out), "\n"), "\t")
+	if len(fields) != 11 || fields[0] != window.Session || fields[1] != s.store.instanceID || fields[2] != window.ID || fields[3] != window.WorkspaceID || fields[4] != "0" || fields[5] != "1" || fields[6] != "1" || fields[7] != "0" || fields[8] != "0" || !sameDirectory(fields[9], projectPath) || fields[10] != panePID {
+		return errors.New("adopted tmux session changed during registration")
+	}
+	return nil
+}
+
+func (s *HostService) inspectTmuxCandidate(ctx context.Context, projectPath, session string) (TmuxSessionCandidate, bool, error) {
+	present, err := s.systemTmuxSessionPresent(ctx, session)
+	if err != nil || !present {
+		return TmuxSessionCandidate{}, false, err
+	}
+	format := "#{session_name}\t#{session_id}\t#{MCE_INSTANCE}\t#{MCE_WINDOW}\t#{MCE_WORKSPACE}\t#{pane_dead}\t#{session_windows}\t#{window_panes}\t#{session_grouped}\t#{session_attached}\t#{pane_current_path}\t#{pane_current_command}\t#{pane_pid}"
+	out, err := s.systemTmux(ctx, "display-message", "-p", "-t", session, format)
+	if err != nil {
+		var failure commandFailure
+		if errors.As(err, &failure) && failure.exitCode == 1 && !failure.notFound {
+			return TmuxSessionCandidate{}, false, nil
+		}
+		return TmuxSessionCandidate{}, false, errors.New("inspect tmux session for adoption")
+	}
+	fields := strings.Split(strings.TrimSuffix(string(out), "\n"), "\t")
+	if len(fields) != 13 || fields[0] != session || !tmuxIDPattern.MatchString(fields[1]) || fields[2] != "" || fields[3] != "" || fields[4] != "" || fields[5] != "0" || fields[6] != "1" || fields[7] != "1" || fields[8] != "0" || fields[9] != "0" || !sameDirectory(fields[10], projectPath) || validateName(fields[11], "tmux command") != nil || !positiveDecimal(fields[12]) {
+		return TmuxSessionCandidate{}, false, nil
+	}
+	return TmuxSessionCandidate{Name: session, Command: fields[11], SessionID: fields[1], PanePID: fields[12]}, true, nil
+}
+
+func positiveDecimal(value string) bool {
+	number, err := strconv.ParseUint(value, 10, 64)
+	return err == nil && number > 0
+}
+
+func (s *HostService) setAdoptedMarkers(ctx context.Context, window Window) error {
+	values := [][2]string{{"MCE_INSTANCE", s.store.instanceID}, {"MCE_WINDOW", window.ID}, {"MCE_WORKSPACE", window.WorkspaceID}}
+	for _, value := range values {
+		if _, err := s.systemTmux(ctx, "set-environment", "-t", window.TmuxSessionID, value[0], value[1]); err != nil {
+			return errors.New("mark tmux session for editor adoption")
+		}
+	}
+	return nil
+}
+
+func (s *HostService) clearAdoptedMarkers(ctx context.Context, window Window) error {
+	format := "#{MCE_INSTANCE}\t#{MCE_WINDOW}\t#{MCE_WORKSPACE}"
+	out, err := s.systemTmux(ctx, "display-message", "-p", "-t", window.TmuxSessionID, format)
+	if err != nil {
+		present, inspectErr := s.systemTmuxSessionIDPresent(ctx, window.TmuxSessionID)
+		if inspectErr == nil && !present {
+			return nil
+		}
+		return errors.New("inspect adopted tmux markers before release")
+	}
+	fields := strings.Split(strings.TrimSuffix(string(out), "\n"), "\t")
+	expected := []string{s.store.instanceID, window.ID, window.WorkspaceID}
+	keys := []string{"MCE_INSTANCE", "MCE_WINDOW", "MCE_WORKSPACE"}
+	if len(fields) != len(expected) {
+		return errors.New("refuse to clear uncertain tmux ownership markers")
+	}
+	for i := range fields {
+		if fields[i] != "" && fields[i] != expected[i] {
+			return errors.New("refuse to clear changed tmux ownership markers")
+		}
+	}
+	for i, key := range keys {
+		if fields[i] == "" {
+			continue
+		}
+		if _, err := s.systemTmux(ctx, "set-environment", "-u", "-t", window.TmuxSessionID, key); err != nil {
+			return errors.New("release adopted tmux session marker")
+		}
+	}
+	return nil
+}
+
+func (s *HostService) rollbackAdoption(ctx context.Context, workspace Workspace, window Window, createdWorkspace bool) {
+	if err := s.clearAdoptedMarkers(ctx, window); err != nil {
+		return
+	}
+	_ = s.store.withLock(func(registry *hostRegistry) error {
+		windows := registry.Windows[:0]
+		for _, existing := range registry.Windows {
+			if existing.ID != window.ID {
+				windows = append(windows, existing)
+			}
+		}
+		registry.Windows = windows
+		if createdWorkspace {
+			workspaces := registry.Workspaces[:0]
+			for _, existing := range registry.Workspaces {
+				if existing.ID != workspace.ID {
+					workspaces = append(workspaces, existing)
+				}
+			}
+			registry.Workspaces = workspaces
+		}
+		return nil
+	})
 }
 
 func (s *HostService) RenameWorkspace(_ context.Context, request RenameRequest) error {
@@ -692,7 +985,7 @@ func (s *HostService) CopyMode(ctx context.Context, id string) error {
 	if err != nil || !owned {
 		return errors.New("refuse to control a tmux session without exact editor ownership")
 	}
-	if _, err := s.tmux(ctx, "copy-mode", "-t", selected.Session); err != nil {
+	if _, err := s.tmuxForWindow(ctx, *selected, "copy-mode", "-t", s.tmuxTarget(*selected)); err != nil {
 		return errors.New("open tmux scrollback")
 	}
 	return nil
@@ -721,6 +1014,9 @@ func (s *HostService) deleteWindow(ctx context.Context, request DeleteRequest, r
 	}
 	if !found {
 		return DeleteResult{Reason: "window no longer exists"}, nil
+	}
+	if window.Adopted {
+		return s.releaseAdoptedWindow(ctx, window)
 	}
 	effectiveForce := request.Force
 	state, alive, err := s.inspectSession(ctx, window)
@@ -787,6 +1083,74 @@ func (s *HostService) deleteWindow(ctx context.Context, request DeleteRequest, r
 		return DeleteResult{}, err
 	}
 	return DeleteResult{Deleted: true}, nil
+}
+
+func (s *HostService) releaseAdoptedWindow(ctx context.Context, window Window) (DeleteResult, error) {
+	if !window.Adopted {
+		return DeleteResult{}, errors.New("refuse to release an editor-created tmux session")
+	}
+	exists, exact, empty, err := s.adoptedMarkerState(ctx, window)
+	if err != nil {
+		return DeleteResult{}, err
+	}
+	if exists && !exact && !empty {
+		return DeleteResult{}, errors.New("adopted tmux ownership changed; no release was performed")
+	}
+	if err := s.store.withLock(func(registry *hostRegistry) error {
+		for i := range registry.Windows {
+			if registry.Windows[i].ID == window.ID {
+				registry.Windows[i].DeletePending = true
+				return nil
+			}
+		}
+		return errors.New("window no longer exists")
+	}); err != nil {
+		return DeleteResult{}, err
+	}
+	exists, exact, empty, err = s.adoptedMarkerState(ctx, window)
+	if err != nil {
+		return DeleteResult{}, err
+	}
+	if exists && !exact && !empty {
+		return DeleteResult{}, errors.New("adopted tmux ownership changed; no release was performed")
+	}
+	if exact {
+		if err := s.clearAdoptedMarkers(ctx, window); err != nil {
+			return DeleteResult{}, err
+		}
+	}
+	if err := s.store.withLock(func(registry *hostRegistry) error {
+		kept := registry.Windows[:0]
+		for _, existing := range registry.Windows {
+			if existing.ID != window.ID {
+				kept = append(kept, existing)
+			}
+		}
+		registry.Windows = kept
+		return nil
+	}); err != nil {
+		return DeleteResult{}, err
+	}
+	return DeleteResult{Deleted: true}, nil
+}
+
+func (s *HostService) adoptedMarkerState(ctx context.Context, window Window) (exists, exact, empty bool, err error) {
+	format := "#{MCE_INSTANCE}\t#{MCE_WINDOW}\t#{MCE_WORKSPACE}\t#{session_windows}\t#{window_panes}"
+	out, runErr := s.systemTmux(ctx, "display-message", "-p", "-t", window.TmuxSessionID, format)
+	if runErr != nil {
+		present, inspectErr := s.systemTmuxSessionIDPresent(ctx, window.TmuxSessionID)
+		if inspectErr == nil && !present {
+			return false, false, false, nil
+		}
+		return false, false, false, errors.New("inspect adopted tmux markers")
+	}
+	fields := strings.Split(strings.TrimSuffix(string(out), "\n"), "\t")
+	if len(fields) != 5 || fields[3] != "1" || fields[4] != "1" {
+		return true, false, false, nil
+	}
+	exact = fields[0] == s.store.instanceID && fields[1] == window.ID && fields[2] == window.WorkspaceID
+	empty = fields[0] == "" && fields[1] == "" && fields[2] == ""
+	return true, exact, empty, nil
 }
 
 func (s *HostService) DeleteWorkspace(ctx context.Context, request DeleteRequest) (DeleteResult, error) {
@@ -877,7 +1241,7 @@ func (s *HostService) deleteWorkspace(ctx context.Context, request DeleteRequest
 	}); err != nil {
 		return DeleteResult{}, err
 	}
-	if workspace.Git {
+	if workspace.Git && !workspace.External {
 		if err := s.removeGitWorktree(ctx, workspace, effectiveForce); err != nil {
 			return DeleteResult{}, err
 		}
@@ -927,6 +1291,17 @@ func (s *HostService) workspaceDeletionRisk(ctx context.Context, workspace Works
 	liveWindows := 0
 	uncertainWindows := 0
 	for _, window := range windows {
+		if window.Adopted {
+			exists, exact, empty, err := s.adoptedMarkerState(ctx, window)
+			if err != nil {
+				return "", false, err
+			}
+			if exists && !exact && !empty {
+				uncertainWindows++
+				allForceable = false
+			}
+			continue
+		}
 		state, alive, err := s.inspectSession(ctx, window)
 		if err != nil {
 			return "", false, err
@@ -953,7 +1328,7 @@ func (s *HostService) workspaceDeletionRisk(ctx context.Context, workspace Works
 		}
 		reasons = append(reasons, fmt.Sprintf("workspace has %d live %s", liveWindows, label))
 	}
-	if workspace.Git {
+	if workspace.Git && !workspace.External {
 		reason, forceable := s.gitWorkspaceDeletionRiskForPath(ctx, workspace)
 		if reason != "" {
 			reasons = append(reasons, reason)
@@ -1015,6 +1390,9 @@ func (s *HostService) clearWorkspaceCascadeDeletePending(workspaceID string) err
 
 func (s *HostService) Cleanup(ctx context.Context) (CleanupResult, error) {
 	result := CleanupResult{}
+	if err := s.ensureOwnedWorktreeLocks(ctx); err != nil {
+		return result, err
+	}
 	cutoff := s.now().UTC().Add(-cleanupAfter)
 	recoveryNotes, err := s.reconcilePendingCreates(ctx)
 	if err != nil {
@@ -1026,6 +1404,15 @@ func (s *HostService) Cleanup(ctx context.Context) (CleanupResult, error) {
 		return result, err
 	}
 	for _, window := range registry.Windows {
+		if window.Adopted {
+			if window.DeletePending {
+				deleted, deleteErr := s.deleteWindow(ctx, DeleteRequest{ID: window.ID}, true)
+				if deleteErr != nil || !deleted.Deleted {
+					result.Skipped = append(result.Skipped, window.Name+": adopted session release did not complete")
+				}
+			}
+			continue
+		}
 		if !window.DeletePending && !window.LastUsedAt.Before(cutoff) {
 			continue
 		}
@@ -1036,7 +1423,7 @@ func (s *HostService) Cleanup(ctx context.Context) (CleanupResult, error) {
 				continue
 			}
 			if owned {
-				alive, err := s.paneAlive(ctx, window.Session)
+				alive, err := s.paneAlive(ctx, window)
 				if err != nil {
 					result.Skipped = append(result.Skipped, window.Name+": process state is uncertain")
 					continue
@@ -1057,6 +1444,9 @@ func (s *HostService) Cleanup(ctx context.Context) (CleanupResult, error) {
 		return result, err
 	}
 	for _, workspace := range registry.Workspaces {
+		if workspace.External && !workspace.DeletePending {
+			continue
+		}
 		if !workspace.DeletePending {
 			hasWindow := false
 			for _, window := range registry.Windows {
@@ -1120,11 +1510,29 @@ func (s *HostService) reconcilePendingCreates(ctx context.Context) ([]string, er
 	var notes []string
 	var prunedProjects []string
 	var prunedAttachmentWorkspaces []string
+	pendingExternal := map[string]bool{}
 	err := s.store.withLock(func(registry *hostRegistry) error {
 		keptWorkspaces := registry.Workspaces[:0]
 		for i := range registry.Workspaces {
 			workspace := registry.Workspaces[i]
 			if !workspace.CreatePending {
+				keptWorkspaces = append(keptWorkspaces, workspace)
+				continue
+			}
+			if workspace.External {
+				info, statErr := os.Stat(workspace.Path)
+				valid := statErr == nil && info.IsDir() && workspace.Path == workspace.ProjectPath
+				if valid && workspace.Git {
+					commonDir, commonErr := s.gitCommonDir(ctx, workspace.Path)
+					valid = commonErr == nil && sameDirectory(commonDir, workspace.GitCommonDir)
+				}
+				if !valid {
+					notes = append(notes, workspace.Name+": pending preserved workspace recovery is uncertain")
+					keptWorkspaces = append(keptWorkspaces, workspace)
+					continue
+				}
+				pendingExternal[workspace.ID] = true
+				workspace.CreatePending = false
 				keptWorkspaces = append(keptWorkspaces, workspace)
 				continue
 			}
@@ -1138,8 +1546,9 @@ func (s *HostService) reconcilePendingCreates(ctx context.Context) ([]string, er
 				root, isGit, rootErr := s.gitRoot(ctx, workspace.Path)
 				commonDir, commonErr := s.gitCommonDir(ctx, workspace.Path)
 				branch, branchErr := s.runner.run(ctx, "git", "-C", workspace.Path, "branch", "--show-current")
-				if rootErr == nil && isGit && commonErr == nil && sameDirectory(root, workspace.Path) && sameDirectory(commonDir, workspace.GitCommonDir) && branchErr == nil && strings.TrimSpace(string(branch)) == workspace.Branch {
+				if rootErr == nil && isGit && commonErr == nil && sameDirectory(root, workspace.Path) && sameDirectory(commonDir, workspace.GitCommonDir) && branchErr == nil && strings.TrimSpace(string(branch)) == workspace.Branch && s.ensureGitWorktreeLock(ctx, workspace) == nil {
 					workspace.CreatePending = false
+					workspace.WorktreeLocked = true
 					keptWorkspaces = append(keptWorkspaces, workspace)
 					continue
 				}
@@ -1190,6 +1599,25 @@ func (s *HostService) reconcilePendingCreates(ctx context.Context) ([]string, er
 				keptWindows = append(keptWindows, window)
 				continue
 			}
+			if window.Adopted {
+				exists, exact, empty, markerErr := s.adoptedMarkerState(ctx, window)
+				if markerErr != nil {
+					notes = append(notes, window.Name+": pending adopted tmux recovery is uncertain")
+					keptWindows = append(keptWindows, window)
+					continue
+				}
+				if !exists || empty {
+					continue
+				}
+				if !exact {
+					notes = append(notes, window.Name+": pending adopted tmux ownership changed")
+					keptWindows = append(keptWindows, window)
+					continue
+				}
+				window.CreatePending = false
+				keptWindows = append(keptWindows, window)
+				continue
+			}
 			state, _, ownershipErr := s.inspectSession(ctx, window)
 			if ownershipErr != nil {
 				notes = append(notes, window.Name+": pending tmux recovery is uncertain")
@@ -1213,6 +1641,19 @@ func (s *HostService) reconcilePendingCreates(ctx context.Context) ([]string, er
 			keptWindows = append(keptWindows, window)
 		}
 		registry.Windows = keptWindows
+		if len(pendingExternal) > 0 {
+			hasWindow := map[string]bool{}
+			for _, window := range registry.Windows {
+				hasWindow[window.WorkspaceID] = true
+			}
+			keptWorkspaces = registry.Workspaces[:0]
+			for _, workspace := range registry.Workspaces {
+				if !pendingExternal[workspace.ID] || hasWindow[workspace.ID] {
+					keptWorkspaces = append(keptWorkspaces, workspace)
+				}
+			}
+			registry.Workspaces = keptWorkspaces
+		}
 
 		keptAttachments := registry.Attachments[:0]
 		for _, attachment := range registry.Attachments {
@@ -1359,6 +1800,98 @@ func (s *HostService) tmux(ctx context.Context, args ...string) ([]byte, error) 
 	return s.runner.run(ctx, "tmux", append([]string{"-L", s.socketName()}, args...)...)
 }
 
+func (s *HostService) systemTmux(ctx context.Context, args ...string) ([]byte, error) {
+	return s.runner.run(ctx, "tmux", append([]string{"-L", s.systemSocket}, args...)...)
+}
+
+func (s *HostService) systemTmuxSessions(ctx context.Context) ([]string, error) {
+	return s.listSystemTmux(ctx, "#{session_name}", "inspect system tmux sessions")
+}
+
+func (s *HostService) systemTmuxSessionPresent(ctx context.Context, session string) (bool, error) {
+	names, err := s.systemTmuxSessions(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, name := range names {
+		if name == session {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (s *HostService) systemTmuxSessionIDPresent(ctx context.Context, sessionID string) (bool, error) {
+	ids, err := s.listSystemTmux(ctx, "#{session_id}", "inspect system tmux session identity")
+	if err != nil {
+		return false, err
+	}
+	for _, id := range ids {
+		if id == sessionID {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (s *HostService) listSystemTmux(ctx context.Context, format, failure string) ([]string, error) {
+	out, err := s.systemTmux(ctx, "list-sessions", "-F", format)
+	if err != nil {
+		inactive, inspectErr := inactiveTmuxSocket(s.systemTmuxSocketPath())
+		if inspectErr == nil && inactive {
+			return []string{}, nil
+		}
+		return nil, errors.New(failure)
+	}
+	trimmed := strings.TrimSuffix(string(out), "\n")
+	if trimmed == "" {
+		return []string{}, nil
+	}
+	return strings.Split(trimmed, "\n"), nil
+}
+
+func inactiveTmuxSocket(path string) (bool, error) {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return true, nil
+	}
+	if err != nil || info.Mode().Type() != os.ModeSocket {
+		return false, errors.New("tmux socket state is uncertain")
+	}
+	connection, dialErr := net.DialTimeout("unix", path, 250*time.Millisecond)
+	if dialErr == nil {
+		_ = connection.Close()
+		return false, nil
+	}
+	if errors.Is(dialErr, syscall.ECONNREFUSED) {
+		return true, nil
+	}
+	if errors.Is(dialErr, os.ErrNotExist) {
+		if _, statErr := os.Lstat(path); errors.Is(statErr, os.ErrNotExist) {
+			return true, nil
+		}
+	}
+	return false, errors.New("tmux socket state is uncertain")
+}
+
+func (s *HostService) systemTmuxSocketPath() string {
+	return filepath.Join("/tmp", "tmux-"+strconv.Itoa(os.Getuid()), s.systemSocket)
+}
+
+func (s *HostService) tmuxForWindow(ctx context.Context, window Window, args ...string) ([]byte, error) {
+	if window.Adopted {
+		return s.systemTmux(ctx, args...)
+	}
+	return s.tmux(ctx, args...)
+}
+
+func (s *HostService) tmuxTarget(window Window) string {
+	if window.Adopted {
+		return window.TmuxSessionID
+	}
+	return window.Session
+}
+
 func (s *HostService) ownsSession(ctx context.Context, window Window) (bool, error) {
 	state, _, err := s.inspectSession(ctx, window)
 	return state == sessionOwned, err
@@ -1373,12 +1906,27 @@ const (
 )
 
 func (s *HostService) inspectSession(ctx context.Context, window Window) (tmuxSessionState, bool, error) {
-	if window.Session != s.sessionName(window.ID) {
+	if window.Adopted {
+		if validateTmuxSessionName(window.Session) != nil || !tmuxIDPattern.MatchString(window.TmuxSessionID) {
+			return sessionAltered, false, nil
+		}
+	} else if window.Session != s.sessionName(window.ID) {
 		return sessionAltered, false, nil
 	}
 	format := "#{session_name}\t#{MCE_INSTANCE}\t#{MCE_WINDOW}\t#{MCE_WORKSPACE}\t#{pane_dead}\t#{session_windows}\t#{window_panes}"
-	out, err := s.tmux(ctx, "display-message", "-p", "-t", window.Session, format)
+	target := s.tmuxTarget(window)
+	out, err := s.tmuxForWindow(ctx, window, "display-message", "-p", "-t", target, format)
 	if err != nil {
+		if window.Adopted {
+			present, inspectErr := s.systemTmuxSessionIDPresent(ctx, window.TmuxSessionID)
+			if inspectErr != nil {
+				return sessionAbsent, false, errors.New("inspect tmux session ownership")
+			}
+			if present {
+				return sessionAltered, false, nil
+			}
+			return sessionAbsent, false, nil
+		}
 		var failure commandFailure
 		if errors.As(err, &failure) && failure.exitCode == 1 && !failure.notFound {
 			return sessionAbsent, false, nil
@@ -1401,8 +1949,8 @@ func (s *HostService) inspectSession(ctx context.Context, window Window) (tmuxSe
 	return sessionOwned, fields[4] == "0", nil
 }
 
-func (s *HostService) paneAlive(ctx context.Context, session string) (bool, error) {
-	out, err := s.tmux(ctx, "display-message", "-p", "-t", session, "#{pane_dead}")
+func (s *HostService) paneAlive(ctx context.Context, window Window) (bool, error) {
+	out, err := s.tmuxForWindow(ctx, window, "display-message", "-p", "-t", s.tmuxTarget(window), "#{pane_dead}")
 	if err != nil {
 		return false, err
 	}
@@ -1410,6 +1958,9 @@ func (s *HostService) paneAlive(ctx context.Context, session string) (bool, erro
 }
 
 func (s *HostService) killOwnedSession(ctx context.Context, window Window) error {
+	if window.Adopted {
+		return errors.New("refuse to stop a preserved tmux session")
+	}
 	owned, err := s.ownsSession(ctx, window)
 	if err != nil || !owned {
 		return errors.New("refuse to delete a tmux session without exact editor ownership")
@@ -1601,27 +2152,141 @@ func (s *HostService) addGitWorktree(ctx context.Context, workspace Workspace) e
 	return nil
 }
 
+func (s *HostService) worktreeLockReason(workspace Workspace) string {
+	return "multicodex-editor:" + s.store.instanceID + ":" + workspace.ID
+}
+
+func (s *HostService) ensureOwnedWorktreeLocks(ctx context.Context) error {
+	var workspaces []Workspace
+	if err := s.store.withReadLock(func(registry hostRegistry) error {
+		for _, workspace := range registry.Workspaces {
+			if workspace.Git && !workspace.External && !workspace.CreatePending && !workspace.WorktreeLocked {
+				workspaces = append(workspaces, workspace)
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	for _, workspace := range workspaces {
+		if _, err := os.Stat(workspace.Path); errors.Is(err, os.ErrNotExist) {
+			continue
+		} else if err != nil {
+			return errors.New("inspect Git worktree before ownership migration")
+		}
+		if err := s.ensureGitWorktreeLock(ctx, workspace); err != nil {
+			return err
+		}
+		if err := s.store.withLock(func(registry *hostRegistry) error {
+			for i := range registry.Workspaces {
+				if registry.Workspaces[i].ID == workspace.ID {
+					registry.Workspaces[i].WorktreeLocked = true
+					return nil
+				}
+			}
+			return errors.New("workspace disappeared during ownership migration")
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *HostService) ensureGitWorktreeLock(ctx context.Context, workspace Workspace) error {
+	if workspace.External || !workspace.Git {
+		return errors.New("refuse to lock a preserved directory")
+	}
+	if err := s.verifyGitWorktreeIdentity(ctx, workspace); err != nil {
+		return err
+	}
+	locked, reason, err := s.gitWorktreeLock(ctx, workspace)
+	if err != nil {
+		return err
+	}
+	expected := s.worktreeLockReason(workspace)
+	if locked {
+		if reason != expected {
+			return errors.New("refuse Git operation because the worktree lock changed")
+		}
+		return nil
+	}
+	if _, err := s.runner.run(ctx, "git", "-C", workspace.ProjectPath, "worktree", "lock", "--reason", expected, workspace.Path); err != nil {
+		return errors.New("lock editor-owned Git worktree")
+	}
+	locked, reason, err = s.gitWorktreeLock(ctx, workspace)
+	if err != nil || !locked || reason != expected {
+		return errors.New("verify editor-owned Git worktree lock")
+	}
+	return nil
+}
+
+func (s *HostService) gitWorktreeLock(ctx context.Context, workspace Workspace) (bool, string, error) {
+	out, err := s.runner.run(ctx, "git", "-C", workspace.ProjectPath, "worktree", "list", "--porcelain")
+	if err != nil {
+		return false, "", errors.New("inspect Git worktree lock")
+	}
+	expectedPath, err := canonicalMissingPath(workspace.Path)
+	if err != nil {
+		return false, "", errors.New("inspect Git worktree lock path")
+	}
+	for _, record := range strings.Split(strings.TrimSpace(string(out)), "\n\n") {
+		lines := strings.Split(record, "\n")
+		path, reason := "", ""
+		locked := false
+		for _, line := range lines {
+			switch {
+			case strings.HasPrefix(line, "worktree "):
+				path = strings.TrimPrefix(line, "worktree ")
+			case line == "locked":
+				locked = true
+			case strings.HasPrefix(line, "locked "):
+				locked = true
+				reason = strings.TrimPrefix(line, "locked ")
+			}
+		}
+		canonicalPath, pathErr := canonicalMissingPath(path)
+		if pathErr == nil && canonicalPath == expectedPath {
+			return locked, reason, nil
+		}
+	}
+	return false, "", errors.New("owned Git worktree registration is missing")
+}
+
 func (s *HostService) gitWorkspaceDeletionRisk(ctx context.Context, workspace Workspace) (string, bool) {
 	if s.verifyGitProject(ctx, workspace) != nil {
 		return "Git project identity changed or is uncertain", false
 	}
 	if err := s.verifyGitWorktree(ctx, workspace); err != nil {
-		return "worktree path is unavailable; run Git worktree repair manually", false
+		return "worktree path or ownership lock changed; repair it manually", false
 	}
 	out, err := s.runner.run(ctx, "git", "-C", workspace.Path, "status", "--porcelain=v1", "--untracked-files=all", "--ignored=matching")
 	if err != nil {
 		return "worktree status is uncertain", false
 	}
 	dirty := len(bytes.TrimSpace(out)) > 0
+	detached := false
+	if _, err := s.runner.run(ctx, "git", "-C", workspace.Path, "symbolic-ref", "--quiet", "HEAD"); err != nil {
+		var failure commandFailure
+		if !errors.As(err, &failure) || failure.notFound || failure.exitCode != 1 {
+			return "worktree checkout state is uncertain", false
+		}
+		detached = true
+	}
 	branchReason, branchForceable := s.gitBranchDeletionRisk(ctx, workspace)
 	if branchReason != "" && !branchForceable {
 		return branchReason, false
 	}
+	if dirty && detached {
+		return "worktree has uncommitted, untracked, or ignored files and a detached checkout that may contain unreachable commits; confirm permanent deletion", true
+	}
 	if dirty && branchReason != "" {
-		return "worktree has uncommitted, untracked, or ignored files and branch has commits not present in its base; confirm permanent deletion", true
+		return "worktree has uncommitted, untracked, or ignored files and the initial editor branch has commits not present in its base; confirm permanent deletion", true
 	}
 	if dirty {
 		return "worktree has uncommitted, untracked, or ignored files; confirm permanent deletion", true
+	}
+	if detached {
+		return "worktree has a detached checkout that may contain unreachable commits; confirm permanent deletion", true
 	}
 	return branchReason, branchForceable
 }
@@ -1636,6 +2301,13 @@ func (s *HostService) gitBranchDeletionRisk(ctx context.Context, workspace Works
 	}
 	if !exists {
 		return "", false
+	}
+	checkedElsewhere, err := s.branchCheckedOutElsewhere(ctx, workspace)
+	if err != nil {
+		return "branch checkout state is uncertain", false
+	}
+	if checkedElsewhere {
+		return "initial editor branch is checked out in another worktree; switch that worktree before deletion", false
 	}
 	oid, err := s.runner.run(ctx, "git", "-C", workspace.ProjectPath, "rev-parse", "--verify", "refs/heads/"+workspace.Branch)
 	if err != nil || !gitOIDPattern.MatchString(strings.TrimSpace(string(oid))) {
@@ -1656,12 +2328,25 @@ func (s *HostService) gitBranchDeletionRisk(ctx context.Context, workspace Works
 }
 
 func (s *HostService) removeGitWorktree(ctx context.Context, workspace Workspace, force bool) error {
+	if workspace.External {
+		return errors.New("refuse to remove a preserved project checkout")
+	}
 	if err := s.verifyGitProject(ctx, workspace); err != nil {
 		return err
+	}
+	checkedElsewhere, err := s.branchCheckedOutElsewhere(ctx, workspace)
+	if err != nil {
+		return errors.New("inspect initial editor branch checkout before removal")
+	}
+	if checkedElsewhere {
+		return errors.New("refuse to remove an initial editor branch checked out in another worktree")
 	}
 	if _, err := os.Lstat(workspace.Path); err == nil {
 		if err := s.verifyGitWorktree(ctx, workspace); err != nil {
 			return err
+		}
+		if _, err := s.runner.run(ctx, "git", "-C", workspace.ProjectPath, "worktree", "unlock", workspace.Path); err != nil {
+			return errors.New("unlock editor-owned Git worktree for deletion")
 		}
 		args := []string{"-c", "core.hooksPath=/dev/null", "-C", workspace.ProjectPath, "worktree", "remove"}
 		if force {
@@ -1669,6 +2354,7 @@ func (s *HostService) removeGitWorktree(ctx context.Context, workspace Workspace
 		}
 		args = append(args, workspace.Path)
 		if _, err := s.runner.run(ctx, "git", args...); err != nil {
+			_ = s.ensureGitWorktreeLock(ctx, workspace)
 			return errors.New("remove owned Git worktree")
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -1679,22 +2365,41 @@ func (s *HostService) removeGitWorktree(ctx context.Context, workspace Workspace
 			return err
 		}
 		if registered {
+			locked, reason, lockErr := s.gitWorktreeLock(ctx, workspace)
+			if lockErr != nil || !locked || reason != s.worktreeLockReason(workspace) {
+				return errors.New("refuse to remove a registered worktree without its exact lock")
+			}
+			if _, err := s.runner.run(ctx, "git", "-C", workspace.ProjectPath, "worktree", "unlock", registeredPath); err != nil {
+				return errors.New("unlock registered editor-owned Git worktree for deletion")
+			}
 			args := []string{"-c", "core.hooksPath=/dev/null", "-C", workspace.ProjectPath, "worktree", "remove"}
 			if force {
 				args = append(args, "--force")
 			}
 			args = append(args, registeredPath)
 			if _, err := s.runner.run(ctx, "git", args...); err != nil {
+				_ = s.ensureGitWorktreeLock(ctx, workspace)
 				return errors.New("remove registered owned Git worktree")
 			}
 		}
 	}
+	return s.removeInitialBranch(ctx, workspace, force)
+}
+
+func (s *HostService) removeInitialBranch(ctx context.Context, workspace Workspace, force bool) error {
 	exists, err := s.gitBranchExists(ctx, workspace.ProjectPath, workspace.Branch)
 	if err != nil {
 		return err
 	}
 	if !exists {
 		return nil
+	}
+	checkedElsewhere, err := s.branchCheckedOutElsewhere(ctx, workspace)
+	if err != nil {
+		return errors.New("inspect initial editor branch checkout before removal")
+	}
+	if checkedElsewhere {
+		return errors.New("refuse to remove an initial editor branch checked out in another worktree")
 	}
 	oid, err := s.runner.run(ctx, "git", "-C", workspace.ProjectPath, "rev-parse", "--verify", "refs/heads/"+workspace.Branch)
 	if err != nil || !gitOIDPattern.MatchString(strings.TrimSpace(string(oid))) {
@@ -1723,17 +2428,21 @@ func (s *HostService) registeredOwnedWorktree(ctx context.Context, workspace Wor
 	if err != nil {
 		return "", false, errors.New("inspect owned Git worktree path before removal")
 	}
-	expectedBranch := "refs/heads/" + workspace.Branch
+	expectedLock := s.worktreeLockReason(workspace)
 	matched := ""
 	for _, record := range bytes.Split(out, []byte{0, 0}) {
-		path, branch := "", ""
+		path, lockReason := "", ""
+		locked := false
 		for _, field := range bytes.Split(record, []byte{0}) {
 			value := string(field)
 			switch {
 			case strings.HasPrefix(value, "worktree "):
 				path = strings.TrimPrefix(value, "worktree ")
-			case strings.HasPrefix(value, "branch "):
-				branch = strings.TrimPrefix(value, "branch ")
+			case value == "locked":
+				locked = true
+			case strings.HasPrefix(value, "locked "):
+				locked = true
+				lockReason = strings.TrimPrefix(value, "locked ")
 			}
 		}
 		if path == "" {
@@ -1741,11 +2450,10 @@ func (s *HostService) registeredOwnedWorktree(ctx context.Context, workspace Wor
 		}
 		canonicalPath, pathErr := canonicalMissingPath(path)
 		pathMatches := pathErr == nil && canonicalPath == expectedPath
-		branchMatches := branch == expectedBranch
-		if pathMatches != branchMatches {
-			return "", false, errors.New("refuse Git removal because registered worktree ownership is uncertain")
-		}
 		if pathMatches {
+			if !locked || lockReason != expectedLock {
+				return "", false, errors.New("refuse Git removal because registered worktree lock ownership changed")
+			}
 			if matched != "" {
 				return "", false, errors.New("refuse Git removal because registered worktree ownership is ambiguous")
 			}
@@ -1753,6 +2461,36 @@ func (s *HostService) registeredOwnedWorktree(ctx context.Context, workspace Wor
 		}
 	}
 	return matched, matched != "", nil
+}
+
+func (s *HostService) branchCheckedOutElsewhere(ctx context.Context, workspace Workspace) (bool, error) {
+	out, err := s.runner.run(ctx, "git", "-C", workspace.ProjectPath, "worktree", "list", "--porcelain")
+	if err != nil {
+		return false, err
+	}
+	expectedPath, err := canonicalMissingPath(workspace.Path)
+	if err != nil {
+		return false, err
+	}
+	expectedBranch := "refs/heads/" + workspace.Branch
+	for _, record := range strings.Split(strings.TrimSpace(string(out)), "\n\n") {
+		path, branch := "", ""
+		for _, line := range strings.Split(record, "\n") {
+			if strings.HasPrefix(line, "worktree ") {
+				path = strings.TrimPrefix(line, "worktree ")
+			} else if strings.HasPrefix(line, "branch ") {
+				branch = strings.TrimPrefix(line, "branch ")
+			}
+		}
+		if branch != expectedBranch {
+			continue
+		}
+		canonicalPath, pathErr := canonicalMissingPath(path)
+		if pathErr != nil || canonicalPath != expectedPath {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func canonicalMissingPath(path string) (string, error) {
@@ -1808,6 +2546,23 @@ func (s *HostService) verifyGitProject(ctx context.Context, workspace Workspace)
 }
 
 func (s *HostService) verifyGitWorktree(ctx context.Context, workspace Workspace) error {
+	if err := s.verifyGitWorktreeIdentity(ctx, workspace); err != nil {
+		return err
+	}
+	if !workspace.WorktreeLocked {
+		return errors.New("refuse Git operation because worktree lock ownership is not recorded")
+	}
+	locked, reason, err := s.gitWorktreeLock(ctx, workspace)
+	if err != nil || !locked || reason != s.worktreeLockReason(workspace) {
+		return errors.New("refuse Git operation because the worktree lock changed or is uncertain")
+	}
+	return nil
+}
+
+func (s *HostService) verifyGitWorktreeIdentity(ctx context.Context, workspace Workspace) error {
+	if workspace.External {
+		return errors.New("refuse owned Git operation on a preserved workspace")
+	}
 	info, err := os.Lstat(workspace.Path)
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return errors.New("refuse Git operation because the owned worktree path changed or is uncertain")
@@ -1819,10 +2574,6 @@ func (s *HostService) verifyGitWorktree(ctx context.Context, workspace Workspace
 	commonDir, err := s.gitCommonDir(ctx, workspace.Path)
 	if err != nil || !sameDirectory(commonDir, workspace.GitCommonDir) {
 		return errors.New("refuse Git operation because the owned worktree identity changed or is uncertain")
-	}
-	branch, err := s.runner.run(ctx, "git", "-C", workspace.Path, "branch", "--show-current")
-	if err != nil || strings.TrimSpace(string(branch)) != workspace.Branch {
-		return errors.New("refuse Git operation because the owned worktree branch changed or is uncertain")
 	}
 	return nil
 }

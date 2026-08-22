@@ -329,6 +329,59 @@ func (m *Manager) CreateWindow(ctx context.Context, hostID string, request Creat
 	return window, nil
 }
 
+func (m *Manager) ListTmuxSessions(ctx context.Context, hostID string, request ListTmuxSessionsRequest) ([]TmuxSessionCandidate, error) {
+	host, ok := m.findHost(hostID)
+	if !ok {
+		return nil, errors.New("host no longer exists")
+	}
+	project, ok := findProject(host, request.ProjectID)
+	if !ok || project.Path != request.ProjectPath {
+		return nil, errors.New("project no longer exists or its path changed")
+	}
+	client, err := m.client(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	var candidates []TmuxSessionCandidate
+	if err := client.Call(ctx, "list_tmux_sessions", request, &candidates); err != nil {
+		return nil, err
+	}
+	if len(candidates) > 100 {
+		return nil, errors.New("editor host returned too many tmux sessions")
+	}
+	seen := map[string]bool{}
+	for _, candidate := range candidates {
+		if validateTmuxSessionName(candidate.Name) != nil || validateName(candidate.Command, "tmux command") != nil || seen[candidate.Name] {
+			return nil, errors.New("editor host returned unsafe tmux session metadata")
+		}
+		seen[candidate.Name] = true
+	}
+	return candidates, nil
+}
+
+func (m *Manager) AdoptTmuxSession(ctx context.Context, hostID string, request AdoptTmuxSessionRequest) (AdoptedTmuxSession, error) {
+	host, ok := m.findHost(hostID)
+	if !ok {
+		return AdoptedTmuxSession{}, errors.New("host no longer exists")
+	}
+	project, ok := findProject(host, request.ProjectID)
+	if !ok || project.Path != request.ProjectPath {
+		return AdoptedTmuxSession{}, errors.New("project no longer exists or its path changed")
+	}
+	client, err := m.client(ctx, host)
+	if err != nil {
+		return AdoptedTmuxSession{}, err
+	}
+	var adopted AdoptedTmuxSession
+	if err := client.Call(ctx, "adopt_tmux_session", request, &adopted); err != nil {
+		return AdoptedTmuxSession{}, err
+	}
+	if err := validateAdoptedTmuxSession(request, adopted); err != nil {
+		return AdoptedTmuxSession{}, err
+	}
+	return adopted, nil
+}
+
 func (m *Manager) CreateWorkspaceWithWindow(ctx context.Context, hostID string, request CreateWorkspaceRequest) (Workspace, Window, error) {
 	workspace, err := m.CreateWorkspace(ctx, hostID, request)
 	if err != nil {
@@ -504,6 +557,7 @@ func validateHostSnapshot(host Host, snapshot HostSnapshot) error {
 		projectPaths[project.ID] = project.Path
 	}
 	workspaceIDs := make(map[string]bool, len(snapshot.Workspaces))
+	externalWorkspaces := make(map[string]bool, len(snapshot.Workspaces))
 	for _, workspace := range snapshot.Workspaces {
 		if validateID(workspace.ID, "workspace identifier") != nil || projectPaths[workspace.ProjectID] == "" || workspace.ProjectPath != projectPaths[workspace.ProjectID] || workspaceIDs[workspace.ID] || validateName(workspace.Name, "workspace name") != nil || validateRemotePath(workspace.Path) != nil || validateRemotePath(workspace.ProjectPath) != nil {
 			return errors.New("editor host returned unsafe workspace metadata")
@@ -512,17 +566,35 @@ func validateHostSnapshot(host Host, snapshot HostSnapshot) error {
 			return errors.New("editor host returned unsafe workspace metadata")
 		}
 		if workspace.Git {
-			if validateRemotePath(workspace.GitCommonDir) != nil || !validOwnedBranch(workspace.Branch, workspace.ID) || !safeStoredBaseRef(workspace.BaseRef) {
+			if validateRemotePath(workspace.GitCommonDir) != nil {
 				return errors.New("editor host returned unsafe Git workspace metadata")
 			}
-		} else if workspace.Path != workspace.ProjectPath || workspace.GitCommonDir != "" || workspace.Branch != "" || workspace.BaseRef != "" {
+			if workspace.External {
+				if workspace.Path != workspace.ProjectPath || workspace.Branch != "" || workspace.BaseRef != "" || workspace.WorktreeLocked {
+					return errors.New("editor host returned unsafe preserved Git workspace metadata")
+				}
+			} else if !validOwnedBranch(workspace.Branch, workspace.ID) || !safeStoredBaseRef(workspace.BaseRef) || !workspace.WorktreeLocked && !workspace.Unavailable {
+				return errors.New("editor host returned unsafe Git workspace metadata")
+			}
+		} else if workspace.Path != workspace.ProjectPath || workspace.GitCommonDir != "" || workspace.Branch != "" || workspace.BaseRef != "" || workspace.WorktreeLocked {
 			return errors.New("editor host returned unsafe non-Git workspace metadata")
 		}
 		workspaceIDs[workspace.ID] = true
+		externalWorkspaces[workspace.ID] = workspace.External
 	}
 	windowIDs := make(map[string]bool, len(snapshot.Windows))
+	adoptedSessions := make(map[string]bool)
 	for _, window := range snapshot.Windows {
-		if validateID(window.ID, "window identifier") != nil || windowIDs[window.ID] || !workspaceIDs[window.WorkspaceID] || validateName(window.Name, "window name") != nil || window.Session != "mce-"+window.ID || window.CreatePending || window.PaneHash != "" && !paneHashPattern.MatchString(window.PaneHash) {
+		if validateID(window.ID, "window identifier") != nil || windowIDs[window.ID] || !workspaceIDs[window.WorkspaceID] || validateName(window.Name, "window name") != nil || window.CreatePending || window.PaneHash != "" && !paneHashPattern.MatchString(window.PaneHash) {
+			return errors.New("editor host returned unsafe window metadata")
+		}
+		if window.Adopted {
+			if !externalWorkspaces[window.WorkspaceID] || validateTmuxSessionName(window.Session) != nil || !tmuxIDPattern.MatchString(window.TmuxSessionID) || adoptedSessions[window.Session] || adoptedSessions[window.TmuxSessionID] {
+				return errors.New("editor host returned unsafe adopted tmux metadata")
+			}
+			adoptedSessions[window.Session] = true
+			adoptedSessions[window.TmuxSessionID] = true
+		} else if window.Session != "mce-"+window.ID || window.TmuxSessionID != "" {
 			return errors.New("editor host returned unsafe window metadata")
 		}
 		windowIDs[window.ID] = true
@@ -534,19 +606,40 @@ func validateCreatedWorkspace(request CreateWorkspaceRequest, workspace Workspac
 	if validateID(workspace.ID, "workspace identifier") != nil || workspace.ProjectID != request.ProjectID || workspace.ProjectPath != request.ProjectPath || workspace.Name != request.Name || validateRemotePath(workspace.Path) != nil || workspace.CreatePending || workspace.DeletePending || workspace.Unavailable {
 		return errors.New("editor host returned unsafe workspace metadata")
 	}
+	if workspace.External {
+		return errors.New("editor host returned an unexpected preserved workspace")
+	}
 	if workspace.Git {
-		if validateRemotePath(workspace.GitCommonDir) != nil || workspace.Branch != "multicodex/"+slug(workspace.Name)+"-"+workspace.ID[:8] || !safeStoredBaseRef(workspace.BaseRef) {
+		if validateRemotePath(workspace.GitCommonDir) != nil || workspace.Branch != "multicodex/"+slug(workspace.Name)+"-"+workspace.ID[:8] || !safeStoredBaseRef(workspace.BaseRef) || !workspace.WorktreeLocked {
 			return errors.New("editor host returned unsafe Git workspace metadata")
 		}
-	} else if workspace.Path != workspace.ProjectPath || workspace.GitCommonDir != "" || workspace.Branch != "" || workspace.BaseRef != "" {
+	} else if workspace.Path != workspace.ProjectPath || workspace.GitCommonDir != "" || workspace.Branch != "" || workspace.BaseRef != "" || workspace.WorktreeLocked {
 		return errors.New("editor host returned unsafe non-Git workspace metadata")
 	}
 	return nil
 }
 
 func validateCreatedWindow(request CreateWindowRequest, window Window) error {
-	if validateID(window.ID, "window identifier") != nil || window.WorkspaceID != request.WorkspaceID || validateName(window.Name, "window name") != nil || window.Session != "mce-"+window.ID || window.CreatePending || window.DeletePending {
+	if validateID(window.ID, "window identifier") != nil || window.WorkspaceID != request.WorkspaceID || validateName(window.Name, "window name") != nil || window.Session != "mce-"+window.ID || window.TmuxSessionID != "" || window.Adopted || window.CreatePending || window.DeletePending {
 		return errors.New("editor host returned unsafe window metadata")
+	}
+	return nil
+}
+
+func validateAdoptedTmuxSession(request AdoptTmuxSessionRequest, adopted AdoptedTmuxSession) error {
+	workspace, window := adopted.Workspace, adopted.Window
+	if validateID(workspace.ID, "workspace identifier") != nil || workspace.ProjectID != request.ProjectID || workspace.ProjectPath != request.ProjectPath || workspace.Path != request.ProjectPath || workspace.Name != request.WorkspaceName || workspace.CreatePending || workspace.DeletePending || workspace.Unavailable {
+		return errors.New("editor host returned unsafe adopted workspace metadata")
+	}
+	if workspace.Git {
+		if !workspace.External || validateRemotePath(workspace.GitCommonDir) != nil || workspace.Branch != "" || workspace.BaseRef != "" || workspace.WorktreeLocked {
+			return errors.New("editor host returned unsafe adopted Git workspace metadata")
+		}
+	} else if !workspace.External || workspace.GitCommonDir != "" || workspace.Branch != "" || workspace.BaseRef != "" || workspace.WorktreeLocked {
+		return errors.New("editor host returned unsafe adopted workspace metadata")
+	}
+	if validateID(window.ID, "window identifier") != nil || window.WorkspaceID != workspace.ID || validateName(window.Name, "window name") != nil || !window.Adopted || window.Session != request.Session || !tmuxIDPattern.MatchString(window.TmuxSessionID) || window.CreatePending || window.DeletePending {
+		return errors.New("editor host returned unsafe adopted tmux metadata")
 	}
 	return nil
 }

@@ -46,7 +46,7 @@ func TestHelpEditorDescribesOwnershipAndNestedTmuxRestriction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"configured SSH hosts", "new owned worktree and branch", "never runs inside tmux"} {
+	for _, want := range []string{"configured SSH hosts", "locked owned worktree", "adopt an eligible detached tmux session", "never runs inside tmux"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("editor help misses %q: %s", want, out)
 		}

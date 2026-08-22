@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -8,6 +9,31 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/vt"
 )
+
+func TestTmuxAttachArgsSeparateCreatedAndAdoptedSessions(t *testing.T) {
+	windowID := "111111111111111111111111"
+	created := Window{ID: windowID, Session: "mce-" + windowID}
+	got, err := tmuxAttachArgs(testInstanceID, created)
+	want := []string{"-L", "mce-" + testInstanceID[:12], "attach-session", "-t", created.Session}
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("created attach args = %v, %v; want %v", got, err, want)
+	}
+	adopted := Window{ID: windowID, Session: "existing-session", TmuxSessionID: "$7", Adopted: true}
+	got, err = tmuxAttachArgs(testInstanceID, adopted)
+	want = []string{"-L", "default", "attach-session", "-t", adopted.TmuxSessionID}
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("adopted attach args = %v, %v; want %v", got, err, want)
+	}
+}
+
+func TestRemoteTmuxArgumentsAreShellQuoted(t *testing.T) {
+	if got, want := quoteRemoteShellArg("$7; touch nope"), "'$7; touch nope'"; got != want {
+		t.Fatalf("quoted remote argument = %q, want %q", got, want)
+	}
+	if got, want := quoteRemoteShellArg("a'b"), "'a'\\''b'"; got != want {
+		t.Fatalf("quoted remote apostrophe = %q, want %q", got, want)
+	}
+}
 
 func TestModifiedKeySequencesPreserveImportantModifiers(t *testing.T) {
 	tests := []struct {
