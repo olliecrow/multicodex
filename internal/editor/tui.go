@@ -987,8 +987,10 @@ func (m tuiModel) renderSidebar() string {
 			style = style.Foreground(lipgloss.Cyan).Bold(true)
 		} else if row.offline || row.workspace.Unavailable {
 			style = style.Foreground(lipgloss.Yellow)
-		} else if row.kind == "window" && m.windowStatusMarker(row) == "◉" {
+		} else if row.kind == "window" && m.windowStatusMarker(row) == "●" {
 			style = style.Foreground(lipgloss.Cyan)
+		} else if row.kind == "window" && m.windowStatusMarker(row) == "×" {
+			style = style.Foreground(lipgloss.Yellow)
 		} else if row.kind == "project" {
 			style = style.Foreground(lipgloss.Cyan).Bold(true)
 		}
@@ -1126,7 +1128,7 @@ func (m tuiModel) sidebarFooter() string {
 	case "workspace":
 		return "Workspace · Choose an option on the right · ⌘R: rename"
 	case "window":
-		return "Window · terminal shown · Enter: focus · ⌘N/Ctrl+N: new"
+		return "Window · " + m.windowStatusLabel(row) + " · Enter: focus · ⌘N/Ctrl+N: new"
 	default:
 		return "Sidebar · ↑/↓: select · Tab: Actions · Esc: terminal"
 	}
@@ -1198,11 +1200,24 @@ func (m tuiModel) windowStatusMarker(row sidebarRow) string {
 	case row.offline:
 		return "?"
 	case !row.window.Alive:
-		return "○"
+		return "×"
 	case !row.changedAt.IsZero() && time.Since(row.changedAt) <= recentOutputWindow:
-		return "◉"
-	default:
 		return "●"
+	default:
+		return "·"
+	}
+}
+
+func (m tuiModel) windowStatusLabel(row sidebarRow) string {
+	switch m.windowStatusMarker(row) {
+	case "●":
+		return "changing now"
+	case "·":
+		return "quiet · monitored live"
+	case "×":
+		return "stopped"
+	default:
+		return "host offline"
 	}
 }
 
@@ -1276,7 +1291,7 @@ func helpModalContent() []string {
 		"  ⌘R: rename · ? or ⌘?: Help · Esc: terminal",
 		"  ⌘1–9 or ⌥1–9: open the numbered window",
 		"  In the sidebar, Ctrl+C: quit",
-		"Windows: ◉ output · ● running · ○ stopped · ? offline",
+		"Windows: ● changing · · quiet · × stopped · ? offline",
 		"Workspace: ! directory unavailable",
 		"Need terminal Ctrl+G? Use Actions → Send Ctrl+G.",
 		closeButtonLabel + " · Enter, ?, or Esc: close",
