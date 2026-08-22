@@ -91,3 +91,9 @@ Context: Git worktrees, branches, tmux sessions, and attachments can outlive a c
 Rationale: The client stores minimal navigation state. Each host records exact ownership and workspace, window, or attachment intent before external mutation. Startup and hourly reconciliation can then resume known operations and refuse uncertain ones without scanning or changing unrelated projects. Force consent is invocation-local and is never replayed after interruption.
 Trade-offs: Loss of the client instance identifier prevents automatic adoption of its old resources, and safe cleanup preserves dirty, unique, live, altered, or uncertain resources for manual review.
 References: `internal/editor/host_store.go`, `internal/editor/host_service.go`, `docs/security-and-privacy.md`
+
+Decision: Separate preserved resources from editor-created resources with two explicit flags.
+Context: Users need to adopt existing tmux sessions without moving or stopping them, and need normal multi-branch Git work inside editor worktrees.
+Rationale: `Workspace.External` identifies a preserved project checkout and `Window.Adopted` identifies a preserved default-server tmux session. Release only clears exact markers and registry state. Editor-created worktrees instead use one stable ownership lock, while the current checkout branch remains ordinary mutable Git state. The recorded initial branch defines the only branch the editor can delete.
+Trade-offs: Adoption is intentionally narrow: the session must be detached, ungrouped, single-pane, unmarked, and at the exact configured project root. Complex tmux layouts stay outside editor ownership.
+References: `internal/editor/types.go`, `internal/editor/host_service.go`, `docs/command-spec.md`

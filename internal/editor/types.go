@@ -15,7 +15,7 @@ import (
 
 const (
 	stateVersion      = 1
-	hostProtocol      = 1
+	hostProtocol      = 2
 	historyLimit      = 60000
 	activityRows      = 100
 	cleanupAfter      = 7 * 24 * time.Hour
@@ -31,6 +31,8 @@ var (
 	idPattern       = regexp.MustCompile(`^[a-f0-9]{24}$`)
 	paneHashPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
 	gitOIDPattern   = regexp.MustCompile(`^[a-f0-9]{40,64}$`)
+	tmuxIDPattern   = regexp.MustCompile(`^\$[0-9]+$`)
+	tmuxNamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,80}$`)
 	sshAliasPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 )
 
@@ -69,20 +71,22 @@ type HostSnapshot struct {
 }
 
 type Workspace struct {
-	ID            string    `json:"id"`
-	ProjectID     string    `json:"project_id"`
-	ProjectPath   string    `json:"project_path"`
-	Name          string    `json:"name"`
-	Path          string    `json:"path"`
-	Git           bool      `json:"git"`
-	GitCommonDir  string    `json:"git_common_dir,omitempty"`
-	Branch        string    `json:"branch,omitempty"`
-	BaseRef       string    `json:"base_ref,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
-	LastUsedAt    time.Time `json:"last_used_at"`
-	CreatePending bool      `json:"create_pending,omitempty"`
-	DeletePending bool      `json:"delete_pending,omitempty"`
-	Unavailable   bool      `json:"unavailable,omitempty"`
+	ID             string    `json:"id"`
+	ProjectID      string    `json:"project_id"`
+	ProjectPath    string    `json:"project_path"`
+	Name           string    `json:"name"`
+	Path           string    `json:"path"`
+	Git            bool      `json:"git"`
+	External       bool      `json:"external,omitempty"`
+	GitCommonDir   string    `json:"git_common_dir,omitempty"`
+	Branch         string    `json:"branch,omitempty"`
+	BaseRef        string    `json:"base_ref,omitempty"`
+	WorktreeLocked bool      `json:"worktree_locked,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+	LastUsedAt     time.Time `json:"last_used_at"`
+	CreatePending  bool      `json:"create_pending,omitempty"`
+	DeletePending  bool      `json:"delete_pending,omitempty"`
+	Unavailable    bool      `json:"unavailable,omitempty"`
 }
 
 type Window struct {
@@ -90,6 +94,8 @@ type Window struct {
 	WorkspaceID   string    `json:"workspace_id"`
 	Name          string    `json:"name"`
 	Session       string    `json:"session"`
+	TmuxSessionID string    `json:"tmux_session_id,omitempty"`
+	Adopted       bool      `json:"adopted,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
 	LastUsedAt    time.Time `json:"last_used_at"`
 	PaneHash      string    `json:"pane_hash,omitempty"`
@@ -159,6 +165,30 @@ type ProjectInfo struct {
 	Git  bool   `json:"git"`
 }
 
+type TmuxSessionCandidate struct {
+	Name      string `json:"name"`
+	Command   string `json:"command"`
+	SessionID string `json:"-"`
+	PanePID   string `json:"-"`
+}
+
+type ListTmuxSessionsRequest struct {
+	ProjectID   string `json:"project_id"`
+	ProjectPath string `json:"project_path"`
+}
+
+type AdoptTmuxSessionRequest struct {
+	ProjectID     string `json:"project_id"`
+	ProjectPath   string `json:"project_path"`
+	WorkspaceName string `json:"workspace_name"`
+	Session       string `json:"session"`
+}
+
+type AdoptedTmuxSession struct {
+	Workspace Workspace `json:"workspace"`
+	Window    Window    `json:"window"`
+}
+
 func NewClientState() (ClientState, error) {
 	id, err := newID()
 	if err != nil {
@@ -207,6 +237,16 @@ func validateName(value, field string) error {
 func validateSSHAlias(value string) error {
 	if !sshAliasPattern.MatchString(value) {
 		return errors.New("SSH host must be a configured alias containing only letters, numbers, dot, underscore, or hyphen")
+	}
+	return nil
+}
+
+func validateTmuxSessionName(value string) error {
+	if err := validateName(value, "tmux session name"); err != nil {
+		return err
+	}
+	if !tmuxNamePattern.MatchString(value) {
+		return errors.New("tmux session name must contain only letters, numbers, underscore, or hyphen")
 	}
 	return nil
 }

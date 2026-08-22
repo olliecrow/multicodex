@@ -204,6 +204,23 @@ func TestSnapshotValidationRejectsHostControlData(t *testing.T) {
 	}
 }
 
+func TestSnapshotValidationAllowsOnlyUnavailableLegacyWorktreesWithoutARecordedLock(t *testing.T) {
+	projectID := "111111111111111111111111"
+	workspaceID := "222222222222222222222222"
+	host := Host{ID: localHostID, Name: localHostName, Projects: []Project{{ID: projectID, Name: "Project", Path: "/tmp/project"}}}
+	snapshot := HostSnapshot{Protocol: hostProtocol, Workspaces: []Workspace{{
+		ID: workspaceID, ProjectID: projectID, ProjectPath: "/tmp/project", Name: "Missing", Path: "/tmp/worktree", Git: true,
+		GitCommonDir: "/tmp/project/.git", Branch: "multicodex/missing-" + workspaceID[:8], BaseRef: "refs/remotes/origin/main", Unavailable: true,
+	}}}
+	if err := validateHostSnapshot(host, snapshot); err != nil {
+		t.Fatalf("unavailable legacy worktree was hidden: %v", err)
+	}
+	snapshot.Workspaces[0].Unavailable = false
+	if err := validateHostSnapshot(host, snapshot); err == nil {
+		t.Fatal("available unlocked worktree was accepted")
+	}
+}
+
 func TestSafeClientTextIsBoundedControlFreeUTF8(t *testing.T) {
 	got := safeClientText("hello\n\x1b]52;c;secret\a界界界", 17)
 	if len(got) > 17 || !strings.Contains(got, "hello") || strings.ContainsAny(got, "\n\r\x1b\a") || !utf8.ValidString(got) {

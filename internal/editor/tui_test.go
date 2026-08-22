@@ -211,6 +211,79 @@ func TestEditorControlsUseNavigationAndAVisibleActionMenu(t *testing.T) {
 	}
 }
 
+func TestProjectActionsOfferSafeTmuxAdoption(t *testing.T) {
+	host := Host{ID: localHostID, Name: localHostName}
+	project := Project{ID: "111111111111111111111111", Name: "Project", Path: "/tmp/project"}
+	model := tuiModel{rows: []sidebarRow{{kind: "project", host: host, project: project}}, selectedRow: 0}
+	model.openActionMenu()
+	if !modalHasAction(model.modal, "list_tmux_sessions") {
+		t.Fatalf("project actions omit tmux adoption: %+v", model.modal.choices)
+	}
+	model.rows[0].offline = true
+	model.openActionMenu()
+	if modalHasAction(model.modal, "list_tmux_sessions") {
+		t.Fatalf("offline project offered tmux adoption: %+v", model.modal.choices)
+	}
+}
+
+func TestUnavailableWorkspaceCannotCreateAWindow(t *testing.T) {
+	host := Host{ID: localHostID, Name: localHostName}
+	workspace := Workspace{ID: "111111111111111111111111", Name: "Missing", Unavailable: true}
+	model := tuiModel{rows: []sidebarRow{{kind: "workspace", host: host, workspace: workspace}}, selectedRow: 0}
+	model.openActionMenu()
+	if modalHasAction(model.modal, "new_window_selected") || modalHasAction(model.modal, "new_window") {
+		t.Fatalf("unavailable workspace offered a new window: %+v", model.modal.choices)
+	}
+	updated, cmd := model.startCreateWindow(model.rows[0])
+	got := updated.(tuiModel)
+	if cmd != nil || !strings.Contains(got.message, "unavailable") {
+		t.Fatalf("direct unavailable-window guard = %q, %v", got.message, cmd)
+	}
+}
+
+func TestAdoptedSessionUsesReleaseLanguage(t *testing.T) {
+	window := Window{ID: "111111111111111111111111", Name: "Imported", Session: "existing", TmuxSessionID: "$1", Adopted: true}
+	workspace := Workspace{ID: "222222222222222222222222", Name: "Shared checkout", External: true}
+	model := tuiModel{rows: []sidebarRow{{kind: "window", workspace: workspace, window: window}}, selectedRow: 0}
+	model.openDeleteConfirmation()
+	if model.modal == nil || model.modal.title != "Release session?" || modalConfirmLabel(*model.modal) != "[ Release ]" || !strings.Contains(model.modal.warning, "keep running") {
+		t.Fatalf("adopted delete dialog = %+v", model.modal)
+	}
+	rendered := ansi.Strip(renderModal(*model.modal, 70, 18))
+	for _, want := range []string{"Release session?", "keep running", "[ Release ]"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("release dialog omits %q:\n%s", want, rendered)
+		}
+	}
+}
+
+func TestAdoptionReusesThePreservedWorkspaceName(t *testing.T) {
+	host := Host{ID: localHostID, Name: localHostName}
+	project := Project{ID: "111111111111111111111111", Name: "Project", Path: "/tmp/project"}
+	workspace := Workspace{ID: "222222222222222222222222", ProjectID: project.ID, Name: "Shared checkout", External: true}
+	manager := &Manager{state: ClientState{Version: stateVersion, InstanceID: testInstanceID, Hosts: []Host{host}}, ctx: context.Background()}
+	model := tuiModel{manager: manager, statuses: []HostStatus{{Host: host, Snapshot: HostSnapshot{Workspaces: []Workspace{workspace}}}}, modal: &modal{
+		kind: "choice", action: "adopt_tmux_session", choices: []choice{{host: host, project: project, session: TmuxSessionCandidate{Name: "existing", Command: "codex"}}},
+	}}
+	updated, cmd := model.acceptChoice()
+	got := updated.(tuiModel)
+	if cmd == nil || got.modal != nil || !got.actionBusy || !strings.Contains(got.message, "adopting existing") {
+		t.Fatalf("preserved workspace adoption flow = modal=%+v busy=%v message=%q cmd=%v", got.modal, got.actionBusy, got.message, cmd)
+	}
+}
+
+func modalHasAction(current *modal, action string) bool {
+	if current == nil {
+		return false
+	}
+	for _, item := range current.choices {
+		if item.action == action {
+			return true
+		}
+	}
+	return false
+}
+
 func TestMacBookSidebarNavigationNeedsNoFunctionOrNavigationKeys(t *testing.T) {
 	rows := make([]sidebarRow, 30)
 	for i := range rows {
