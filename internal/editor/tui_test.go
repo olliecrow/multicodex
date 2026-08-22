@@ -204,7 +204,7 @@ func TestEditorControlsUseNavigationAndAVisibleActionMenu(t *testing.T) {
 		}
 	}
 	help := ansi.Strip(renderModal(modal{kind: "help", title: "Controls"}, helpWidth, (tuiModel{width: minimumWidth, height: minimumHeight}).bodyHeight()))
-	for _, want := range []string{"Click rows, fields, buttons, or terminal to focus", "⌘B or Ctrl+G: focus the sidebar", "⌥↑/⌥↓: one screen", "scroll terminal history", "In the sidebar, Ctrl+C: quit", "● running · ○ stopped", "Need terminal Ctrl+G?", "[ Close ]"} {
+	for _, want := range []string{"Click project/workspace: options · window: open", "⌘B or Ctrl+G: focus the sidebar", "⌥↑/⌥↓: one screen", "scroll terminal history", "In the sidebar, Ctrl+C: quit", "● running · ○ stopped", "Need terminal Ctrl+G?", "[ Close ]"} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("minimum-width help truncated %q:\n%s", want, help)
 		}
@@ -435,6 +435,74 @@ func TestSidebarSelectionProvidesContextualCreateAndRename(t *testing.T) {
 	model = updated.(tuiModel)
 	if cmd != nil || model.modal == nil || model.modal.action != "rename_window" || model.modal.window.ID != window.ID {
 		t.Fatalf("contextual rename did not keep its captured window: %+v", model.modal)
+	}
+}
+
+func TestProjectAndWorkspaceSelectionShowClickableOptions(t *testing.T) {
+	host := Host{ID: localHostID, Name: localHostName}
+	project := Project{ID: "111111111111111111111111", Name: "Project"}
+	workspace := Workspace{ID: "222222222222222222222222", ProjectID: project.ID, Name: "Workspace"}
+	rows := []sidebarRow{
+		{kind: "project", host: host, project: project},
+		{kind: "workspace", host: host, project: project, workspace: workspace},
+	}
+	model := tuiModel{manager: &Manager{}, width: minimumWidth, height: minimumHeight, controlMode: true, rows: rows, selectedRow: 0}
+	inputQueue := make(chan terminalInput, 1)
+	model.attachment = &Attachment{inputQueue: inputQueue}
+
+	projectView := ansi.Strip(model.View().Content)
+	for _, want := range []string{"Project options", "Project selected", "[ New workspace… ]", "[ Adopt tmux session… ]"} {
+		if !strings.Contains(projectView, want) {
+			t.Fatalf("project context omitted %q:\n%s", want, projectView)
+		}
+	}
+	if model.isTerminalMousePosition(model.layout().terminalX+10, model.layout().bodyContent+10) {
+		t.Fatal("hidden terminal accepted mouse input through the project options panel")
+	}
+	layout := model.layout()
+	updated, cmd := model.handleMouse(tea.MouseClickMsg{
+		X:      layout.terminalX + contextInsetX,
+		Y:      layout.bodyContent + contextInsetY + contextActionRow,
+		Button: tea.MouseLeft,
+	})
+	got := updated.(tuiModel)
+	if cmd != nil || got.modal == nil || got.modal.action != "create_workspace" {
+		t.Fatalf("project context click did not open workspace form: %+v", got.modal)
+	}
+
+	model.selectedRow = 1
+	workspaceView := ansi.Strip(model.View().Content)
+	for _, want := range []string{"Workspace options", "Workspace selected", "[ New terminal ]", "[ Rename workspace… ]", "[ Delete workspace… ]"} {
+		if !strings.Contains(workspaceView, want) {
+			t.Fatalf("workspace context omitted %q:\n%s", want, workspaceView)
+		}
+	}
+	layout = model.layout()
+	updated, cmd = model.handleMouse(tea.MouseClickMsg{
+		X:      layout.terminalX + contextInsetX,
+		Y:      layout.bodyContent + contextInsetY + contextActionRow + 1,
+		Button: tea.MouseLeft,
+	})
+	got = updated.(tuiModel)
+	if cmd != nil || got.modal == nil || got.modal.action != "rename_workspace" || got.modal.fields[0].value != workspace.Name {
+		t.Fatalf("workspace context click did not open rename form: %+v", got.modal)
+	}
+}
+
+func TestKeyboardSelectionOpensAWindowAndKeepsSidebarNavigation(t *testing.T) {
+	host := Host{ID: localHostID, Name: localHostName}
+	project := Project{ID: "111111111111111111111111", Name: "Project"}
+	workspace := Workspace{ID: "222222222222222222222222", ProjectID: project.ID, Name: "Workspace"}
+	window := Window{ID: "333333333333333333333333", WorkspaceID: workspace.ID, Name: "Terminal"}
+	model := tuiModel{manager: &Manager{}, width: minimumWidth, height: minimumHeight, controlMode: true, selectedRow: 0, rows: []sidebarRow{
+		{kind: "project", host: host, project: project},
+		{kind: "window", host: host, project: project, workspace: workspace, window: window},
+	}}
+
+	updated, cmd := model.handleKey(tea.KeyPressMsg{Code: tea.KeyDown})
+	got := updated.(tuiModel)
+	if cmd == nil || got.selectedRow != 1 || got.attachingID != window.ID || got.keepSidebarAttach != window.ID || !got.controlMode {
+		t.Fatalf("keyboard window selection did not start a sidebar-preserving attach: %+v", got)
 	}
 }
 
@@ -813,7 +881,7 @@ func TestHelpShowsEveryCoreControlAtMinimumSize(t *testing.T) {
 	model := tuiModel{width: minimumWidth, height: minimumHeight, modal: &modal{kind: "help", title: "Controls"}}
 	view := ansi.Strip(model.View().Content)
 	for _, want := range []string{
-		"Click rows, fields, buttons, or terminal to focus",
+		"Click project/workspace: options · window: open",
 		"⌘B or Ctrl+G: focus the sidebar",
 		"⌥↑/⌥↓: one screen",
 		"⌘↑/⌘↓: first/last",
