@@ -505,19 +505,21 @@ func (m tuiModel) handleKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.selectSidebarEdge(true)
 		return m.openSelectedWindowFromSidebar()
 	}
-	if isMacListPageKey(key, tea.KeyUp) {
-		m.moveSelectionPage(-1)
-		return m.openSelectedWindowFromSidebar()
+	if isMacOptionArrowKey(key, tea.KeyUp) {
+		return m.selectAdjacentWindow(-1)
 	}
-	if isMacListPageKey(key, tea.KeyDown) {
-		m.moveSelectionPage(1)
-		return m.openSelectedWindowFromSidebar()
+	if isMacOptionArrowKey(key, tea.KeyDown) {
+		return m.selectAdjacentWindow(1)
 	}
 	if isCreateKey(key) {
 		return m.createForSelection()
 	}
 	if isRenameKey(key) {
 		m.openRename()
+		return m, nil
+	}
+	if isDeleteKey(key) {
+		m.openDeleteConfirmation()
 		return m, nil
 	}
 	if isSidebarHelpKey(key) {
@@ -576,11 +578,11 @@ func (m tuiModel) handleModalKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.modal.choice = max(0, len(m.modal.choices)-1)
 			return m, nil
 		}
-		if isMacListPageKey(key, tea.KeyUp) {
+		if isMacOptionArrowKey(key, tea.KeyUp) {
 			m.moveModalChoicePage(-1)
 			return m, nil
 		}
-		if isMacListPageKey(key, tea.KeyDown) {
+		if isMacOptionArrowKey(key, tea.KeyDown) {
 			m.moveModalChoicePage(1)
 			return m, nil
 		}
@@ -1296,10 +1298,10 @@ func helpModalContent() []string {
 		"  Paste: ⌘V · focuses the attached terminal",
 		"Keyboard · MacBook",
 		"  ⌘B or Ctrl+G: focus the sidebar",
-		"  ↑/↓: select; windows open · ⌥↑/⌥↓: one screen",
+		"  ↑/↓: one row · ⌥↑/⌥↓: previous/next window",
 		"  ⌘↑/⌘↓: first/last · Enter: focus/create",
-		"  Tab: Actions · ⌘N or Ctrl+N: create",
-		"  ⌘R: rename · ? or ⌘?: Help · Esc: terminal",
+		"  Tab: Actions · ⌘N/Ctrl+N: create · ?: Help",
+		"  ⌘R: rename · ⌘⌫: delete · Esc: terminal",
 		"  ⌘1–9 or ⌥1–9: open the numbered window",
 		"  In the sidebar, Ctrl+C: quit",
 		"Windows: ● changing · · quiet · × stopped · ? offline",
@@ -1554,6 +1556,47 @@ func (m *tuiModel) moveSelectionPage(direction int) {
 		m.selectedRow = max(0, min(len(m.rows)-1, m.selectedRow+direction*max(1, m.sidebarHeight()-1)))
 	}
 	m.ensureSelectionVisible()
+}
+
+func (m tuiModel) selectAdjacentWindow(direction int) (tea.Model, tea.Cmd) {
+	var windowRows []int
+	current := -1
+	original := m.selectedRow
+	for index, row := range m.rows {
+		if row.kind != "window" {
+			continue
+		}
+		if index == m.selectedRow {
+			current = len(windowRows)
+		}
+		windowRows = append(windowRows, index)
+	}
+	if len(windowRows) == 0 {
+		m.message = "no terminal windows are available"
+		return m, nil
+	}
+	if current >= 0 {
+		current = (current + direction + len(windowRows)) % len(windowRows)
+		m.selectedRow = windowRows[current]
+	} else if direction > 0 {
+		m.selectedRow = windowRows[0]
+		for _, index := range windowRows {
+			if index > original {
+				m.selectedRow = index
+				break
+			}
+		}
+	} else {
+		m.selectedRow = windowRows[len(windowRows)-1]
+		for index := len(windowRows) - 1; index >= 0; index-- {
+			if windowRows[index] < original {
+				m.selectedRow = windowRows[index]
+				break
+			}
+		}
+	}
+	m.ensureSelectionVisible()
+	return m.openSelectedWindowFromSidebar()
 }
 
 func (m *tuiModel) moveModalChoicePage(direction int) {
@@ -2274,11 +2317,15 @@ func isRenameKey(key tea.KeyPressMsg) bool {
 	return key.Keystroke() == "f2" || isCommandRune(key, 'r')
 }
 
+func isDeleteKey(key tea.KeyPressMsg) bool {
+	return hasCommandModifier(key) && (key.Code == tea.KeyBackspace || key.Code == tea.KeyDelete)
+}
+
 func isCancelKey(key tea.KeyPressMsg) bool {
 	return key.Keystroke() == "esc" || isCommandRune(key, '.')
 }
 
-func isMacListPageKey(key tea.KeyPressMsg, code rune) bool {
+func isMacOptionArrowKey(key tea.KeyPressMsg, code rune) bool {
 	return key.Code == code && key.Mod&tea.ModAlt != 0 && key.Mod&(tea.ModCtrl|tea.ModMeta|tea.ModHyper|tea.ModSuper) == 0
 }
 
