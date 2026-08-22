@@ -675,9 +675,10 @@ func TestDeleteConfirmationDefaultsToCancelAndUsesDialogControls(t *testing.T) {
 }
 
 func TestAccountUsageShowsEveryAccountAndFailureState(t *testing.T) {
+	reset := int64((2*24*time.Hour + 3*time.Hour) / time.Second)
 	summary := &usage.Summary{Accounts: []usage.AccountSummary{
 		{Label: "delta", WeeklyWindow: usage.WindowSummary{UsedPercent: 40}},
-		{Label: "alpha", WeeklyWindow: usage.WindowSummary{UsedPercent: 10}},
+		{Label: "alpha", WeeklyWindow: usage.WindowSummary{UsedPercent: 10, SecondsUntilReset: &reset}},
 		{Label: "charlie", Error: "signed out", WeeklyWindow: usage.WindowSummary{UsedPercent: 0}},
 		{Label: "bravo", WeeklyWindow: usage.WindowSummary{UsedPercent: 20}},
 	}}
@@ -687,13 +688,52 @@ func TestAccountUsageShowsEveryAccountAndFailureState(t *testing.T) {
 	}
 	model := tuiModel{usage: accountUsageState{accounts: rows}}
 	got := strings.Join(model.usageLines(38), "\n")
-	for _, want := range []string{"alpha", "10% used", "bravo", "20% used", "charlie", "unavailable", "delta", "40% used"} {
+	for _, want := range []string{"alpha", "10% used · 2d3h", "bravo", "20% used · ?", "charlie", "unavailable", "delta", "40% used · ?"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("usage is missing %q: %q", want, got)
 		}
 	}
 	if strings.Contains(got, "+") || strings.Contains(got, "charlie 0%") || len(strings.Split(got, "\n")) != 4 {
 		t.Fatalf("usage collapsed or misreported a failed account: %q", got)
+	}
+}
+
+func TestAccountResetTextStaysCompact(t *testing.T) {
+	for _, test := range []struct {
+		seconds int64
+		want    string
+	}{
+		{seconds: 0, want: "now"},
+		{seconds: 30, want: "<1m"},
+		{seconds: 42 * 60, want: "42m"},
+		{seconds: int64((6*time.Hour + 3*time.Minute) / time.Second), want: "6h3m"},
+		{seconds: int64(7 * 24 * time.Hour / time.Second), want: "7d"},
+		{seconds: int64((4*24*time.Hour + 6*time.Hour) / time.Second), want: "4d6h"},
+	} {
+		if got := accountResetText(accountUsage{resetKnown: true, resetSeconds: test.seconds}); got != test.want {
+			t.Fatalf("reset after %d seconds = %q, want %q", test.seconds, got, test.want)
+		}
+	}
+	if got := accountResetText(accountUsage{}); got != "?" {
+		t.Fatalf("unknown reset = %q", got)
+	}
+}
+
+func TestAccountResetSecondsUsesExactResetWhenRelativeValueIsMissing(t *testing.T) {
+	reference := time.Date(2026, time.August, 23, 12, 0, 0, 0, time.UTC)
+	reset := reference.Add(2*time.Hour + 30*time.Minute)
+	seconds, known := accountResetSeconds(usage.WindowSummary{ResetsAt: &reset}, reference)
+	if !known || seconds != int64((2*time.Hour+30*time.Minute)/time.Second) {
+		t.Fatalf("exact reset = %d, %v", seconds, known)
+	}
+}
+
+func TestUsageTitleKeepsResetMeaningAtNarrowAndNormalWidths(t *testing.T) {
+	if got := (tuiModel{width: minimumWidth}).usageTitle(); got != "Codex use · resets in" {
+		t.Fatalf("narrow usage title = %q", got)
+	}
+	if got := (tuiModel{width: 160}).usageTitle(); got != "Codex weekly use · resets in" {
+		t.Fatalf("normal usage title = %q", got)
 	}
 }
 
@@ -860,7 +900,7 @@ func TestUsageBoxStaysAtTheBottomOfTheSidebar(t *testing.T) {
 	bottomBorder := len(lines) - 2
 	firstUsage := bottomBorder - layout.usageHeight
 	separator := firstUsage - 1
-	if !strings.HasPrefix(lines[separator], "├") || !strings.Contains(lines[separator], "Codex weekly use") || !strings.HasPrefix(lines[bottomBorder], "└") {
+	if !strings.HasPrefix(lines[separator], "├") || !strings.Contains(lines[separator], "Codex use · resets in") || !strings.HasPrefix(lines[bottomBorder], "└") {
 		t.Fatalf("usage box boundaries are misplaced:\n%s", strings.Join(lines, "\n"))
 	}
 	for index, account := range accounts {
@@ -899,7 +939,7 @@ func TestMinimumViewportShowsTitleUsageSidebarAndFooter(t *testing.T) {
 	state := ClientState{Version: stateVersion, InstanceID: testInstanceID, Hosts: []Host{{ID: localHostID, Name: localHostName}}}
 	model := tuiModel{manager: &Manager{state: state}, width: minimumWidth, height: minimumHeight, usage: accountUsageState{accounts: []accountUsage{{label: "alpha", usedPercent: 42, available: true}}}, message: "ready"}
 	view := ansi.Strip(model.View().Content)
-	for _, want := range []string{"multicodex editor", "[ Actions ]", "[ Help ]", "Codex weekly use", "alpha", "42% used", "Projects", "No projects", "Set up your first terminal", "Click Actions, or ⌘B/Ctrl+G then Tab", "ready", "┌", "┬", "├", "┤", "┴"} {
+	for _, want := range []string{"multicodex editor", "[ Actions ]", "[ Help ]", "Codex use · resets in", "alpha", "42% used · ?", "Projects", "No projects", "Set up your first terminal", "Click Actions, or ⌘B/Ctrl+G then Tab", "ready", "┌", "┬", "├", "┤", "┴"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("missing %q in view:\n%s", want, view)
 		}

@@ -116,11 +116,13 @@ type formField struct {
 }
 
 type accountUsage struct {
-	label       string
-	usedPercent int
-	available   bool
-	loading     bool
-	stale       bool
+	label        string
+	usedPercent  int
+	resetSeconds int64
+	resetKnown   bool
+	available    bool
+	loading      bool
+	stale        bool
 }
 
 type accountUsageState struct {
@@ -2419,14 +2421,34 @@ func accountUsageRows(summary *usage.Summary) []accountUsage {
 	}
 	rows := make([]accountUsage, 0, len(summary.Accounts))
 	for _, account := range summary.Accounts {
+		reference := summary.FetchedAt
+		if account.FetchedAt != nil {
+			reference = *account.FetchedAt
+		}
+		resetSeconds, resetKnown := accountResetSeconds(account.WeeklyWindow, reference)
 		rows = append(rows, accountUsage{
-			label:       accountUsageLabel(account.Label),
-			usedPercent: account.WeeklyWindow.UsedPercent,
-			available:   strings.TrimSpace(account.Error) == "" && account.WeeklyWindow.UsedPercent >= 0,
+			label:        accountUsageLabel(account.Label),
+			usedPercent:  account.WeeklyWindow.UsedPercent,
+			resetSeconds: resetSeconds,
+			resetKnown:   resetKnown,
+			available:    strings.TrimSpace(account.Error) == "" && account.WeeklyWindow.UsedPercent >= 0,
 		})
 	}
 	sort.SliceStable(rows, func(i, j int) bool { return rows[i].label < rows[j].label })
 	return rows
+}
+
+func accountResetSeconds(window usage.WindowSummary, reference time.Time) (int64, bool) {
+	if window.SecondsUntilReset != nil {
+		return max(0, *window.SecondsUntilReset), true
+	}
+	if window.ResetsAt == nil {
+		return 0, false
+	}
+	if reference.IsZero() {
+		reference = time.Now()
+	}
+	return max(0, int64(window.ResetsAt.Sub(reference).Seconds())), true
 }
 
 func accountUsageLabel(label string) string {
@@ -2541,11 +2563,39 @@ func accountUsageStateText(account accountUsage) string {
 	case account.loading:
 		return "loading…"
 	case account.available && account.stale:
-		return fmt.Sprintf("%d%% stale", account.usedPercent)
+		return fmt.Sprintf("%d%% stale · %s", account.usedPercent, accountResetText(account))
 	case account.available:
-		return fmt.Sprintf("%d%% used", account.usedPercent)
+		return fmt.Sprintf("%d%% used · %s", account.usedPercent, accountResetText(account))
 	default:
 		return "unavailable"
+	}
+}
+
+func accountResetText(account accountUsage) string {
+	if !account.resetKnown {
+		return "?"
+	}
+	seconds := max(0, account.resetSeconds)
+	duration := time.Duration(seconds) * time.Second
+	switch {
+	case duration <= 0:
+		return "now"
+	case duration < time.Minute:
+		return "<1m"
+	case duration < time.Hour:
+		return fmt.Sprintf("%dm", int(duration/time.Minute))
+	case duration < 24*time.Hour:
+		hours, minutes := int(duration/time.Hour), int(duration%time.Hour/time.Minute)
+		if minutes == 0 {
+			return fmt.Sprintf("%dh", hours)
+		}
+		return fmt.Sprintf("%dh%dm", hours, minutes)
+	default:
+		days, hours := int(duration/(24*time.Hour)), int(duration%(24*time.Hour)/time.Hour)
+		if hours == 0 {
+			return fmt.Sprintf("%dd", days)
+		}
+		return fmt.Sprintf("%dd%dh", days, hours)
 	}
 }
 
@@ -2556,7 +2606,11 @@ func (m tuiModel) usageTitle() string {
 		}
 		return "Codex use · error"
 	}
-	return "Codex weekly use"
+	full := "Codex weekly use · resets in"
+	if lipgloss.Width(full) <= max(1, m.sidebarWidth()-3) {
+		return full
+	}
+	return "Codex use · resets in"
 
 }
 
