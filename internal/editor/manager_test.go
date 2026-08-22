@@ -187,6 +187,35 @@ func TestClearSelectedWindowPersistsOnlyTheDeletedSelection(t *testing.T) {
 	}
 }
 
+func TestEveryChangedReconnectSelectionIsSavedImmediately(t *testing.T) {
+	home := privateTestHome(t)
+	manager, err := NewManager(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close()
+	first, second := mustID(t), mustID(t)
+	if err := manager.SetSelectedWindow(first); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.SetSelectedWindow(second); err != nil {
+		t.Fatal(err)
+	}
+	persisted, err := NewStateStore(home).Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.SelectedWindowID != second {
+		t.Fatalf("rapid selection persisted as %q, want %q", persisted.SelectedWindowID, second)
+	}
+	if err := manager.SetSelectedWindow(second); err != nil {
+		t.Fatal(err)
+	}
+	if manager.dirty {
+		t.Fatal("selecting the current window dirtied client state")
+	}
+}
+
 func TestRefreshQueueCancellationPreservesHealthyClient(t *testing.T) {
 	manager, err := NewManager(privateTestHome(t))
 	if err != nil {
