@@ -46,6 +46,9 @@ const (
 	confirmationWarning = "This cannot be undone. Cancel is selected by default."
 	modalInsetX         = 1
 	modalInsetY         = 1
+	contextInsetX       = 1
+	contextInsetY       = 1
+	contextActionRow    = 4
 	recentOutputWindow  = 5 * time.Second
 )
 
@@ -187,6 +190,7 @@ type tuiModel struct {
 	attachedHost      string
 	attachedID        string
 	attachingID       string
+	keepSidebarAttach string
 	queuedAttach      *sidebarRow
 	selectOnRefreshID string
 	resizePending     bool
@@ -355,12 +359,18 @@ func (m tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				_ = msg.attachment.Close()
 			}
 			if queued.window.ID == m.attachedID {
+				if queued.window.ID == m.keepSidebarAttach {
+					m.keepSidebarAttach = ""
+				}
 				m.message = "kept current window"
 				return m, nil
 			}
 			return m, m.requestAttach(queued)
 		}
 		if msg.err != nil {
+			if msg.window.ID == m.keepSidebarAttach {
+				m.keepSidebarAttach = ""
+			}
 			m.message = msg.err.Error()
 			return m, nil
 		}
@@ -375,7 +385,10 @@ func (m tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.resizePending = true
 		}
-		m.controlMode = false
+		m.controlMode = msg.window.ID == m.keepSidebarAttach
+		if msg.window.ID == m.keepSidebarAttach {
+			m.keepSidebarAttach = ""
+		}
 		m.message = ""
 		if err := m.manager.SetSelectedWindow(msg.window.ID); err != nil {
 			m.message = "connected, but reconnect selection was not saved: " + err.Error()
@@ -486,19 +499,19 @@ func (m tuiModel) handleKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	if isMacListEdgeKey(key, tea.KeyUp) {
 		m.selectSidebarEdge(false)
-		return m, nil
+		return m.openSelectedWindowFromSidebar()
 	}
 	if isMacListEdgeKey(key, tea.KeyDown) {
 		m.selectSidebarEdge(true)
-		return m, nil
+		return m.openSelectedWindowFromSidebar()
 	}
 	if isMacListPageKey(key, tea.KeyUp) {
 		m.moveSelectionPage(-1)
-		return m, nil
+		return m.openSelectedWindowFromSidebar()
 	}
 	if isMacListPageKey(key, tea.KeyDown) {
 		m.moveSelectionPage(1)
-		return m, nil
+		return m.openSelectedWindowFromSidebar()
 	}
 	if isCreateKey(key) {
 		return m.createForSelection()
@@ -520,16 +533,22 @@ func (m tuiModel) handleKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "up":
 		m.moveSelection(-1)
+		return m.openSelectedWindowFromSidebar()
 	case "down":
 		m.moveSelection(1)
+		return m.openSelectedWindowFromSidebar()
 	case "home":
 		m.selectSidebarEdge(false)
+		return m.openSelectedWindowFromSidebar()
 	case "end":
 		m.selectSidebarEdge(true)
+		return m.openSelectedWindowFromSidebar()
 	case "pgup":
 		m.moveSelectionPage(-1)
+		return m.openSelectedWindowFromSidebar()
 	case "pgdown":
 		m.moveSelectionPage(1)
+		return m.openSelectedWindowFromSidebar()
 	case "enter":
 		return m.selectCurrentRow()
 	case "tab", "shift+tab", "right":
@@ -679,6 +698,18 @@ func (m tuiModel) handleMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		if _, choices, ok := m.selectedContextActions(); ok {
+			x := click.X - layout.terminalX - contextInsetX
+			y := click.Y - layout.bodyContent - contextInsetY
+			index := y - contextActionRow
+			if index >= 0 && index < len(choices) {
+				button := contextActionButton(choices[index])
+				if hitLabel(button, button, x) {
+					return m.activateEditorChoice(choices[index])
+				}
+			}
+			return m, nil
+		}
 		if m.isTerminalMousePosition(click.X, click.Y) {
 			return m.forwardTerminalMouse(event)
 		}
@@ -800,7 +831,8 @@ func (m tuiModel) submitModalForm() (tea.Model, tea.Cmd) {
 
 func (m tuiModel) isTerminalMousePosition(x, y int) bool {
 	layout := m.layout()
-	return m.attachment != nil && layout.fits() && x >= layout.terminalX && x < layout.terminalX+layout.terminalWidth && y >= layout.bodyContent && y < layout.bodyContent+layout.bodyHeight
+	_, _, contextOpen := m.selectedContextActions()
+	return m.attachment != nil && !contextOpen && layout.fits() && x >= layout.terminalX && x < layout.terminalX+layout.terminalWidth && y >= layout.bodyContent && y < layout.bodyContent+layout.bodyHeight
 }
 
 func (m tuiModel) forwardTerminalMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
@@ -983,6 +1015,9 @@ func (m tuiModel) renderMain() string {
 	if m.modal != nil {
 		return renderModal(*m.modal, width, height)
 	}
+	if row, choices, ok := m.selectedContextActions(); ok {
+		return renderContextPanel(row, choices, width, height)
+	}
 	if m.attachment == nil {
 		text := "Set up your first terminal\n\n1. Open Actions: click [ Actions ].\n   Keyboard: ⌘B or Ctrl+G, then Tab.\n2. Add a project.\n3. Create a named workspace.\n   Its first terminal opens automatically."
 		if m.loadingProjects() {
@@ -1011,6 +1046,64 @@ func (m tuiModel) renderMain() string {
 	return m.attachment.Render(width, height)
 }
 
+func (m tuiModel) selectedContextActions() (sidebarRow, []choice, bool) {
+	row, ok := m.selectedSidebarRow()
+	if !ok || !m.controlMode || (row.kind != "project" && row.kind != "workspace") {
+		return sidebarRow{}, nil, false
+	}
+	choices := m.primaryActions(row)
+	if item, ok := m.deleteAction(row); ok {
+		choices = append(choices, item)
+	}
+	return row, choices, true
+}
+
+func renderContextPanel(row sidebarRow, choices []choice, width, height int) string {
+	title := "Project selected"
+	detail := row.project.Name + " · " + row.host.Name
+	hint := "Enter: new workspace · Tab: all actions"
+	if row.kind == "workspace" {
+		title = "Workspace selected"
+		detail = row.workspace.Name + " · " + row.project.Name + " · " + row.host.Name
+		hint = "Enter: new terminal · ⌘R: rename · Tab: all actions"
+		if row.workspace.Unavailable {
+			hint = "Directory unavailable · use Delete only when recovery is complete"
+		}
+	}
+	lines := []string{accentStyle.Render(title), plainDisplayText(detail), "", "Choose an action"}
+	buttonStyle := lipgloss.NewStyle().Reverse(true).Bold(true).Foreground(lipgloss.Cyan)
+	for _, item := range choices {
+		lines = append(lines, buttonStyle.Render(contextActionButton(item)))
+	}
+	if len(choices) == 0 {
+		lines = append(lines, "No action is available while this host is offline.")
+	}
+	lines = append(lines, "", hint, "Click an option, or use the shown keyboard shortcut.")
+	return padInsetBlock(strings.Join(lines, "\n"), width, height, contextInsetX, contextInsetY)
+}
+
+func contextActionButton(item choice) string {
+	label := "Action"
+	switch item.action {
+	case "new_workspace_selected":
+		label = "New workspace…"
+	case "list_tmux_sessions":
+		label = "Adopt tmux session…"
+	case "new_window_selected":
+		label = "New terminal"
+	case "rename_selected":
+		label = "Rename workspace…"
+	case "delete":
+		switch {
+		case item.workspace.External:
+			label = "Remove preserved workspace…"
+		default:
+			label = "Delete workspace…"
+		}
+	}
+	return "[ " + label + " ]"
+}
+
 func (m tuiModel) loadingProjects() bool {
 	return m.refreshing && len(m.statuses) == 0 && len(m.rows) == 0
 }
@@ -1029,11 +1122,11 @@ func (m tuiModel) sidebarFooter() string {
 	}
 	switch row.kind {
 	case "project":
-		return "Project · Enter: new workspace · Tab: Actions · Esc: terminal"
+		return "Project · Choose an option on the right · Enter: new workspace"
 	case "workspace":
-		return "Workspace · Enter: new terminal · ⌘R: rename · Tab: Actions"
+		return "Workspace · Choose an option on the right · ⌘R: rename"
 	case "window":
-		return "Window · Enter: open · ⌘N/Ctrl+N: new · ⌘R: rename"
+		return "Window · terminal shown · Enter: focus · ⌘N/Ctrl+N: new"
 	default:
 		return "Sidebar · ↑/↓: select · Tab: Actions · Esc: terminal"
 	}
@@ -1055,6 +1148,12 @@ func (m tuiModel) focusLabel() string {
 func (m tuiModel) mainTitle() string {
 	if m.modal != nil {
 		return "Dialog"
+	}
+	if row, _, ok := m.selectedContextActions(); ok {
+		if row.kind == "project" {
+			return "Project options"
+		}
+		return "Workspace options"
 	}
 	if row, ok := m.currentAttachedRow(); ok {
 		if row.workspace.Unavailable {
@@ -1165,14 +1264,14 @@ func renderModal(modal modal, width, height int) string {
 func helpModalContent() []string {
 	return []string{
 		"Mouse",
-		"  Click rows, fields, buttons, or terminal to focus",
+		"  Click project/workspace: options · window: open",
 		"  Wheel: move lists or scroll terminal history",
 		"  Copy: iTerm2 ⌥-drag · others Shift-drag · ⌘C",
 		"  Paste: ⌘V · focuses the attached terminal",
 		"Keyboard · MacBook",
 		"  ⌘B or Ctrl+G: focus the sidebar",
-		"  ↑/↓: one row · ⌥↑/⌥↓: one screen",
-		"  ⌘↑/⌘↓: first/last · Enter: open/create",
+		"  ↑/↓: select; windows open · ⌥↑/⌥↓: one screen",
+		"  ⌘↑/⌘↓: first/last · Enter: focus/create",
 		"  Tab: Actions · ⌘N or Ctrl+N: create",
 		"  ⌘R: rename · ? or ⌘?: Help · Esc: terminal",
 		"  ⌘1–9 or ⌥1–9: open the numbered window",
@@ -1338,6 +1437,7 @@ func (m tuiModel) selectCurrentRow() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if row.window.ID == m.attachedID {
+		m.keepSidebarAttach = ""
 		m.controlMode = false
 		if m.attachingID != "" {
 			m.queuedAttach = &row
@@ -1347,10 +1447,21 @@ func (m tuiModel) selectCurrentRow() (tea.Model, tea.Cmd) {
 	}
 	if row.window.ID == m.attachingID {
 		m.queuedAttach = nil
+		m.keepSidebarAttach = ""
 		m.controlMode = false
 		return m, nil
 	}
 	m.controlMode = false
+	m.keepSidebarAttach = ""
+	return m, m.requestAttach(row)
+}
+
+func (m tuiModel) openSelectedWindowFromSidebar() (tea.Model, tea.Cmd) {
+	row, ok := m.selectedSidebarRow()
+	if !ok || row.kind != "window" || row.window.ID == m.attachedID {
+		return m, nil
+	}
+	m.keepSidebarAttach = row.window.ID
 	return m, m.requestAttach(row)
 }
 
@@ -1459,24 +1570,7 @@ func (m *tuiModel) openActionMenu() {
 	}
 	selectedRow, hasSelection := m.selectedSidebarRow()
 	if hasSelection {
-		row := selectedRow
-		switch row.kind {
-		case "project":
-			choices = append(choices, choice{label: "New workspace in " + row.project.Name + "…", action: "new_workspace_selected", host: row.host, project: row.project})
-			if !row.offline {
-				choices = append(choices, choice{label: "Adopt existing tmux session…", action: "list_tmux_sessions", host: row.host, project: row.project})
-			}
-		case "workspace":
-			if !row.workspace.Unavailable {
-				choices = append(choices, choice{label: "New window in " + row.workspace.Name, action: "new_window_selected", host: row.host, project: row.project, workspace: row.workspace})
-			}
-			choices = append(choices, choice{label: "Rename workspace…", action: "rename_selected", host: row.host, project: row.project, workspace: row.workspace})
-		case "window":
-			if !row.workspace.Unavailable {
-				choices = append(choices, choice{label: "New window in " + row.workspace.Name, action: "new_window_selected", host: row.host, project: row.project, workspace: row.workspace, window: row.window})
-			}
-			choices = append(choices, choice{label: "Rename window…", action: "rename_selected", host: row.host, project: row.project, workspace: row.workspace, window: row.window})
-		}
+		choices = append(choices, m.primaryActions(selectedRow)...)
 	}
 	if hasProject {
 		choices = append(choices, choice{label: "New workspace…", action: "new_workspace"})
@@ -1495,14 +1589,10 @@ func (m *tuiModel) openActionMenu() {
 			choice{label: "Open terminal history", action: "scrollback"},
 		)
 	}
-	if hasSelection && (selectedRow.kind == "workspace" || selectedRow.kind == "window") {
-		label := "Delete selected window or workspace…"
-		if selectedRow.window.Adopted {
-			label = "Release selected tmux session…"
-		} else if selectedRow.workspace.External {
-			label = "Remove preserved workspace…"
+	if hasSelection {
+		if item, ok := m.deleteAction(selectedRow); ok {
+			choices = append(choices, item)
 		}
-		choices = append(choices, choice{label: label, action: "delete"})
 	}
 	choices = append(choices, choice{label: "Run safe cleanup", action: "cleanup"})
 	if m.attachment != nil {
@@ -1515,13 +1605,52 @@ func (m *tuiModel) openActionMenu() {
 	m.modal = &modal{kind: "actions", title: "Editor actions", choices: choices}
 }
 
+func (m tuiModel) primaryActions(row sidebarRow) []choice {
+	choices := []choice{}
+	switch row.kind {
+	case "project":
+		choices = append(choices, choice{label: "New workspace in " + row.project.Name + "…", action: "new_workspace_selected", host: row.host, project: row.project})
+		if !row.offline {
+			choices = append(choices, choice{label: "Adopt existing tmux session…", action: "list_tmux_sessions", host: row.host, project: row.project})
+		}
+	case "workspace":
+		if !row.workspace.Unavailable {
+			choices = append(choices, choice{label: "New window in " + row.workspace.Name, action: "new_window_selected", host: row.host, project: row.project, workspace: row.workspace})
+		}
+		choices = append(choices, choice{label: "Rename workspace…", action: "rename_selected", host: row.host, project: row.project, workspace: row.workspace})
+	case "window":
+		if !row.workspace.Unavailable {
+			choices = append(choices, choice{label: "New window in " + row.workspace.Name, action: "new_window_selected", host: row.host, project: row.project, workspace: row.workspace, window: row.window})
+		}
+		choices = append(choices, choice{label: "Rename window…", action: "rename_selected", host: row.host, project: row.project, workspace: row.workspace, window: row.window})
+	}
+	return choices
+}
+
+func (m tuiModel) deleteAction(row sidebarRow) (choice, bool) {
+	if row.kind != "workspace" && row.kind != "window" {
+		return choice{}, false
+	}
+	label := "Delete selected window or workspace…"
+	if row.window.Adopted {
+		label = "Release selected tmux session…"
+	} else if row.workspace.External {
+		label = "Remove preserved workspace…"
+	}
+	return choice{label: label, action: "delete", host: row.host, project: row.project, workspace: row.workspace, window: row.window}, true
+}
+
 func (m tuiModel) activateEditorAction() (tea.Model, tea.Cmd) {
 	if m.modal == nil || len(m.modal.choices) == 0 || m.modal.choice < 0 || m.modal.choice >= len(m.modal.choices) {
 		return m, nil
 	}
 	selected := m.modal.choices[m.modal.choice]
-	action := selected.action
 	m.modal = nil
+	return m.activateEditorChoice(selected)
+}
+
+func (m tuiModel) activateEditorChoice(selected choice) (tea.Model, tea.Cmd) {
+	action := selected.action
 	switch action {
 	case "new_window_selected":
 		return m.startCreateWindow(sidebarRow{kind: "workspace", host: selected.host, project: selected.project, workspace: selected.workspace})
