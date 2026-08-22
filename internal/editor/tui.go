@@ -1026,6 +1026,14 @@ func (m tuiModel) renderMain() string {
 			text = "Loading projects\n\nConnecting to configured hosts…"
 		}
 		if row, ok := m.selectedSidebarRow(); ok {
+			if row.offline {
+				reason := safeClientText(row.hostError, 160)
+				if reason == "" {
+					reason = "connection unavailable"
+				}
+				text = "Host offline\n\n" + row.host.Name + " is not reachable: " + reason + ".\n\nMulticodex editor will reconnect automatically. It does not stop existing tmux sessions."
+				return padInsetBlock(text, width, height, 1, 1)
+			}
 			switch row.kind {
 			case "project":
 				text = "Project selected\n\nPress Enter to create a named workspace.\nIts first terminal opens automatically.\n\nOr click Actions."
@@ -1071,6 +1079,9 @@ func renderContextPanel(row sidebarRow, choices []choice, width, height int) str
 		if row.workspace.Unavailable {
 			hint = "Directory unavailable · use Delete only when recovery is complete"
 		}
+	}
+	if row.offline {
+		hint = "Reconnect is automatic · existing tmux sessions are left unchanged"
 	}
 	lines := []string{accentStyle.Render(title), plainDisplayText(detail), "", "Choose an action"}
 	buttonStyle := lipgloss.NewStyle().Reverse(true).Bold(true).Foreground(lipgloss.Cyan)
@@ -1441,6 +1452,10 @@ func (m tuiModel) selectCurrentRow() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	row := m.rows[m.selectedRow]
+	if row.offline && row.kind != "window" {
+		m.message = offlineStatusMessage(row)
+		return m, nil
+	}
 	switch row.kind {
 	case "project":
 		m.openWorkspaceName(row.host, row.project)
@@ -1484,6 +1499,10 @@ func (m tuiModel) createForSelection() (tea.Model, tea.Cmd) {
 	row, ok := m.selectedSidebarRow()
 	if !ok {
 		m.openActionMenu()
+		return m, nil
+	}
+	if row.offline {
+		m.message = offlineStatusMessage(row)
 		return m, nil
 	}
 	if row.kind == "project" {
@@ -1578,19 +1597,20 @@ func (m *tuiModel) openActionMenu() {
 	for _, row := range m.rows {
 		switch row.kind {
 		case "project":
-			hasProject = true
+			hasProject = hasProject || !row.offline
 		case "workspace":
-			hasWorkspace = hasWorkspace || !row.workspace.Unavailable
+			hasWorkspace = hasWorkspace || !row.offline && !row.workspace.Unavailable
 		}
 	}
 	selectedRow, hasSelection := m.selectedSidebarRow()
 	if hasSelection {
 		choices = append(choices, m.primaryActions(selectedRow)...)
 	}
-	if hasProject && (!hasSelection || selectedRow.kind != "project") {
+	selectedProjectCanCreateWorkspace := hasSelection && !selectedRow.offline && selectedRow.kind == "project"
+	if hasProject && !selectedProjectCanCreateWorkspace {
 		choices = append(choices, choice{label: "New workspace…", action: "new_workspace"})
 	}
-	selectedWorkspaceCanCreateWindow := hasSelection && (selectedRow.kind == "workspace" || selectedRow.kind == "window") && !selectedRow.workspace.Unavailable
+	selectedWorkspaceCanCreateWindow := hasSelection && !selectedRow.offline && (selectedRow.kind == "workspace" || selectedRow.kind == "window") && !selectedRow.workspace.Unavailable
 	if hasWorkspace && !selectedWorkspaceCanCreateWindow {
 		choices = append(choices, choice{label: "New window…", action: "new_window"})
 	}
@@ -1623,6 +1643,9 @@ func (m *tuiModel) openActionMenu() {
 
 func (m tuiModel) primaryActions(row sidebarRow) []choice {
 	choices := []choice{}
+	if row.offline {
+		return choices
+	}
 	switch row.kind {
 	case "project":
 		choices = append(choices, choice{label: "New workspace in " + row.project.Name + "…", action: "new_workspace_selected", host: row.host, project: row.project})
@@ -1644,7 +1667,7 @@ func (m tuiModel) primaryActions(row sidebarRow) []choice {
 }
 
 func (m tuiModel) deleteAction(row sidebarRow) (choice, bool) {
-	if row.kind != "workspace" && row.kind != "window" {
+	if row.offline || row.kind != "workspace" && row.kind != "window" {
 		return choice{}, false
 	}
 	label := "Delete selected window or workspace…"
@@ -1750,11 +1773,10 @@ func (m *tuiModel) openHostChoice(action, title string) {
 }
 
 func (m *tuiModel) openProjectChoice() {
-	state := m.manager.State()
 	choices := []choice{}
-	for _, host := range state.Hosts {
-		for _, project := range host.Projects {
-			choices = append(choices, choice{label: project.Name + " · " + host.Name, host: host, project: project})
+	for _, row := range m.rows {
+		if row.kind == "project" && !row.offline {
+			choices = append(choices, choice{label: row.project.Name + " · " + row.host.Name, host: row.host, project: row.project})
 		}
 	}
 	if len(choices) == 0 {
@@ -1767,6 +1789,9 @@ func (m *tuiModel) openProjectChoice() {
 func (m *tuiModel) openWorkspaceChoice() {
 	choices := []choice{}
 	for _, status := range m.statuses {
+		if status.Error != "" {
+			continue
+		}
 		projects := map[string]Project{}
 		for _, project := range status.Host.Projects {
 			projects[project.ID] = project
@@ -1804,6 +1829,10 @@ func (m *tuiModel) openRename() {
 		m.message = "select a workspace or window to rename"
 		return
 	}
+	if row.offline {
+		m.message = offlineStatusMessage(row)
+		return
+	}
 	m.openRenameRow(row)
 }
 
@@ -1823,6 +1852,10 @@ func (m *tuiModel) openRenameRow(row sidebarRow) {
 func (m tuiModel) startCreateWindow(row sidebarRow) (tea.Model, tea.Cmd) {
 	if row.workspace.ID == "" {
 		m.message = "select a workspace before creating a window"
+		return m, nil
+	}
+	if row.offline {
+		m.message = offlineStatusMessage(row)
 		return m, nil
 	}
 	if row.workspace.Unavailable {
@@ -1884,6 +1917,10 @@ func (m *tuiModel) openDeleteConfirmation() {
 		return
 	}
 	row := m.rows[m.selectedRow]
+	if row.offline {
+		m.message = offlineStatusMessage(row)
+		return
+	}
 	current := &modal{kind: "confirm", host: row.host, project: row.project, workspace: row.workspace, delete: DeleteRequest{Force: false}}
 	switch row.kind {
 	case "window":
@@ -1918,6 +1955,10 @@ func (m *tuiModel) openDeleteConfirmation() {
 		return
 	}
 	m.modal = current
+}
+
+func offlineStatusMessage(row sidebarRow) string {
+	return row.host.Name + " is offline; reconnect is automatic"
 }
 
 func (m tuiModel) handleActionResult(msg actionResultMsg) (tea.Model, tea.Cmd) {
