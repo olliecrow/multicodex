@@ -1,0 +1,23 @@
+# Commit identity allow-list.
+#
+# Every author and committer email on an outbound push must match one of the
+# extended regular expressions below, compared case-insensitively against the
+# whole address. Anything else is rejected before the push leaves the machine.
+#
+# The reserved domains accepted by the sensitive-text policy are deliberately
+# NOT accepted here. Those exist so that fixtures inside files can carry an
+# address-shaped string; they are not valid authorship for a real commit.
+#
+# Adding a line here publishes that address on every commit it signs. Prefer a
+# GitHub no-reply identity over a real mailbox.
+
+# GitHub-provided no-reply identities, including bot accounts. This is what
+# "Keep my email address private" produces.
+^[^@[:space:]]+@users\.noreply\.github\.com$
+
+# GitHub itself, as committer of merges performed through the web UI.
+^noreply@github\.com$
+
+# Maintainer address already present throughout this repository's history.
+# A no-reply identity would be preferable for new commits.
+^me@olliecrow\.io$

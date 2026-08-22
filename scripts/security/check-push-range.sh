@@ -28,10 +28,13 @@ tmp_dir="$(mktemp -d)"
 trap 'rm -rf "${tmp_dir}"' EXIT
 
 commit_msg_file="${tmp_dir}/commit_messages.txt"
+commit_identity_file="${tmp_dir}/commit_identities.txt"
 patch_file="${tmp_dir}/patches.diff"
 
-git log --format='%H%n%s%n%b%n' "${commits[@]}" > "${commit_msg_file}"
+git log --no-walk=unsorted --format='%H%n%s%n%b%n' "${commits[@]}" > "${commit_msg_file}"
+git log --no-walk=unsorted --format='%ae%n%ce' "${commits[@]}" > "${commit_identity_file}"
 git show --format= --patch --no-color "${commits[@]}" > "${patch_file}"
 
 bash scripts/security/check-sensitive-text.sh --context=push-commit-message "${commit_msg_file}"
+bash scripts/security/check-commit-identity.sh --context=push-commit-identity "${commit_identity_file}"
 bash scripts/security/check-sensitive-text.sh --context=push-diff "${patch_file}"

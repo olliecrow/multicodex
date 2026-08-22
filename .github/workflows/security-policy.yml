@@ -136,6 +136,33 @@ jobs:
             exit 1
           fi
 
+      - name: Self-test commit identity policy
+        run: |
+          set -euo pipefail
+          tmp_ok="$(mktemp)"
+          tmp_bad="$(mktemp)"
+          tmp_empty="$(mktemp)"
+          printf '%s@%s\n' "1+user" "users.noreply.github.com" > "${tmp_ok}"
+          printf '%s@%s\n' "noreply" "github.com" >> "${tmp_ok}"
+          printf '%s@%s\n' "person" "mailprovider.co" > "${tmp_bad}"
+          printf '\n' > "${tmp_empty}"
+          bash scripts/security/check-commit-identity.sh --context=identity-selftest "${tmp_ok}"
+          if bash scripts/security/check-commit-identity.sh --context=identity-selftest "${tmp_bad}"; then
+            echo "expected commit identity self-test failure did not occur" >&2
+            exit 1
+          fi
+          if bash scripts/security/check-commit-identity.sh --context=identity-selftest "${tmp_empty}"; then
+            echo "expected missing-identity self-test failure did not occur" >&2
+            exit 1
+          fi
+
+      - name: Verify every commit identity in history is allowed
+        run: |
+          set -euo pipefail
+          tmp_identities="$(mktemp)"
+          git log --no-walk=unsorted --format='%ae%n%ce' $(git rev-list HEAD) > "${tmp_identities}"
+          bash scripts/security/check-commit-identity.sh --context=history-identity "${tmp_identities}"
+
       - name: Self-test sensitive text policy without ripgrep
         run: |
           set -euo pipefail
