@@ -477,6 +477,13 @@ func TestReleaseDoesNotTouchAReusedTmuxSessionName(t *testing.T) {
 		t.Fatal(err)
 	}
 	runTestCommand(t, "tmux", "-L", service.systemSocket, "kill-session", "-t", adopted.Window.TmuxSessionID)
+	snapshot, err := service.Snapshot(ctx)
+	if err != nil {
+		t.Fatalf("snapshot after adopted session exit: %v", err)
+	}
+	if len(snapshot.Windows) != 1 || snapshot.Windows[0].ID != adopted.Window.ID || snapshot.Windows[0].Alive {
+		t.Fatalf("ended adopted session snapshot = %+v", snapshot.Windows)
+	}
 	runTestCommand(t, "tmux", "-L", service.systemSocket, "new-session", "-d", "-s", session, "-c", project)
 	newPID := commandOutput(t, "tmux", "-L", service.systemSocket, "display-message", "-p", "-t", session, "#{pane_pid}")
 	if result, err := service.DeleteWindow(ctx, DeleteRequest{ID: adopted.Window.ID}); err != nil || !result.Deleted {

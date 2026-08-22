@@ -1918,14 +1918,7 @@ func (s *HostService) inspectSession(ctx context.Context, window Window) (tmuxSe
 	out, err := s.tmuxForWindow(ctx, window, "display-message", "-p", "-t", target, format)
 	if err != nil {
 		if window.Adopted {
-			present, inspectErr := s.systemTmuxSessionIDPresent(ctx, window.TmuxSessionID)
-			if inspectErr != nil {
-				return sessionAbsent, false, errors.New("inspect tmux session ownership")
-			}
-			if present {
-				return sessionAltered, false, nil
-			}
-			return sessionAbsent, false, nil
+			return s.classifyUnresponsiveAdoptedSession(ctx, window)
 		}
 		var failure commandFailure
 		if errors.As(err, &failure) && failure.exitCode == 1 && !failure.notFound {
@@ -1935,6 +1928,9 @@ func (s *HostService) inspectSession(ctx context.Context, window Window) (tmuxSe
 	}
 	fields := strings.Split(strings.TrimSpace(string(out)), "\t")
 	if len(fields) != 7 {
+		if window.Adopted {
+			return s.classifyUnresponsiveAdoptedSession(ctx, window)
+		}
 		return sessionAbsent, false, errors.New("inspect tmux session ownership")
 	}
 	if fields[0] != window.Session || fields[1] != s.store.instanceID || fields[2] != window.ID || fields[3] != window.WorkspaceID {
@@ -1947,6 +1943,17 @@ func (s *HostService) inspectSession(ctx context.Context, window Window) (tmuxSe
 		return sessionAltered, false, nil
 	}
 	return sessionOwned, fields[4] == "0", nil
+}
+
+func (s *HostService) classifyUnresponsiveAdoptedSession(ctx context.Context, window Window) (tmuxSessionState, bool, error) {
+	present, err := s.systemTmuxSessionIDPresent(ctx, window.TmuxSessionID)
+	if err != nil {
+		return sessionAbsent, false, errors.New("inspect tmux session ownership")
+	}
+	if present {
+		return sessionAltered, false, nil
+	}
+	return sessionAbsent, false, nil
 }
 
 func (s *HostService) paneAlive(ctx context.Context, window Window) (bool, error) {
