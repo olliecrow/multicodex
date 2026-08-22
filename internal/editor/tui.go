@@ -889,6 +889,8 @@ func (m tuiModel) View() tea.View {
 	footerLeft := terminalFooter()
 	if m.controlMode {
 		footerLeft = m.sidebarFooter()
+	} else if m.loadingProjects() {
+		footerLeft = "Loading projects…"
 	} else if len(m.rows) == 0 {
 		footerLeft = "No projects · Click Actions, or ⌘B/Ctrl+G then Tab"
 	} else if m.attachment == nil {
@@ -961,7 +963,11 @@ func (m tuiModel) renderSidebar() string {
 		lines = append(lines, style.Render(label))
 	}
 	if len(lines) == 0 {
-		lines = append(lines, fitPlain(" No projects", width), fitPlain(" Click Actions to begin", width))
+		if m.loadingProjects() {
+			lines = append(lines, fitPlain(" Loading projects…", width), fitPlain(" Connecting to hosts", width))
+		} else {
+			lines = append(lines, fitPlain(" No projects", width), fitPlain(" Click Actions to begin", width))
+		}
 	}
 	start := min(m.sidebarOffset, len(lines))
 	end := min(len(lines), start+height)
@@ -979,6 +985,9 @@ func (m tuiModel) renderMain() string {
 	}
 	if m.attachment == nil {
 		text := "Set up your first terminal\n\n1. Open Actions: click [ Actions ].\n   Keyboard: ⌘B or Ctrl+G, then Tab.\n2. Add a project.\n3. Create a named workspace.\n   Its first terminal opens automatically."
+		if m.loadingProjects() {
+			text = "Loading projects\n\nConnecting to configured hosts…"
+		}
 		if row, ok := m.selectedSidebarRow(); ok {
 			switch row.kind {
 			case "project":
@@ -1000,6 +1009,10 @@ func (m tuiModel) renderMain() string {
 		return padInsetBlock(text, width, height, 1, 1)
 	}
 	return m.attachment.Render(width, height)
+}
+
+func (m tuiModel) loadingProjects() bool {
+	return m.refreshing && len(m.statuses) == 0 && len(m.rows) == 0
 }
 
 func (m tuiModel) sidebarFooter() string {
