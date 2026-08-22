@@ -218,7 +218,7 @@ func TestEditorControlsUseNavigationAndAVisibleActionMenu(t *testing.T) {
 		}
 	}
 	help := ansi.Strip(renderModal(modal{kind: "help", title: "Controls"}, helpWidth, (tuiModel{width: minimumWidth, height: minimumHeight}).bodyHeight()))
-	for _, want := range []string{"Click project/workspace: options · window: open", "⌘B or Ctrl+G: focus the sidebar", "⌥↑/⌥↓: one screen", "scroll terminal history", "In the sidebar, Ctrl+C: quit", "● changing · · quiet · × stopped", "Need terminal Ctrl+G?", "[ Close ]"} {
+	for _, want := range []string{"Click project/workspace: options · window: open", "⌘B or Ctrl+G: focus the sidebar", "⌥↑/⌥↓: previous/next window", "⌘⌫: delete", "scroll terminal history", "In the sidebar, Ctrl+C: quit", "● changing · · quiet · × stopped", "Need terminal Ctrl+G?", "[ Close ]"} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("minimum-width help truncated %q:\n%s", want, help)
 		}
@@ -362,21 +362,38 @@ func modalHasAction(current *modal, action string) bool {
 }
 
 func TestMacBookSidebarNavigationNeedsNoFunctionOrNavigationKeys(t *testing.T) {
-	rows := make([]sidebarRow, 30)
-	for i := range rows {
-		rows[i] = sidebarRow{kind: "project", project: Project{ID: fmt.Sprintf("%024d", i+1), Name: fmt.Sprintf("Project %d", i+1)}}
+	rows := []sidebarRow{
+		{kind: "project", project: Project{Name: "First"}},
+		{kind: "window", host: Host{Name: "Local"}, window: Window{ID: "111111111111111111111111", Name: "One"}},
+		{kind: "workspace", workspace: Workspace{Name: "Work"}},
+		{kind: "window", host: Host{Name: "Local"}, window: Window{ID: "222222222222222222222222", Name: "Two"}},
+		{kind: "window", host: Host{Name: "Local"}, window: Window{ID: "333333333333333333333333", Name: "Three"}},
+		{kind: "project", project: Project{Name: "Last"}},
 	}
-	model := tuiModel{width: 100, height: 30, controlMode: true, rows: rows, selectedRow: 10}
-	page := max(1, model.sidebarHeight()-1)
+	model := tuiModel{width: 100, height: 30, controlMode: true, rows: rows, selectedRow: 3}
 
 	updated, cmd := model.handleKey(tea.KeyPressMsg{Code: tea.KeyDown, Mod: tea.ModAlt})
 	got := updated.(tuiModel)
-	want := min(len(rows)-1, 10+page)
-	if cmd != nil || got.selectedRow != want {
-		t.Fatalf("Option+Down selected row %d, want %d", got.selectedRow, want)
+	if cmd == nil || got.selectedRow != 4 || got.attachingID != rows[4].window.ID || got.keepSidebarAttach != rows[4].window.ID {
+		t.Fatalf("Option+Down did not open the next window with sidebar focus: %+v, %v", got, cmd)
 	}
 
-	updated, cmd = got.handleKey(tea.KeyPressMsg{Code: tea.KeyDown, Mod: tea.ModSuper})
+	model.selectedRow = 1
+	updated, cmd = model.handleKey(tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModAlt})
+	got = updated.(tuiModel)
+	if cmd == nil || got.selectedRow != 4 || got.attachingID != rows[4].window.ID {
+		t.Fatalf("Option+Up did not wrap to the previous window: %+v, %v", got, cmd)
+	}
+
+	model.selectedRow = 2
+	updated, cmd = model.handleKey(tea.KeyPressMsg{Code: tea.KeyDown, Mod: tea.ModAlt})
+	got = updated.(tuiModel)
+	if cmd == nil || got.selectedRow != 3 || got.attachingID != rows[3].window.ID {
+		t.Fatalf("Option+Down did not find the next window from a workspace: %+v, %v", got, cmd)
+	}
+
+	model.selectedRow = 2
+	updated, cmd = model.handleKey(tea.KeyPressMsg{Code: tea.KeyDown, Mod: tea.ModSuper})
 	got = updated.(tuiModel)
 	if cmd != nil || got.selectedRow != len(rows)-1 {
 		t.Fatalf("Command+Down selected row %d", got.selectedRow)
@@ -424,6 +441,24 @@ func TestMacBookEditorShortcutsHaveVisibleKeyFallbacks(t *testing.T) {
 	got = updated.(tuiModel)
 	if cmd != nil || len(terminal.inputQueue) != 1 || got.controlMode {
 		t.Fatalf("terminal Command+N was stolen by editor controls: %+v", got)
+	}
+}
+
+func TestCommandBackspaceDeletesOnlyTheSidebarSelection(t *testing.T) {
+	row := sidebarRow{kind: "workspace", host: Host{Name: "Local"}, workspace: Workspace{ID: "111111111111111111111111", Name: "Work"}}
+	model := tuiModel{width: minimumWidth, height: minimumHeight, controlMode: true, rows: []sidebarRow{row}, selectedRow: 0}
+	updated, cmd := model.handleKey(tea.KeyPressMsg{Code: tea.KeyBackspace, Mod: tea.ModSuper})
+	got := updated.(tuiModel)
+	if cmd != nil || got.modal == nil || got.modal.action != "delete_workspace" || got.modal.choice != 0 {
+		t.Fatalf("Command+Backspace did not open the cancel-first delete dialog: %+v, %v", got, cmd)
+	}
+
+	attachment := &Attachment{inputQueue: make(chan terminalInput, 1)}
+	model = tuiModel{width: minimumWidth, height: minimumHeight, attachment: attachment}
+	updated, cmd = model.handleKey(tea.KeyPressMsg{Code: tea.KeyBackspace, Mod: tea.ModSuper})
+	got = updated.(tuiModel)
+	if cmd != nil || got.modal != nil {
+		t.Fatalf("terminal Command+Backspace opened an editor dialog: %+v, %v", got, cmd)
 	}
 }
 
@@ -963,10 +998,11 @@ func TestHelpShowsEveryCoreControlAtMinimumSize(t *testing.T) {
 	for _, want := range []string{
 		"Click project/workspace: options · window: open",
 		"⌘B or Ctrl+G: focus the sidebar",
-		"⌥↑/⌥↓: one screen",
+		"⌥↑/⌥↓: previous/next window",
 		"⌘↑/⌘↓: first/last",
-		"⌘N or Ctrl+N: create",
+		"⌘N/Ctrl+N: create",
 		"⌘R: rename",
+		"⌘⌫: delete",
 		"⌘1–9 or ⌥1–9: open the numbered window",
 		"Copy: iTerm2 ⌥-drag",
 		"Paste: ⌘V",
