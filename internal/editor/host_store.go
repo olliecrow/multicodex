@@ -139,6 +139,7 @@ func (s *hostStore) load() (hostRegistry, error) {
 
 func (s *hostStore) validateRegistry(registry hostRegistry) error {
 	workspaceIDs := make(map[string]bool, len(registry.Workspaces))
+	externalWorkspaces := make(map[string]bool, len(registry.Workspaces))
 	nonGitProjects := make(map[string]bool)
 	workspaceNames := make(map[string]bool)
 	for _, workspace := range registry.Workspaces {
@@ -149,6 +150,7 @@ func (s *hostStore) validateRegistry(registry hostRegistry) error {
 			return errors.New("editor host state contains a duplicate workspace identifier")
 		}
 		workspaceIDs[workspace.ID] = true
+		externalWorkspaces[workspace.ID] = workspace.External
 		if err := validateID(workspace.ProjectID, "project identifier"); err != nil {
 			return errors.New("editor host state contains invalid workspace ownership metadata")
 		}
@@ -164,12 +166,21 @@ func (s *hostStore) validateRegistry(registry hostRegistry) error {
 			return errors.New("editor host state contains invalid workspace ownership metadata")
 		}
 		if workspace.Git {
-			expectedPath := filepath.Join(s.worktreeRoot, workspace.ProjectID, workspace.ID)
-			if workspace.Path != expectedPath || validateAbsolutePath(workspace.GitCommonDir, "Git common directory") != nil || !validOwnedBranch(workspace.Branch, workspace.ID) || !safeStoredBaseRef(workspace.BaseRef) {
-				return errors.New("editor host state contains a Git workspace outside its exact owned path")
+			if validateAbsolutePath(workspace.GitCommonDir, "Git common directory") != nil {
+				return errors.New("editor host state contains invalid Git workspace metadata")
+			}
+			if workspace.External {
+				if workspace.Path != workspace.ProjectPath || workspace.Branch != "" || workspace.BaseRef != "" || workspace.WorktreeLocked {
+					return errors.New("editor host state contains invalid preserved Git workspace metadata")
+				}
+			} else {
+				expectedPath := filepath.Join(s.worktreeRoot, workspace.ProjectID, workspace.ID)
+				if workspace.Path != expectedPath || !validOwnedBranch(workspace.Branch, workspace.ID) || !safeStoredBaseRef(workspace.BaseRef) {
+					return errors.New("editor host state contains a Git workspace outside its exact owned path")
+				}
 			}
 		} else {
-			if workspace.Path != workspace.ProjectPath || workspace.GitCommonDir != "" || workspace.Branch != "" || workspace.BaseRef != "" || nonGitProjects[workspace.ProjectID] {
+			if workspace.Path != workspace.ProjectPath || workspace.GitCommonDir != "" || workspace.Branch != "" || workspace.BaseRef != "" || workspace.WorktreeLocked || nonGitProjects[workspace.ProjectID] {
 				return errors.New("editor host state contains invalid non-Git workspace ownership metadata")
 			}
 			nonGitProjects[workspace.ProjectID] = true
@@ -187,6 +198,7 @@ func (s *hostStore) validateRegistry(registry hostRegistry) error {
 
 	windowIDs := make(map[string]bool, len(registry.Windows))
 	windowNames := make(map[string]bool)
+	adoptedSessions := make(map[string]bool)
 	for _, window := range registry.Windows {
 		if err := validateID(window.ID, "window identifier"); err != nil || windowIDs[window.ID] || !workspaceIDs[window.WorkspaceID] {
 			return errors.New("editor host state contains invalid window ownership metadata")
@@ -200,7 +212,13 @@ func (s *hostStore) validateRegistry(registry hostRegistry) error {
 			return errors.New("editor host state contains a duplicate window name")
 		}
 		windowNames[windowName] = true
-		if window.Session != "mce-"+window.ID {
+		if window.Adopted {
+			if !externalWorkspaces[window.WorkspaceID] || validateTmuxSessionName(window.Session) != nil || !tmuxIDPattern.MatchString(window.TmuxSessionID) || adoptedSessions[window.Session] || adoptedSessions[window.TmuxSessionID] {
+				return errors.New("editor host state contains invalid adopted tmux metadata")
+			}
+			adoptedSessions[window.Session] = true
+			adoptedSessions[window.TmuxSessionID] = true
+		} else if window.Session != "mce-"+window.ID || window.TmuxSessionID != "" {
 			return errors.New("editor host state contains invalid window ownership metadata")
 		}
 		if window.CreatePending && window.DeletePending {

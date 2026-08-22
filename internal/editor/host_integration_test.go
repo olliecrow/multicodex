@@ -236,6 +236,272 @@ func TestHostServiceGitWindowReconnectAndSafeDeletion(t *testing.T) {
 	}
 }
 
+func TestGitWorkspaceLockAllowsBranchChangesAndPreservesExtraBranches(t *testing.T) {
+	requireCommands(t, "git", "tmux")
+	ctx := context.Background()
+	project := syntheticGitProject(t)
+	service, err := NewHostService(privateTestHome(t), mustID(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer killTestServer(service)
+	workspace, err := service.CreateWorkspace(ctx, CreateWorkspaceRequest{ProjectID: mustID(t), ProjectPath: project, Name: "Flexible branches"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !workspace.WorktreeLocked {
+		t.Fatalf("new worktree is not recorded as locked: %+v", workspace)
+	}
+	locked, reason, err := service.gitWorktreeLock(ctx, workspace)
+	if err != nil || !locked || reason != service.worktreeLockReason(workspace) {
+		t.Fatalf("worktree lock = %v, %q, %v", locked, reason, err)
+	}
+	if out, err := exec.Command("git", "-C", project, "worktree", "remove", "--force", workspace.Path).CombinedOutput(); err == nil {
+		t.Fatalf("external removal bypassed the editor lock: %s", out)
+	}
+	extraBranch := "feature/second-pr"
+	runTestCommand(t, "git", "-C", workspace.Path, "checkout", "-b", extraBranch)
+	if _, err := service.CreateWindow(ctx, CreateWindowRequest{WorkspaceID: workspace.ID}); err != nil {
+		t.Fatalf("create window after branch change: %v", err)
+	}
+	snapshot, err := service.Snapshot(ctx)
+	if err != nil || len(snapshot.Workspaces) != 1 || snapshot.Workspaces[0].Unavailable {
+		t.Fatalf("snapshot after branch change = %+v, %v", snapshot, err)
+	}
+	deleted, err := service.DeleteWorkspace(ctx, DeleteRequest{ID: workspace.ID, Force: true})
+	if err != nil || !deleted.Deleted {
+		t.Fatalf("delete flexible workspace = %+v, %v", deleted, err)
+	}
+	if out, err := exec.Command("git", "-C", project, "show-ref", "--verify", "refs/heads/"+workspace.Branch).CombinedOutput(); err == nil {
+		t.Fatalf("initial editor branch remains: %s", out)
+	}
+	if out, err := exec.Command("git", "-C", project, "show-ref", "--verify", "refs/heads/"+extraBranch).CombinedOutput(); err != nil {
+		t.Fatalf("user-created branch was removed: %v: %s", err, out)
+	}
+}
+
+func TestExistingOwnedWorktreeIsLockedOnSnapshot(t *testing.T) {
+	requireCommands(t, "git", "tmux")
+	ctx := context.Background()
+	project := syntheticGitProject(t)
+	service, err := NewHostService(privateTestHome(t), mustID(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace, err := service.CreateWorkspace(ctx, CreateWorkspaceRequest{ProjectID: mustID(t), ProjectPath: project, Name: "Lock migration"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runTestCommand(t, "git", "-C", project, "worktree", "unlock", workspace.Path)
+	if err := service.store.withLock(func(registry *hostRegistry) error {
+		registry.Workspaces[0].WorktreeLocked = false
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Snapshot(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.store.withReadLock(func(registry hostRegistry) error {
+		if len(registry.Workspaces) != 1 || !registry.Workspaces[0].WorktreeLocked {
+			t.Fatalf("migration did not record lock: %+v", registry.Workspaces)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	workspace.WorktreeLocked = true
+	if locked, reason, err := service.gitWorktreeLock(ctx, workspace); err != nil || !locked || reason != service.worktreeLockReason(workspace) {
+		t.Fatalf("migrated lock = %v, %q, %v", locked, reason, err)
+	}
+	if result, err := service.DeleteWorkspace(ctx, DeleteRequest{ID: workspace.ID, Force: true}); err != nil || !result.Deleted {
+		t.Fatalf("cleanup migrated workspace: %+v, %v", result, err)
+	}
+}
+
+func TestWorkspaceDeletionRefusesAChangedWorktreeLock(t *testing.T) {
+	requireCommands(t, "git", "tmux")
+	ctx := context.Background()
+	project := syntheticGitProject(t)
+	service, err := NewHostService(privateTestHome(t), mustID(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace, err := service.CreateWorkspace(ctx, CreateWorkspaceRequest{ProjectID: mustID(t), ProjectPath: project, Name: "Changed lock"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runTestCommand(t, "git", "-C", project, "worktree", "unlock", workspace.Path)
+	runTestCommand(t, "git", "-C", project, "worktree", "lock", "--reason", "someone-else", workspace.Path)
+	result, err := service.DeleteWorkspace(ctx, DeleteRequest{ID: workspace.ID, Force: true})
+	if err == nil || result.Deleted || !strings.Contains(err.Error(), "worktree") {
+		t.Fatalf("changed lock did not block deletion: %+v, %v", result, err)
+	}
+	if _, statErr := os.Stat(workspace.Path); statErr != nil {
+		t.Fatalf("changed-lock worktree was removed: %v", statErr)
+	}
+	runTestCommand(t, "git", "-C", project, "worktree", "unlock", workspace.Path)
+	if err := service.ensureGitWorktreeLock(ctx, workspace); err != nil {
+		t.Fatal(err)
+	}
+	if result, err := service.DeleteWorkspace(ctx, DeleteRequest{ID: workspace.ID, Force: true}); err != nil || !result.Deleted {
+		t.Fatalf("cleanup restored lock workspace: %+v, %v", result, err)
+	}
+}
+
+func TestWorkspaceDeletionPreservesInitialBranchUsedElsewhere(t *testing.T) {
+	requireCommands(t, "git", "tmux")
+	ctx := context.Background()
+	project := syntheticGitProject(t)
+	service, err := NewHostService(privateTestHome(t), mustID(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace, err := service.CreateWorkspace(ctx, CreateWorkspaceRequest{ProjectID: mustID(t), ProjectPath: project, Name: "Shared initial branch"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runTestCommand(t, "git", "-C", workspace.Path, "checkout", "-b", "feature/current")
+	other := filepath.Join(t.TempDir(), "other-worktree")
+	runTestCommand(t, "git", "-C", project, "worktree", "add", other, workspace.Branch)
+	result, err := service.DeleteWorkspace(ctx, DeleteRequest{ID: workspace.ID, Force: true})
+	if err == nil || result.Deleted || !strings.Contains(err.Error(), "checked out in another worktree") {
+		t.Fatalf("branch used elsewhere was not preserved: %+v, %v", result, err)
+	}
+	if _, statErr := os.Stat(workspace.Path); statErr != nil {
+		t.Fatalf("blocked deletion removed the owned worktree: %v", statErr)
+	}
+	runTestCommand(t, "git", "-C", project, "worktree", "remove", other)
+	if result, err := service.DeleteWorkspace(ctx, DeleteRequest{ID: workspace.ID, Force: true}); err != nil || !result.Deleted {
+		t.Fatalf("cleanup workspace after branch release: %+v, %v", result, err)
+	}
+}
+
+func TestAdoptedTmuxSessionIsPreservedThroughCleanupAndRelease(t *testing.T) {
+	requireCommands(t, "git", "tmux")
+	ctx := context.Background()
+	project := syntheticGitProject(t)
+	service, err := NewHostService(privateTestHome(t), mustID(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.systemSocket = "mce-adopt-" + mustID(t)[:12]
+	defer killTestSystemServer(service)
+	session := "existing-session"
+	secondSession := "existing-session-2"
+	runTestCommand(t, "tmux", "-L", service.systemSocket, "new-session", "-d", "-s", session, "-c", project)
+	runTestCommand(t, "tmux", "-L", service.systemSocket, "new-session", "-d", "-s", secondSession, "-c", project)
+	pidBefore := commandOutput(t, "tmux", "-L", service.systemSocket, "display-message", "-p", "-t", session, "#{pane_pid}")
+	secondPIDBefore := commandOutput(t, "tmux", "-L", service.systemSocket, "display-message", "-p", "-t", secondSession, "#{pane_pid}")
+	projectID := mustID(t)
+	candidates, err := service.ListTmuxSessions(ctx, ListTmuxSessionsRequest{ProjectID: projectID, ProjectPath: project})
+	if err != nil || len(candidates) != 2 {
+		t.Fatalf("adoption candidates = %+v, %v", candidates, err)
+	}
+	adopted, err := service.AdoptTmuxSession(ctx, AdoptTmuxSessionRequest{ProjectID: projectID, ProjectPath: project, WorkspaceName: "Shared checkout", Session: session})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !adopted.Workspace.External || !adopted.Workspace.Git || !adopted.Window.Adopted || adopted.Window.Session != session {
+		t.Fatalf("unexpected adoption result: %+v", adopted)
+	}
+	if pidAfter := commandOutput(t, "tmux", "-L", service.systemSocket, "display-message", "-p", "-t", adopted.Window.TmuxSessionID, "#{pane_pid}"); pidAfter != pidBefore {
+		t.Fatalf("adoption restarted pane: %q -> %q", pidBefore, pidAfter)
+	}
+	if candidates, err := service.ListTmuxSessions(ctx, ListTmuxSessionsRequest{ProjectID: projectID, ProjectPath: project}); err != nil || len(candidates) != 1 || candidates[0].Name != secondSession {
+		t.Fatalf("adopted session remained eligible: %+v, %v", candidates, err)
+	}
+	second, err := service.AdoptTmuxSession(ctx, AdoptTmuxSessionRequest{ProjectID: projectID, ProjectPath: project, WorkspaceName: "Shared checkout", Session: secondSession})
+	if err != nil || second.Workspace.ID != adopted.Workspace.ID || second.Window.Name != "Terminal 2" {
+		t.Fatalf("second adoption did not reuse its workspace: %+v, %v", second, err)
+	}
+	if secondPIDAfter := commandOutput(t, "tmux", "-L", service.systemSocket, "display-message", "-p", "-t", second.Window.TmuxSessionID, "#{pane_pid}"); secondPIDAfter != secondPIDBefore {
+		t.Fatalf("second adoption restarted pane: %q -> %q", secondPIDBefore, secondPIDAfter)
+	}
+	service.now = func() time.Time { return adopted.Window.LastUsedAt.Add(cleanupAfter + time.Hour) }
+	cleanup, err := service.Cleanup(ctx)
+	if err != nil || cleanup.WindowsDeleted != 0 || cleanup.WorkspacesDeleted != 0 {
+		t.Fatalf("cleanup changed adopted resources: %+v, %v", cleanup, err)
+	}
+	if state, alive, err := service.inspectSession(ctx, adopted.Window); err != nil || state != sessionOwned || !alive {
+		t.Fatalf("adopted session after cleanup = %v, %v, %v", state, alive, err)
+	}
+	runTestCommand(t, "tmux", "-L", service.systemSocket, "set-environment", "-t", adopted.Window.TmuxSessionID, "MCE_WINDOW", mustID(t))
+	if deleted, err := service.DeleteWorkspace(ctx, DeleteRequest{ID: adopted.Workspace.ID}); err != nil || deleted.Deleted || !strings.Contains(deleted.Reason, "changed or uncertain ownership") {
+		t.Fatalf("changed adopted marker did not block release: %+v, %v", deleted, err)
+	}
+	if pidAfter := commandOutput(t, "tmux", "-L", service.systemSocket, "display-message", "-p", "-t", adopted.Window.TmuxSessionID, "#{pane_pid}"); pidAfter != pidBefore {
+		t.Fatalf("failed release changed original pane: %q -> %q", pidBefore, pidAfter)
+	}
+	runTestCommand(t, "tmux", "-L", service.systemSocket, "set-environment", "-t", adopted.Window.TmuxSessionID, "MCE_WINDOW", adopted.Window.ID)
+	deleted, err := service.DeleteWorkspace(ctx, DeleteRequest{ID: adopted.Workspace.ID})
+	if err != nil || !deleted.Deleted {
+		t.Fatalf("delete preserved workspace = %+v, %v", deleted, err)
+	}
+	if pidAfter := commandOutput(t, "tmux", "-L", service.systemSocket, "display-message", "-p", "-t", session, "#{pane_pid}"); pidAfter != pidBefore {
+		t.Fatalf("release changed original pane: %q -> %q", pidBefore, pidAfter)
+	}
+	if pidAfter := commandOutput(t, "tmux", "-L", service.systemSocket, "display-message", "-p", "-t", secondSession, "#{pane_pid}"); pidAfter != secondPIDBefore {
+		t.Fatalf("release changed second pane: %q -> %q", secondPIDBefore, pidAfter)
+	}
+	if markers := commandOutput(t, "tmux", "-L", service.systemSocket, "display-message", "-p", "-t", session, "#{MCE_INSTANCE}|#{MCE_WINDOW}|#{MCE_WORKSPACE}"); markers != "||" {
+		t.Fatalf("release retained editor markers: %q", markers)
+	}
+	if markers := commandOutput(t, "tmux", "-L", service.systemSocket, "display-message", "-p", "-t", secondSession, "#{MCE_INSTANCE}|#{MCE_WINDOW}|#{MCE_WORKSPACE}"); markers != "||" {
+		t.Fatalf("release retained second editor markers: %q", markers)
+	}
+	if info, err := os.Stat(project); err != nil || !info.IsDir() {
+		t.Fatalf("release removed preserved project: %v", err)
+	}
+	runTestCommand(t, "tmux", "-L", service.systemSocket, "kill-server")
+	if candidates, err := service.ListTmuxSessions(ctx, ListTmuxSessionsRequest{ProjectID: projectID, ProjectPath: project}); err != nil || len(candidates) != 0 {
+		t.Fatalf("inactive default tmux server did not produce an empty list: %+v, %v", candidates, err)
+	}
+}
+
+func TestReleaseDoesNotTouchAReusedTmuxSessionName(t *testing.T) {
+	requireCommands(t, "git", "tmux")
+	ctx := context.Background()
+	project := syntheticGitProject(t)
+	service, err := NewHostService(privateTestHome(t), mustID(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.systemSocket = "mce-reuse-" + mustID(t)[:12]
+	defer killTestSystemServer(service)
+	session := "reused-name"
+	runTestCommand(t, "tmux", "-L", service.systemSocket, "new-session", "-d", "-s", session, "-c", project)
+	projectID := mustID(t)
+	adopted, err := service.AdoptTmuxSession(ctx, AdoptTmuxSessionRequest{ProjectID: projectID, ProjectPath: project, WorkspaceName: "Shared checkout", Session: session})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runTestCommand(t, "tmux", "-L", service.systemSocket, "kill-session", "-t", adopted.Window.TmuxSessionID)
+	runTestCommand(t, "tmux", "-L", service.systemSocket, "new-session", "-d", "-s", session, "-c", project)
+	newPID := commandOutput(t, "tmux", "-L", service.systemSocket, "display-message", "-p", "-t", session, "#{pane_pid}")
+	if result, err := service.DeleteWindow(ctx, DeleteRequest{ID: adopted.Window.ID}); err != nil || !result.Deleted {
+		t.Fatalf("release absent adopted session: %+v, %v", result, err)
+	}
+	if got := commandOutput(t, "tmux", "-L", service.systemSocket, "display-message", "-p", "-t", session, "#{pane_pid}"); got != newPID {
+		t.Fatalf("release touched reused session name: %q -> %q", newPID, got)
+	}
+	if markers := commandOutput(t, "tmux", "-L", service.systemSocket, "display-message", "-p", "-t", session, "#{MCE_INSTANCE}|#{MCE_WINDOW}|#{MCE_WORKSPACE}"); markers != "||" {
+		t.Fatalf("release marked reused session: %q", markers)
+	}
+	if err := service.store.withLock(func(registry *hostRegistry) error {
+		registry.Workspaces[0].DeletePending = true
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if cleanup, err := service.Cleanup(ctx); err != nil || cleanup.WorkspacesDeleted != 1 {
+		t.Fatalf("recover preserved workspace removal: %+v, %v", cleanup, err)
+	}
+	if info, err := os.Stat(project); err != nil || !info.IsDir() {
+		t.Fatalf("recovery removed preserved project: %v", err)
+	}
+}
+
 func TestSnapshotKeepsAWindowVisibleWhenItsWorkspaceDirectoryIsMissing(t *testing.T) {
 	requireCommands(t, "git", "tmux")
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -254,6 +520,7 @@ func TestSnapshotKeepsAWindowVisibleWhenItsWorkspaceDirectoryIsMissing(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
+	runTestCommand(t, "git", "-C", project, "worktree", "unlock", workspace.Path)
 	runTestCommand(t, "git", "-C", project, "worktree", "remove", "--force", workspace.Path)
 
 	snapshot, err := service.Snapshot(ctx)
@@ -384,6 +651,7 @@ func TestTerminalPassesRequestedExtendedKeyThroughTmux(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer attachment.Close()
+	waitUntil(t, 5*time.Second, func() bool { return strings.TrimSpace(attachment.Render(100, 30)) != "" })
 	command := "stty -echo; printf '\\033[>4;1m\\115\\103\\105\\137\\105\\130\\124\\113\\105\\131\\137\\122\\105\\101\\104\\131\\n'; IFS= read -r line; stty echo; printf '%s' \"$line\" | od -An -t x1; printf '\\nMCE_EXTKEY_DONE\\n'"
 	if err := attachment.SendKey(tea.KeyPressMsg{Code: 's', Text: command}); err != nil {
 		t.Fatal(err)
@@ -439,6 +707,7 @@ func TestCleanupRemovesOnlyExpiredOwnedResources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	waitUntil(t, 5*time.Second, func() bool { return strings.TrimSpace(attachment.Render(80, 20)) != "" })
 	_ = attachment.SendKey(tea.KeyPressMsg{Code: 'e', Text: "exit"})
 	_ = attachment.SendKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	waitUntil(t, 3*time.Second, func() bool {
@@ -890,7 +1159,7 @@ func TestGitWorkspaceRefusesChangedProjectIdentity(t *testing.T) {
 	}
 }
 
-func TestGitWorkspaceRefusesAlteredOwnedWorktree(t *testing.T) {
+func TestGitWorkspaceRequiresConfirmationForDetachedCheckout(t *testing.T) {
 	requireCommands(t, "git", "tmux")
 	ctx := context.Background()
 	home := privateTestHome(t)
@@ -904,9 +1173,9 @@ func TestGitWorkspaceRefusesAlteredOwnedWorktree(t *testing.T) {
 		t.Fatal(err)
 	}
 	runTestCommand(t, "git", "-C", workspace.Path, "checkout", "--detach")
-	result, err := service.DeleteWorkspace(ctx, DeleteRequest{ID: workspace.ID, Force: true})
-	if err == nil || result.Deleted {
-		t.Fatalf("altered worktree was not rejected: %+v, %v", result, err)
+	result, err := service.DeleteWorkspace(ctx, DeleteRequest{ID: workspace.ID})
+	if err != nil || result.Deleted || !result.Forceable || !strings.Contains(result.Reason, "detached checkout") {
+		t.Fatalf("detached worktree did not require confirmation: %+v, %v", result, err)
 	}
 	runTestCommand(t, "git", "-C", workspace.Path, "checkout", workspace.Branch)
 	if result, err := service.DeleteWorkspace(ctx, DeleteRequest{ID: workspace.ID, Force: true}); err != nil || !result.Deleted {
@@ -1387,4 +1656,11 @@ func killTestServer(service *HostService) {
 	defer cancel()
 	_, _ = service.tmux(ctx, "kill-server")
 	_ = service.cleanupUnusedTmuxSocket(ctx)
+}
+
+func killTestSystemServer(service *HostService) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, _ = service.systemTmux(ctx, "kill-server")
+	_ = os.Remove(service.systemTmuxSocketPath())
 }

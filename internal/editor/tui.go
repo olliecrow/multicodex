@@ -102,6 +102,7 @@ type sidebarRow struct {
 	window    Window
 	slot      int
 	offline   bool
+	hostError string
 	changedAt time.Time
 }
 
@@ -142,6 +143,7 @@ type choice struct {
 	project   Project
 	workspace Workspace
 	window    Window
+	session   TmuxSessionCandidate
 }
 
 type modal struct {
@@ -156,9 +158,12 @@ type modal struct {
 	project   Project
 	workspace Workspace
 	window    Window
+	session   TmuxSessionCandidate
 	windowIDs []string
 	delete    DeleteRequest
 	reason    string
+	confirm   string
+	warning   string
 }
 
 type tuiModel struct {
@@ -745,13 +750,14 @@ func (m tuiModel) handleModalMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case "confirm":
-		buttons := cancelButtonLabel + "   " + deleteButtonLabel
+		confirm := modalConfirmLabel(*m.modal)
+		buttons := cancelButtonLabel + "   " + confirm
 		if y == confirmButtonRow(*m.modal, max(1, m.terminalWidth()-modalInsetX)) {
 			switch {
 			case hitLabel(buttons, cancelButtonLabel, x):
 				m.modal.choice = 0
 				return m.activateConfirmation()
-			case hitLabel(buttons, deleteButtonLabel, x):
+			case hitLabel(buttons, confirm, x):
 				m.modal.choice = 1
 				return m.activateConfirmation()
 			}
@@ -979,13 +985,13 @@ func (m tuiModel) renderMain() string {
 				text = "Project selected\n\nPress Enter to create a named workspace.\nIts first terminal opens automatically.\n\nOr click Actions."
 			case "workspace":
 				if row.workspace.Unavailable {
-					text = "Workspace directory is unavailable\n\nIts terminals remain managed for recovery.\nDelete this workspace when you no longer need it."
+					text = "Workspace directory is unavailable\n\nIts terminals remain available for recovery, but commands that use the missing directory can fail.\nUse Actions → Delete selected when you no longer need it."
 				} else {
 					text = "Workspace selected\n\nPress Enter to create and open a new terminal.\nChoose Rename from Actions to change its name."
 				}
 			case "window":
 				if row.workspace.Unavailable {
-					text = "Workspace directory is unavailable\n\nOpen this terminal to recover what remains.\nDelete the workspace when you no longer need it."
+					text = "Workspace directory is unavailable\n\nOpen this terminal to recover its live session. Commands that use the missing directory can fail.\nUse Actions → Delete selected when finished."
 				} else {
 					text = "No terminal is open\n\nPress Enter or click the selected window to open it.\nPress Ctrl+N for another terminal."
 				}
@@ -1000,6 +1006,13 @@ func (m tuiModel) sidebarFooter() string {
 	row, ok := m.selectedSidebarRow()
 	if !ok {
 		return "Sidebar · ↑/↓: select · Tab: Actions · Esc: terminal"
+	}
+	if row.offline {
+		reason := safeClientText(row.hostError, 100)
+		if reason == "" {
+			reason = "connection unavailable"
+		}
+		return row.host.Name + " offline · " + reason
 	}
 	switch row.kind {
 	case "project":
@@ -1121,7 +1134,7 @@ func renderModal(modal modal, width, height int) string {
 		}
 		lines = append(lines, "Ctrl+U: clear this field · Esc: cancel")
 	case "confirm":
-		cancel, remove := cancelButtonLabel, deleteButtonLabel
+		cancel, remove := cancelButtonLabel, modalConfirmLabel(modal)
 		if modal.choice == 0 {
 			cancel = lipgloss.NewStyle().Reverse(true).Render(cancel)
 		} else {
@@ -1129,7 +1142,7 @@ func renderModal(modal modal, width, height int) string {
 		}
 		lines = append(lines, wrappedPlainLines(modal.reason, contentWidth)...)
 		lines = append(lines, "")
-		lines = append(lines, wrappedPlainLines(confirmationWarning, contentWidth)...)
+		lines = append(lines, wrappedPlainLines(modalWarning(modal), contentWidth)...)
 		lines = append(lines, "", cancel+"   "+remove)
 		lines = append(lines, wrappedPlainLines("←/→ or Tab: choose · Enter: confirm · Esc: cancel", contentWidth)...)
 	}
@@ -1179,6 +1192,8 @@ func modalPrimaryLabel(current modal) string {
 		label = "Rename"
 	case "put_file":
 		label = "Attach file"
+	case "adopt_tmux_session":
+		label = "Adopt session"
 	}
 	return label
 }
@@ -1208,15 +1223,15 @@ func (m *tuiModel) rebuildRows() {
 	rows := []sidebarRow{}
 	slot := 0
 	for _, location := range locations {
-		rows = append(rows, sidebarRow{kind: "project", host: location.Host, project: location.Project, offline: location.HostError != ""})
+		rows = append(rows, sidebarRow{kind: "project", host: location.Host, project: location.Project, offline: location.HostError != "", hostError: location.HostError})
 		for _, workspace := range location.Workspaces {
-			rows = append(rows, sidebarRow{kind: "workspace", host: location.Host, project: location.Project, workspace: workspace, offline: location.HostError != ""})
+			rows = append(rows, sidebarRow{kind: "workspace", host: location.Host, project: location.Project, workspace: workspace, offline: location.HostError != "", hostError: location.HostError})
 			for _, window := range location.Windows {
 				if window.WorkspaceID != workspace.ID {
 					continue
 				}
 				slot++
-				rows = append(rows, sidebarRow{kind: "window", host: location.Host, project: location.Project, workspace: workspace, window: window, slot: slot, offline: location.HostError != "", changedAt: activities[location.Host.ID+"/"+window.ID]})
+				rows = append(rows, sidebarRow{kind: "window", host: location.Host, project: location.Project, workspace: workspace, window: window, slot: slot, offline: location.HostError != "", hostError: location.HostError, changedAt: activities[location.Host.ID+"/"+window.ID]})
 			}
 		}
 	}
@@ -1426,7 +1441,7 @@ func (m *tuiModel) openActionMenu() {
 		case "project":
 			hasProject = true
 		case "workspace":
-			hasWorkspace = true
+			hasWorkspace = hasWorkspace || !row.workspace.Unavailable
 		}
 	}
 	selectedRow, hasSelection := m.selectedSidebarRow()
@@ -1435,16 +1450,19 @@ func (m *tuiModel) openActionMenu() {
 		switch row.kind {
 		case "project":
 			choices = append(choices, choice{label: "New workspace in " + row.project.Name + "…", action: "new_workspace_selected", host: row.host, project: row.project})
+			if !row.offline {
+				choices = append(choices, choice{label: "Adopt existing tmux session…", action: "list_tmux_sessions", host: row.host, project: row.project})
+			}
 		case "workspace":
-			choices = append(choices,
-				choice{label: "New window in " + row.workspace.Name, action: "new_window_selected", host: row.host, project: row.project, workspace: row.workspace},
-				choice{label: "Rename workspace…", action: "rename_selected", host: row.host, project: row.project, workspace: row.workspace},
-			)
+			if !row.workspace.Unavailable {
+				choices = append(choices, choice{label: "New window in " + row.workspace.Name, action: "new_window_selected", host: row.host, project: row.project, workspace: row.workspace})
+			}
+			choices = append(choices, choice{label: "Rename workspace…", action: "rename_selected", host: row.host, project: row.project, workspace: row.workspace})
 		case "window":
-			choices = append(choices,
-				choice{label: "New window in " + row.workspace.Name, action: "new_window_selected", host: row.host, project: row.project, workspace: row.workspace, window: row.window},
-				choice{label: "Rename window…", action: "rename_selected", host: row.host, project: row.project, workspace: row.workspace, window: row.window},
-			)
+			if !row.workspace.Unavailable {
+				choices = append(choices, choice{label: "New window in " + row.workspace.Name, action: "new_window_selected", host: row.host, project: row.project, workspace: row.workspace, window: row.window})
+			}
+			choices = append(choices, choice{label: "Rename window…", action: "rename_selected", host: row.host, project: row.project, workspace: row.workspace, window: row.window})
 		}
 	}
 	if hasProject {
@@ -1465,7 +1483,13 @@ func (m *tuiModel) openActionMenu() {
 		)
 	}
 	if hasSelection && (selectedRow.kind == "workspace" || selectedRow.kind == "window") {
-		choices = append(choices, choice{label: "Delete selected window or workspace…", action: "delete"})
+		label := "Delete selected window or workspace…"
+		if selectedRow.window.Adopted {
+			label = "Release selected tmux session…"
+		} else if selectedRow.workspace.External {
+			label = "Remove preserved workspace…"
+		}
+		choices = append(choices, choice{label: label, action: "delete"})
 	}
 	choices = append(choices, choice{label: "Run safe cleanup", action: "cleanup"})
 	if m.attachment != nil {
@@ -1504,6 +1528,11 @@ func (m tuiModel) activateEditorAction() (tea.Model, tea.Cmd) {
 		m.openHostChoice("add_project", "Choose a host for the new project")
 	case "add_host":
 		m.modal = &modal{kind: "form", action: "add_host", title: "Add SSH host", fields: []formField{{label: "Display name", limit: 80}, {label: "SSH alias from ~/.ssh/config", limit: 128}}}
+	case "list_tmux_sessions":
+		if !m.beginAction("looking for tmux sessions in " + selected.project.Name + "…") {
+			return m, nil
+		}
+		return m, m.track(listTmuxSessionsCmd(m.manager, selected.host, selected.project))
 	case "attach_file":
 		if row, ok := m.currentAttachedRow(); ok {
 			if _, pending := m.pendingPastes[row.window.ID]; pending {
@@ -1585,6 +1614,9 @@ func (m *tuiModel) openWorkspaceChoice() {
 			projects[project.ID] = project
 		}
 		for _, workspace := range status.Snapshot.Workspaces {
+			if workspace.Unavailable {
+				continue
+			}
 			project := projects[workspace.ProjectID]
 			choices = append(choices, choice{label: workspace.Name + " · " + project.Name + " · " + status.Host.Name, host: status.Host, project: project, workspace: workspace})
 		}
@@ -1635,6 +1667,10 @@ func (m tuiModel) startCreateWindow(row sidebarRow) (tea.Model, tea.Cmd) {
 		m.message = "select a workspace before creating a window"
 		return m, nil
 	}
+	if row.workspace.Unavailable {
+		m.message = "workspace directory is unavailable; remove it or select another workspace"
+		return m, nil
+	}
 	if !m.beginAction("creating a terminal in " + row.workspace.Name + "…") {
 		return m, nil
 	}
@@ -1657,8 +1693,32 @@ func (m tuiModel) acceptChoice() (tea.Model, tea.Cmd) {
 		m.openWorkspaceName(selected.host, selected.project)
 	case "create_window":
 		return m.startCreateWindow(sidebarRow{kind: "workspace", host: selected.host, project: selected.project, workspace: selected.workspace})
+	case "adopt_tmux_session":
+		if workspace, ok := m.externalWorkspace(selected.host.ID, selected.project.ID); ok {
+			if !m.beginAction("adopting " + selected.session.Name + "…") {
+				return m, nil
+			}
+			m.modal = nil
+			return m, m.track(adoptTmuxSessionCmd(m.manager, selected.host, selected.project, workspace.Name, selected.session))
+		}
+		m.modal = &modal{kind: "form", action: "adopt_tmux_session", title: "Adopt " + selected.session.Name, host: selected.host, project: selected.project, session: selected.session,
+			fields: []formField{{label: "Workspace name", limit: 80}}}
 	}
 	return m, nil
+}
+
+func (m tuiModel) externalWorkspace(hostID, projectID string) (Workspace, bool) {
+	for _, status := range m.statuses {
+		if status.Host.ID != hostID {
+			continue
+		}
+		for _, workspace := range status.Snapshot.Workspaces {
+			if workspace.ProjectID == projectID && workspace.External {
+				return workspace, true
+			}
+		}
+	}
+	return Workspace{}, false
 }
 
 func (m *tuiModel) openDeleteConfirmation() {
@@ -1670,10 +1730,21 @@ func (m *tuiModel) openDeleteConfirmation() {
 	switch row.kind {
 	case "window":
 		current.action, current.title, current.reason = "delete_window", "Delete window?", "Delete “"+row.window.Name+"” and its tmux session?"
+		if row.window.Adopted {
+			current.title = "Release session?"
+			current.reason = "Stop managing “" + row.window.Name + "” in multicodex editor?"
+			current.confirm = "[ Release ]"
+			current.warning = "The tmux session and its process will keep running. You can adopt it again."
+		}
 		current.delete.ID = row.window.ID
 	case "workspace":
 		current.action, current.title = "delete_workspace", "Delete workspace?"
-		if row.workspace.Git {
+		if row.workspace.External {
+			current.title = "Remove preserved workspace?"
+			current.reason = "Stop managing workspace “" + row.workspace.Name + "” and its windows?"
+			current.confirm = "[ Remove ]"
+			current.warning = "The project directory, Git branches, and adopted sessions will remain. Editor-created windows will stop."
+		} else if row.workspace.Git {
 			current.reason = "Delete workspace “" + row.workspace.Name + "”, all its terminal windows, and its owned Git worktree and branch?"
 		} else {
 			current.reason = "Delete workspace “" + row.workspace.Name + "” and all its terminal windows? Its project directory will remain."
@@ -1737,11 +1808,49 @@ func (m tuiModel) handleActionResult(msg actionResultMsg) (tea.Model, tea.Cmd) {
 			cmd := m.requestAttach(sidebarRow{kind: "window", host: host, window: value})
 			return m, tea.Batch(m.startRefresh(), cmd)
 		}
+	case []TmuxSessionCandidate:
+		if len(value) == 0 {
+			m.message = "no eligible tmux sessions are running in this project"
+			break
+		}
+		if msg.form == nil {
+			m.message = "tmux session discovery lost its project context"
+			break
+		}
+		choices := make([]choice, 0, len(value))
+		for _, session := range value {
+			choices = append(choices, choice{label: session.Name + " · " + session.Command, host: msg.form.host, project: msg.form.project, session: session})
+		}
+		m.modal = &modal{kind: "choice", action: "adopt_tmux_session", title: "Choose a tmux session to adopt", choices: choices}
+		return m, nil
+	case AdoptedTmuxSession:
+		m.message = "adopted " + value.Window.Session + " without restarting it"
+		m.selectOnRefreshID = "w/" + value.Window.ID
+		if host, ok := m.manager.findHost(msg.hostID); ok {
+			cmd := m.requestAttach(sidebarRow{kind: "window", host: host, workspace: value.Workspace, window: value.Window})
+			return m, tea.Batch(m.startRefresh(), cmd)
+		}
 	case renamedResource:
 		m.message = "renamed " + value.kind + " to " + value.name
 	case DeleteResult:
 		if value.Deleted {
 			m.message = "deleted"
+			if msg.action == "delete_window" {
+				for _, row := range m.rows {
+					if row.window.ID == msg.targetID && row.window.Adopted {
+						m.message = "released; the original tmux session is still running"
+						break
+					}
+				}
+			}
+			if msg.action == "delete_workspace" {
+				for _, row := range m.rows {
+					if row.workspace.ID == msg.targetID && row.workspace.External {
+						m.message = "removed; the project and adopted tmux sessions are preserved"
+						break
+					}
+				}
+			}
 			if msg.action == "delete_window" && msg.targetID == m.attachedID && m.attachment != nil {
 				_ = m.attachment.Close()
 				m.attachment, m.attachedID, m.attachedHost = nil, "", ""
@@ -2329,8 +2438,28 @@ func submitFormCmd(manager *Manager, form modal) tea.Cmd {
 			}
 			result.targetID = form.window.ID
 			result.value, result.err = manager.PutAttachment(ctx, form.host.ID, PutAttachmentRequest{WorkspaceID: form.workspace.ID, Extension: extension, Data: data})
+		case "adopt_tmux_session":
+			result.value, result.err = manager.AdoptTmuxSession(ctx, form.host.ID, AdoptTmuxSessionRequest{ProjectID: form.project.ID, ProjectPath: form.project.Path, WorkspaceName: form.fields[0].value, Session: form.session.Name})
 		}
 		return result
+	}
+}
+
+func listTmuxSessionsCmd(manager *Manager, host Host, project Project) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(manager.Context(), 15*time.Second)
+		defer cancel()
+		value, err := manager.ListTmuxSessions(ctx, host.ID, ListTmuxSessionsRequest{ProjectID: project.ID, ProjectPath: project.Path})
+		return actionResultMsg{action: "list_tmux_sessions", hostID: host.ID, value: value, form: &modal{host: host, project: project}, err: err}
+	}
+}
+
+func adoptTmuxSessionCmd(manager *Manager, host Host, project Project, workspaceName string, session TmuxSessionCandidate) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(manager.Context(), 30*time.Second)
+		defer cancel()
+		value, err := manager.AdoptTmuxSession(ctx, host.ID, AdoptTmuxSessionRequest{ProjectID: project.ID, ProjectPath: project.Path, WorkspaceName: workspaceName, Session: session.Name})
+		return actionResultMsg{action: "adopt_tmux_session", hostID: host.ID, value: value, err: err}
 	}
 }
 
@@ -2488,7 +2617,21 @@ func wrappedPlainLines(value string, width int) []string {
 }
 
 func confirmButtonRow(current modal, width int) int {
-	return 4 + len(wrappedPlainLines(current.reason, width)) + len(wrappedPlainLines(confirmationWarning, width))
+	return 4 + len(wrappedPlainLines(current.reason, width)) + len(wrappedPlainLines(modalWarning(current), width))
+}
+
+func modalConfirmLabel(current modal) string {
+	if current.confirm != "" {
+		return current.confirm
+	}
+	return deleteButtonLabel
+}
+
+func modalWarning(current modal) string {
+	if current.warning != "" {
+		return current.warning
+	}
+	return confirmationWarning
 }
 
 func padBlock(value string, width, height int) string {

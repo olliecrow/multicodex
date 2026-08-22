@@ -155,7 +155,7 @@ var commandHelpByName = map[string]commandHelp{
 	},
 	"editor": {
 		Usage:       "multicodex editor",
-		Description: "Run the local-first multicodex editor. It groups owned tmux windows under project workspaces on this machine and configured SSH hosts. Git workspaces always use a new owned worktree and branch. The editor never runs inside tmux.",
+		Description: "Run the local-first multicodex editor. It groups managed tmux windows under project workspaces on this machine and configured SSH hosts. New Git workspaces use a locked owned worktree and an initial branch, while normal branch changes remain supported. A project can also adopt an eligible detached tmux session without restarting it. The editor never runs inside tmux.",
 		Examples: []string{
 			"multicodex editor",
 		},

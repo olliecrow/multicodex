@@ -144,6 +144,18 @@ func dispatchHostRequest(parent context.Context, service *HostService, request p
 			return nil, err
 		}
 		return service.CreateWindow(ctx, params)
+	case "list_tmux_sessions":
+		var params ListTmuxSessionsRequest
+		if err := decodeParams(request.Params, &params); err != nil {
+			return nil, err
+		}
+		return service.ListTmuxSessions(ctx, params)
+	case "adopt_tmux_session":
+		var params AdoptTmuxSessionRequest
+		if err := decodeParams(request.Params, &params); err != nil {
+			return nil, err
+		}
+		return service.AdoptTmuxSession(ctx, params)
 	case "rename_workspace":
 		var params RenameRequest
 		if err := decodeParams(request.Params, &params); err != nil {
@@ -202,9 +214,9 @@ func dispatchHostRequest(parent context.Context, service *HostService, request p
 func hostRequestTimeout(method string) time.Duration {
 	timeout := 30 * time.Second
 	switch method {
-	case "hello", "snapshot", "touch_window", "copy_mode", "doctor":
+	case "hello", "snapshot", "touch_window", "copy_mode", "doctor", "list_tmux_sessions":
 		timeout = 8 * time.Second
-	case "delete_window", "delete_workspace":
+	case "delete_window", "delete_workspace", "adopt_tmux_session":
 		timeout = 25 * time.Second
 	case "create_workspace":
 		timeout = 2 * time.Minute
