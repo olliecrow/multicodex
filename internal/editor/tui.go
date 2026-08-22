@@ -1587,10 +1587,11 @@ func (m *tuiModel) openActionMenu() {
 	if hasSelection {
 		choices = append(choices, m.primaryActions(selectedRow)...)
 	}
-	if hasProject {
+	if hasProject && (!hasSelection || selectedRow.kind != "project") {
 		choices = append(choices, choice{label: "New workspace…", action: "new_workspace"})
 	}
-	if hasWorkspace {
+	selectedWorkspaceCanCreateWindow := hasSelection && (selectedRow.kind == "workspace" || selectedRow.kind == "window") && !selectedRow.workspace.Unavailable
+	if hasWorkspace && !selectedWorkspaceCanCreateWindow {
 		choices = append(choices, choice{label: "New window…", action: "new_window"})
 	}
 	choices = append(choices,
