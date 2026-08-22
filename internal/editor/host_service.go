@@ -1138,19 +1138,23 @@ func (s *HostService) adoptedMarkerState(ctx context.Context, window Window) (ex
 	format := "#{MCE_INSTANCE}\t#{MCE_WINDOW}\t#{MCE_WORKSPACE}\t#{session_windows}\t#{window_panes}"
 	out, runErr := s.systemTmux(ctx, "display-message", "-p", "-t", window.TmuxSessionID, format)
 	if runErr != nil {
-		present, inspectErr := s.systemTmuxSessionIDPresent(ctx, window.TmuxSessionID)
-		if inspectErr == nil && !present {
-			return false, false, false, nil
-		}
-		return false, false, false, errors.New("inspect adopted tmux markers")
+		return s.classifyUnresponsiveAdoptedMarkers(ctx, window)
 	}
 	fields := strings.Split(strings.TrimSuffix(string(out), "\n"), "\t")
 	if len(fields) != 5 || fields[3] != "1" || fields[4] != "1" {
-		return true, false, false, nil
+		return s.classifyUnresponsiveAdoptedMarkers(ctx, window)
 	}
 	exact = fields[0] == s.store.instanceID && fields[1] == window.ID && fields[2] == window.WorkspaceID
 	empty = fields[0] == "" && fields[1] == "" && fields[2] == ""
 	return true, exact, empty, nil
+}
+
+func (s *HostService) classifyUnresponsiveAdoptedMarkers(ctx context.Context, window Window) (exists, exact, empty bool, err error) {
+	present, inspectErr := s.systemTmuxSessionIDPresent(ctx, window.TmuxSessionID)
+	if inspectErr != nil {
+		return false, false, false, errors.New("inspect adopted tmux markers")
+	}
+	return present, false, false, nil
 }
 
 func (s *HostService) DeleteWorkspace(ctx context.Context, request DeleteRequest) (DeleteResult, error) {
