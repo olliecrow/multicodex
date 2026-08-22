@@ -238,8 +238,68 @@ func TestProjectActionsOfferSafeTmuxAdoption(t *testing.T) {
 	}
 	model.rows[0].offline = true
 	model.openActionMenu()
-	if modalHasAction(model.modal, "list_tmux_sessions") {
-		t.Fatalf("offline project offered tmux adoption: %+v", model.modal.choices)
+	for _, action := range []string{"list_tmux_sessions", "new_workspace_selected", "delete"} {
+		if modalHasAction(model.modal, action) {
+			t.Fatalf("offline project offered %q: %+v", action, model.modal.choices)
+		}
+	}
+	model.modal = nil
+	updated, cmd := model.selectCurrentRow()
+	got := updated.(tuiModel)
+	if cmd != nil || got.modal != nil || !strings.Contains(got.message, "reconnect is automatic") {
+		t.Fatalf("offline project Enter was not safely explained: %+v, %v", got, cmd)
+	}
+}
+
+func TestOfflineWorkspaceActionsAreUnavailableUntilAutomaticReconnect(t *testing.T) {
+	host := Host{ID: "111111111111111111111111", Name: "Remote"}
+	project := Project{ID: "222222222222222222222222", Name: "Project", Path: "/tmp/project"}
+	workspace := Workspace{ID: "333333333333333333333333", ProjectID: project.ID, Name: "Work", Path: project.Path}
+	model := tuiModel{rows: []sidebarRow{{kind: "workspace", host: host, project: project, workspace: workspace, offline: true, hostError: "network unavailable"}}, selectedRow: 0, controlMode: true, width: 100, height: 30}
+
+	model.openActionMenu()
+	for _, action := range []string{"new_window_selected", "rename_selected", "delete"} {
+		if modalHasAction(model.modal, action) {
+			t.Fatalf("offline workspace offered %q: %+v", action, model.modal.choices)
+		}
+	}
+	model.modal = nil
+	model.openRename()
+	if model.modal != nil || !strings.Contains(model.message, "reconnect is automatic") {
+		t.Fatalf("offline rename was not safely explained: %+v", model)
+	}
+	model.message = ""
+	model.openDeleteConfirmation()
+	if model.modal != nil || !strings.Contains(model.message, "reconnect is automatic") {
+		t.Fatalf("offline delete was not safely explained: %+v", model)
+	}
+
+	rendered := ansi.Strip(model.renderMain())
+	for _, want := range []string{"No action is available while this host is offline.", "Reconnect is automatic", "existing tmux sessions are left unchanged"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("offline context omitted %q:\n%s", want, rendered)
+		}
+	}
+}
+
+func TestGlobalCreateChoicesExcludeOfflineHosts(t *testing.T) {
+	offlineHost := Host{ID: "111111111111111111111111", Name: "Offline"}
+	onlineHost := Host{ID: "222222222222222222222222", Name: "Online"}
+	offlineProject := Project{ID: "333333333333333333333333", Name: "Unavailable", Path: "/tmp/unavailable"}
+	onlineProject := Project{ID: "444444444444444444444444", Name: "Ready", Path: "/tmp/ready"}
+	model := tuiModel{rows: []sidebarRow{
+		{kind: "project", host: offlineHost, project: offlineProject, offline: true},
+		{kind: "project", host: onlineHost, project: onlineProject},
+	}, selectedRow: 0}
+
+	model.openActionMenu()
+	if modalHasAction(model.modal, "new_workspace_selected") || !modalHasAction(model.modal, "new_workspace") {
+		t.Fatalf("offline selection did not offer a safe global workspace choice: %+v", model.modal.choices)
+	}
+	model.modal = nil
+	model.openProjectChoice()
+	if model.modal == nil || len(model.modal.choices) != 1 || model.modal.choices[0].project.ID != onlineProject.ID {
+		t.Fatalf("project choices include an offline host: %+v", model.modal)
 	}
 }
 
