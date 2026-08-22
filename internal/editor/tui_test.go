@@ -218,7 +218,7 @@ func TestEditorControlsUseNavigationAndAVisibleActionMenu(t *testing.T) {
 		}
 	}
 	help := ansi.Strip(renderModal(modal{kind: "help", title: "Controls"}, helpWidth, (tuiModel{width: minimumWidth, height: minimumHeight}).bodyHeight()))
-	for _, want := range []string{"Click project/workspace: options · window: open", "⌘B or Ctrl+G: focus the sidebar", "⌥↑/⌥↓: previous/next window", "⌘⌫: delete", "scroll terminal history", "In the sidebar, Ctrl+C: quit", "● changing · · quiet · × stopped", "Need terminal Ctrl+G?", "[ Close ]"} {
+	for _, want := range []string{"Click project/window: open", "⌘B or Ctrl+G: focus the sidebar", "⌥↑/⌥↓: previous/next terminal", "numbered terminal", "⌘⌫: delete", "scroll terminal history", "In the sidebar, Ctrl+C: quit", "● active · · quiet · × stopped", "Need terminal Ctrl+G?", "[ Close ]"} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("minimum-width help truncated %q:\n%s", want, help)
 		}
@@ -495,10 +495,11 @@ func TestSidebarSelectionProvidesContextualCreateAndRename(t *testing.T) {
 	}}
 	updated, cmd := model.selectCurrentRow()
 	model = updated.(tuiModel)
-	if cmd != nil || model.modal == nil || model.modal.action != "create_workspace" || len(model.modal.fields) != 1 || model.modal.fields[0].label != "Workspace name" {
-		t.Fatalf("project Enter did not request the required workspace name: %+v", model.modal)
+	if cmd == nil || model.modal != nil || !model.actionBusy {
+		t.Fatalf("project Enter did not start the project terminal: %+v", model)
 	}
 
+	model.actionBusy = false
 	model.modal = nil
 	model.selectedRow = 1
 	updated, cmd = model.selectCurrentRow()
@@ -566,7 +567,7 @@ func TestProjectAndWorkspaceSelectionShowClickableOptions(t *testing.T) {
 	model.attachment = &Attachment{inputQueue: inputQueue}
 
 	projectView := ansi.Strip(model.View().Content)
-	for _, want := range []string{"Project options", "Project selected", "[ New workspace… ]", "[ Adopt tmux session… ]"} {
+	for _, want := range []string{"Project options", "Project selected", "[ Open project terminal ]", "[ New workspace… ]", "[ Adopt tmux session… ]"} {
 		if !strings.Contains(projectView, want) {
 			t.Fatalf("project context omitted %q:\n%s", want, projectView)
 		}
@@ -581,8 +582,8 @@ func TestProjectAndWorkspaceSelectionShowClickableOptions(t *testing.T) {
 		Button: tea.MouseLeft,
 	})
 	got := updated.(tuiModel)
-	if cmd != nil || got.modal == nil || got.modal.action != "create_workspace" {
-		t.Fatalf("project context click did not open workspace form: %+v", got.modal)
+	if cmd == nil || got.modal != nil || !got.actionBusy {
+		t.Fatalf("project context click did not open the project terminal: %+v", got)
 	}
 
 	model.selectedRow = 1
@@ -1036,14 +1037,14 @@ func TestHelpShowsEveryCoreControlAtMinimumSize(t *testing.T) {
 	model := tuiModel{width: minimumWidth, height: minimumHeight, modal: &modal{kind: "help", title: "Controls"}}
 	view := ansi.Strip(model.View().Content)
 	for _, want := range []string{
-		"Click project/workspace: options · window: open",
+		"Click project/window: open · workspace: options",
 		"⌘B or Ctrl+G: focus the sidebar",
-		"⌥↑/⌥↓: previous/next window",
+		"⌥↑/⌥↓: previous/next terminal",
 		"⌘↑/⌘↓: first/last",
 		"⌘N/Ctrl+N: create",
 		"⌘R: rename",
 		"⌘⌫: delete",
-		"⌘1–9 or ⌥1–9: open the numbered window",
+		"⌘1–9 or ⌥1–9: open the numbered terminal",
 		"Copy: iTerm2 ⌥-drag",
 		"Paste: ⌘V",
 		"[ Close ]",
@@ -1230,6 +1231,18 @@ func TestMouseSelectsSidebarRowsAndForwardsTerminalEvents(t *testing.T) {
 	want := fmt.Sprintf("\x1b[<0;5;%dM", layout.bodyHeight)
 	if input.kind != "raw" || input.text != want {
 		t.Fatalf("bottom terminal click = %+v, want %q", input, want)
+	}
+}
+
+func TestSingleClickProjectOpensItsTerminal(t *testing.T) {
+	host := Host{ID: localHostID, Name: localHostName}
+	project := Project{ID: "111111111111111111111111", Name: "Project", Path: "/tmp/project"}
+	model := tuiModel{manager: &Manager{}, width: 100, height: 30, rows: []sidebarRow{{kind: "project", host: host, project: project}}, selectedRow: -1}
+	layout := model.layout()
+	updated, cmd := model.handleMouse(tea.MouseClickMsg{X: 2, Y: layout.bodyContent, Button: tea.MouseLeft})
+	got := updated.(tuiModel)
+	if cmd == nil || got.selectedRow != 0 || got.controlMode || !got.actionBusy {
+		t.Fatalf("project click did not open its terminal: %+v", got)
 	}
 }
 
