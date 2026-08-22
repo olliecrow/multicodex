@@ -233,6 +233,9 @@ func TestProjectActionsOfferSafeTmuxAdoption(t *testing.T) {
 	if !modalHasAction(model.modal, "list_tmux_sessions") {
 		t.Fatalf("project actions omit tmux adoption: %+v", model.modal.choices)
 	}
+	if !modalHasAction(model.modal, "new_workspace_selected") || modalHasAction(model.modal, "new_workspace") {
+		t.Fatalf("selected project shows duplicate workspace actions: %+v", model.modal.choices)
+	}
 	model.rows[0].offline = true
 	model.openActionMenu()
 	if modalHasAction(model.modal, "list_tmux_sessions") {
@@ -422,6 +425,9 @@ func TestSidebarSelectionProvidesContextualCreateAndRename(t *testing.T) {
 	model.openActionMenu()
 	if len(model.modal.choices) < 2 || model.modal.choices[0].action != "new_window_selected" || model.modal.choices[1].action != "rename_selected" {
 		t.Fatalf("selected-window actions are not contextual: %+v", model.modal.choices)
+	}
+	if modalHasAction(model.modal, "new_window") {
+		t.Fatalf("selected window shows a duplicate new-window action: %+v", model.modal.choices)
 	}
 	available := map[string]bool{}
 	for _, item := range model.modal.choices {
