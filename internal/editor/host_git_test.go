@@ -39,6 +39,47 @@ func TestGitRootFailsClosedForUnavailableOrMarkedRepository(t *testing.T) {
 	}
 }
 
+func TestInspectAdoptedSessionClassifiesEmptyTmuxReplyByExactID(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		ids  string
+		want tmuxSessionState
+	}{
+		{name: "absent", ids: "$5\n", want: sessionAbsent},
+		{name: "still present", ids: "$4\n", want: sessionAltered},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			service, err := NewHostService(privateTestHome(t), mustID(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			window := Window{
+				ID: mustID(t), WorkspaceID: mustID(t), Name: "Terminal",
+				Session: "ended-session", TmuxSessionID: "$4", Adopted: true,
+			}
+			service.runner = runnerFunc(func(_ context.Context, name string, args ...string) ([]byte, error) {
+				if name != "tmux" {
+					t.Fatalf("unexpected command %q", name)
+				}
+				if slices.Contains(args, "display-message") {
+					// tmux 3.4 on Linux can report success with no usable output
+					// when queried by an adopted session ID.
+					return nil, nil
+				}
+				if slices.Contains(args, "list-sessions") {
+					return []byte(test.ids), nil
+				}
+				t.Fatalf("unexpected tmux arguments: %v", args)
+				return nil, errors.New("unexpected call")
+			})
+			state, alive, err := service.inspectSession(context.Background(), window)
+			if err != nil || state != test.want || alive {
+				t.Fatalf("adopted session = %v, %v, %v; want %v", state, alive, err, test.want)
+			}
+		})
+	}
+}
+
 func TestSnapshotKeepsOtherHostStateWhenWindowDisappearsDuringCapture(t *testing.T) {
 	home := privateTestHome(t)
 	service, err := NewHostService(home, mustID(t))
