@@ -732,9 +732,12 @@ func (m *Manager) SetSelectedWindow(windowID string) error {
 	if m.closed {
 		return errors.New("editor is closing")
 	}
+	if m.state.SelectedWindowID == windowID {
+		return nil
+	}
 	m.state.SelectedWindowID = windowID
 	m.dirty = true
-	return m.maybeSaveLocked(false)
+	return m.maybeSaveLocked(true)
 }
 
 func (m *Manager) Close() error {
