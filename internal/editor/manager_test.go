@@ -49,6 +49,23 @@ func TestActivityOrderingKeepsPopulatedProjectsFirst(t *testing.T) {
 	}
 }
 
+func TestActivityOrderingIncludesProjectTerminal(t *testing.T) {
+	hostID := "111111111111111111111111"
+	projectID := "222222222222222222222222"
+	emptyProjectID := "333333333333333333333333"
+	windowID := "444444444444444444444444"
+	changed := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	host := Host{ID: hostID, Name: "Build", Projects: []Project{
+		{ID: emptyProjectID, Name: "A empty", Path: "/srv/empty"},
+		{ID: projectID, Name: "Z active", Path: "/srv/active"},
+	}}
+	window := Window{ID: windowID, ProjectID: projectID, ProjectPath: "/srv/active", Name: projectWindowName, LastUsedAt: changed}
+	locations := sortedProjectsByActivity(ClientState{}, []HostStatus{{Host: host, Snapshot: HostSnapshot{Windows: []Window{window}}}})
+	if len(locations) != 2 || locations[0].Project.ID != projectID || locations[0].ProjectWindow.ID != windowID || !locations[0].LastActivity.Equal(changed) {
+		t.Fatalf("project terminal ordering = %+v", locations)
+	}
+}
+
 func TestActivityOrderingSortsWorkspacesAndWindowsWithoutMutatingSnapshot(t *testing.T) {
 	hostID := "111111111111111111111111"
 	projectID := "222222222222222222222222"
@@ -270,6 +287,23 @@ func TestSnapshotValidationRejectsHostControlData(t *testing.T) {
 	snapshot.Workspaces[0].Path = "/tmp/project\nforged"
 	if err := validateHostSnapshot(host, snapshot); err == nil {
 		t.Fatal("expected remote control character to be rejected")
+	}
+}
+
+func TestSnapshotValidationAcceptsOneExactProjectTerminal(t *testing.T) {
+	projectID := "111111111111111111111111"
+	windowID := "222222222222222222222222"
+	host := Host{ID: localHostID, Name: localHostName, Projects: []Project{{ID: projectID, Name: "Project", Path: "/tmp/project"}}}
+	window := Window{ID: windowID, ProjectID: projectID, ProjectPath: "/tmp/project", Name: projectWindowName, Session: "mce-" + windowID}
+	snapshot := HostSnapshot{Protocol: hostProtocol, Windows: []Window{window}}
+	if err := validateHostSnapshot(host, snapshot); err != nil {
+		t.Fatalf("valid project terminal rejected: %v", err)
+	}
+	snapshot.Windows = append(snapshot.Windows, window)
+	snapshot.Windows[1].ID = "333333333333333333333333"
+	snapshot.Windows[1].Session = "mce-" + snapshot.Windows[1].ID
+	if err := validateHostSnapshot(host, snapshot); err == nil {
+		t.Fatal("duplicate project terminal was accepted")
 	}
 }
 

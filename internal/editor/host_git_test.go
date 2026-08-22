@@ -150,7 +150,7 @@ func TestSnapshotKeepsOtherHostStateWhenWindowDisappearsDuringCapture(t *testing
 		calls++
 		switch calls {
 		case 1:
-			return []byte(window.Session + "\t" + service.store.instanceID + "\t" + window.ID + "\t" + workspace.ID + "\t0\t1\t1\n"), nil
+			return []byte(window.Session + "\t" + service.store.instanceID + "\t" + window.ID + "\t" + workspace.ID + "\t\t0\t1\t1\n"), nil
 		case 2, 3:
 			return nil, commandFailure{exitCode: 1}
 		default:

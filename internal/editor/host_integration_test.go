@@ -22,6 +22,63 @@ import (
 
 const testInstanceID = "0123456789abcdef01234567"
 
+func TestProjectTerminalUsesOriginalDirectoryAndIsIdempotent(t *testing.T) {
+	requireCommands(t, "git", "tmux")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	project := syntheticGitProject(t)
+	service, err := NewHostService(privateTestHome(t), mustID(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer killTestServer(service)
+	request := OpenProjectWindowRequest{ProjectID: mustID(t), ProjectPath: project}
+	before := commandOutput(t, "git", "-C", project, "worktree", "list", "--porcelain")
+	first, err := service.OpenProjectWindow(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !first.Created || first.Window.WorkspaceID != "" || first.Window.ProjectID != request.ProjectID || first.Window.ProjectPath != project || first.Window.Name != projectWindowName {
+		t.Fatalf("project terminal = %+v", first)
+	}
+	if got := commandOutput(t, "tmux", "-L", service.socketName(), "display-message", "-p", "-t", first.Window.Session, "#{pane_current_path}"); !sameDirectory(got, project) {
+		t.Fatalf("project terminal directory = %q, want %q", got, project)
+	}
+	second, err := service.OpenProjectWindow(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Created || second.Window.ID != first.Window.ID || second.Window.Session != first.Window.Session {
+		t.Fatalf("second project terminal = %+v, want reuse of %+v", second, first)
+	}
+	if _, err := service.tmux(ctx, "kill-session", "-t", first.Window.Session); err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := service.OpenProjectWindow(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recovered.Created || recovered.Window.ID != first.Window.ID {
+		t.Fatalf("recovered project terminal = %+v, want same registry identity", recovered)
+	}
+	if after := commandOutput(t, "git", "-C", project, "worktree", "list", "--porcelain"); after != before {
+		t.Fatalf("project terminal changed Git worktrees:\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+	attachment, err := service.PutAttachment(ctx, PutAttachmentRequest{ProjectID: request.ProjectID, Extension: ".txt", Data: []byte("project terminal")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attachment.WorkspaceID != "" || attachment.ProjectID != request.ProjectID {
+		t.Fatalf("project terminal attachment = %+v", attachment)
+	}
+	if deleted, err := service.DeleteWindow(ctx, DeleteRequest{ID: first.Window.ID, Force: true}); err != nil || !deleted.Deleted {
+		t.Fatalf("delete project terminal = %+v, %v", deleted, err)
+	}
+	if _, err := os.Stat(attachment.Path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("project terminal attachment remained after deletion: %v", err)
+	}
+}
+
 func TestHostServiceGitWindowReconnectAndSafeDeletion(t *testing.T) {
 	requireCommands(t, "git", "tmux")
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
