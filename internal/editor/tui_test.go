@@ -732,6 +732,22 @@ func TestMinimumViewportShowsTitleUsageSidebarAndFooter(t *testing.T) {
 	}
 }
 
+func TestInitialRefreshDoesNotClaimConfiguredProjectsAreMissing(t *testing.T) {
+	state := ClientState{Version: stateVersion, InstanceID: testInstanceID, Hosts: []Host{{ID: localHostID, Name: localHostName}}}
+	model := tuiModel{manager: &Manager{state: state}, width: minimumWidth, height: minimumHeight, refreshing: true}
+	view := ansi.Strip(model.View().Content)
+	for _, want := range []string{"Projects · connecting", "Loading projects…", "Connecting to hosts", "Connecting to configured hosts…"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("missing %q in loading view:\n%s", want, view)
+		}
+	}
+	for _, unwanted := range []string{"No projects", "Set up your first terminal", "Click Actions to begin"} {
+		if strings.Contains(view, unwanted) {
+			t.Fatalf("loading view contains premature empty-state text %q:\n%s", unwanted, view)
+		}
+	}
+}
+
 func TestFramedLayoutShowsEveryAccountAcrossViewportSizes(t *testing.T) {
 	for _, width := range []int{80, 81, 100, 160} {
 		for _, height := range []int{24, 30} {
