@@ -1045,7 +1045,11 @@ func (m tuiModel) renderMain() string {
 				if reason == "" {
 					reason = "connection unavailable"
 				}
-				text = "Host offline\n\n" + row.host.Name + " is not reachable: " + reason + ".\n\nMulticodex editor will reconnect automatically. It does not stop existing tmux sessions."
+				if hostNeedsManualRecovery(reason) {
+					text = "Editor update required\n\nUpdate multicodex on every machine.\nThen quit and reopen only the outer editor.\nManaged tmux sessions keep running."
+				} else {
+					text = "Host offline\n\n" + row.host.Name + " is not reachable: " + reason + ".\n\nMulticodex editor will reconnect automatically. It does not stop existing tmux sessions."
+				}
 				return padInsetBlock(text, width, height, 1, 1)
 			}
 			switch row.kind {
@@ -1092,6 +1096,7 @@ func renderContextPanel(row sidebarRow, choices []choice, width, height int) str
 	title := "Project selected"
 	detail := row.project.Name + " · " + row.host.Name
 	hint := "Enter: open project terminal · Ctrl+N: new workspace · Tab: all actions"
+	manualRecovery := false
 	if row.kind == "project" && row.window.ID != "" && !row.window.Alive && !row.offline {
 		title = "Project terminal stopped"
 		hint = "Delete the stopped terminal before creating a replacement."
@@ -1105,7 +1110,12 @@ func renderContextPanel(row sidebarRow, choices []choice, width, height int) str
 		}
 	}
 	if row.offline && row.window.ID == "" {
-		hint = "Reconnect is automatic · existing tmux sessions are left unchanged"
+		if hostNeedsManualRecovery(row.hostError) {
+			title = "Editor update required"
+			manualRecovery = true
+		} else {
+			hint = "Reconnect is automatic · existing tmux sessions are left unchanged"
+		}
 	}
 	lines := []string{accentStyle.Render(title), plainDisplayText(detail), "", "Choose an action"}
 	buttonStyle := lipgloss.NewStyle().Reverse(true).Bold(true).Foreground(lipgloss.Cyan)
@@ -1115,7 +1125,11 @@ func renderContextPanel(row sidebarRow, choices []choice, width, height int) str
 	if len(choices) == 0 {
 		lines = append(lines, "No action is available while this host is offline.")
 	}
-	lines = append(lines, "", hint, "Click an option, or use the shown keyboard shortcut.")
+	if manualRecovery {
+		lines = append(lines, "", "Update multicodex on every machine.", "Then quit and reopen only the outer editor.", "Managed tmux sessions keep running.")
+	} else {
+		lines = append(lines, "", hint, "Click an option, or use the shown keyboard shortcut.")
+	}
 	return padInsetBlock(strings.Join(lines, "\n"), width, height, contextInsetX, contextInsetY)
 }
 
@@ -2077,7 +2091,14 @@ func (m *tuiModel) openDeleteConfirmation() {
 }
 
 func offlineStatusMessage(row sidebarRow) string {
+	if hostNeedsManualRecovery(row.hostError) {
+		return row.host.Name + " needs an editor update and restart; tmux sessions keep running"
+	}
 	return row.host.Name + " is offline; reconnect is automatic"
+}
+
+func hostNeedsManualRecovery(reason string) bool {
+	return reason == incompatibleEditorHostMessage || reason == unverifiableEditorHostBuildMessage
 }
 
 func (m tuiModel) handleActionResult(msg actionResultMsg) (tea.Model, tea.Cmd) {
