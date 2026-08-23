@@ -1096,6 +1096,36 @@ func TestUnfocusedSidebarSelectionHasANonColorMarker(t *testing.T) {
 	}
 }
 
+func TestSidebarStylesCommunicateStateWithoutCompetingWithSelection(t *testing.T) {
+	tests := []struct {
+		name       string
+		row        sidebarRow
+		foreground any
+		faint      bool
+		bold       bool
+	}{
+		{name: "changing", row: sidebarRow{kind: "window", signal: sidebarActive}, foreground: lipgloss.Cyan},
+		{name: "live and quiet", row: sidebarRow{kind: "window", signal: sidebarQuiet}, foreground: lipgloss.Green},
+		{name: "empty project", row: sidebarRow{kind: "project", signal: sidebarEmpty}, faint: true},
+		{name: "empty workspace", row: sidebarRow{kind: "workspace", signal: sidebarEmpty}, faint: true},
+		{name: "attention", row: sidebarRow{kind: "window", signal: sidebarOffline}, foreground: lipgloss.Yellow},
+		{name: "project hierarchy", row: sidebarRow{kind: "project", signal: sidebarQuiet}, foreground: lipgloss.Green, bold: true},
+	}
+	for _, test := range tests {
+		style := sidebarRowStyle(test.row, false, false, 20)
+		if got := style.GetForeground(); test.foreground != nil && got != test.foreground {
+			t.Fatalf("%s foreground = %v, want %v", test.name, got, test.foreground)
+		}
+		if style.GetFaint() != test.faint || style.GetBold() != test.bold {
+			t.Fatalf("%s style faint=%v bold=%v, want faint=%v bold=%v", test.name, style.GetFaint(), style.GetBold(), test.faint, test.bold)
+		}
+	}
+	selected := sidebarRowStyle(sidebarRow{kind: "workspace", signal: sidebarEmpty}, true, true, 20)
+	if selected.GetFaint() || !selected.GetBold() || !selected.GetReverse() {
+		t.Fatalf("selection did not override empty styling: faint=%v bold=%v reverse=%v", selected.GetFaint(), selected.GetBold(), selected.GetReverse())
+	}
+}
+
 func TestUsageBoxStaysAtTheBottomOfTheSidebar(t *testing.T) {
 	accounts := []accountUsage{
 		{label: "alpha", usedPercent: 10, available: true},
