@@ -380,6 +380,31 @@ func TestOfflineWorkspaceActionsAreUnavailableUntilAutomaticReconnect(t *testing
 	}
 }
 
+func TestIncompatibleHostExplainsTheRequiredEditorRestart(t *testing.T) {
+	host := Host{ID: "111111111111111111111111", Name: "Remote"}
+	project := Project{ID: "222222222222222222222222", Name: "Project", Path: "/tmp/project"}
+	row := sidebarRow{kind: "project", host: host, project: project, offline: true, hostError: incompatibleEditorHostMessage}
+	rows := []sidebarRow{
+		row,
+		{kind: "window", host: host, project: project, workspace: Workspace{ID: "333333333333333333333333", Name: "Work"}, window: Window{ID: "444444444444444444444444", Name: "Terminal"}, offline: true, hostError: incompatibleEditorHostMessage},
+	}
+	for _, selectedRow := range []int{0, 1} {
+		model := tuiModel{rows: rows, selectedRow: selectedRow, controlMode: true, width: 100, height: 30}
+		rendered := ansi.Strip(model.renderMain())
+		for _, want := range []string{"Editor update required", "quit and reopen", "tmux sessions keep running"} {
+			if !strings.Contains(rendered, want) {
+				t.Fatalf("row %d update recovery view omitted %q:\n%s", selectedRow, want, rendered)
+			}
+		}
+		if strings.Contains(rendered, "reconnect automatically") {
+			t.Fatalf("row %d incompatible host promised automatic recovery:\n%s", selectedRow, rendered)
+		}
+	}
+	if got := offlineStatusMessage(row); !strings.Contains(got, "update and restart") || !strings.Contains(got, "tmux sessions keep running") {
+		t.Fatalf("incompatible host status = %q", got)
+	}
+}
+
 func TestGlobalCreateChoicesExcludeOfflineHosts(t *testing.T) {
 	offlineHost := Host{ID: "111111111111111111111111", Name: "Offline"}
 	onlineHost := Host{ID: "222222222222222222222222", Name: "Online"}

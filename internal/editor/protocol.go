@@ -20,7 +20,11 @@ import (
 	"github.com/olliecrow/multicodex/internal/buildinfo"
 )
 
-const maxProtocolMessage = 24 << 20
+const (
+	maxProtocolMessage                 = 24 << 20
+	incompatibleEditorHostMessage      = "editor and host use incompatible multicodex protocols; update every machine, then quit and reopen only the outer editor"
+	unverifiableEditorHostBuildMessage = "remote editor connections require clean verifiable multicodex builds"
+)
 
 var (
 	errHostRequestCanceled = errors.New("editor host request canceled")
@@ -352,18 +356,21 @@ func startHostClient(ctx context.Context, executable, multicodexHome, instanceID
 		client.Close()
 		return nil, connectionHandshakeError(host)
 	}
-	if hello.Protocol != hostProtocol || hello.Version != buildinfo.Current() {
+	if err := validateHostHello(host, hello, editorBuildIdentity()); err != nil {
 		client.Close()
-		return nil, errors.New("editor host uses an incompatible multicodex version")
-	}
-	if host.ID != localHostID {
-		identity := editorBuildIdentity()
-		if identity == "" || hello.Identity != identity {
-			client.Close()
-			return nil, errors.New("editor host must use the same release or clean source revision")
-		}
+		return nil, err
 	}
 	return client, nil
+}
+
+func validateHostHello(host Host, hello helloResult, clientIdentity string) error {
+	if hello.Protocol != hostProtocol {
+		return errors.New(incompatibleEditorHostMessage)
+	}
+	if host.ID != localHostID && (clientIdentity == "" || hello.Identity == "") {
+		return errors.New(unverifiableEditorHostBuildMessage)
+	}
+	return nil
 }
 
 func editorBuildIdentity() string {
