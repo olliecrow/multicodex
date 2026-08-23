@@ -279,6 +279,13 @@ func TestSnapshotValidationRejectsHostControlData(t *testing.T) {
 	if err := validateHostSnapshot(host, snapshot); err != nil {
 		t.Fatalf("valid snapshot rejected: %v", err)
 	}
+	snapshot.Windows[0].Alive = true
+	snapshot.Windows[0].Exited = true
+	if err := validateHostSnapshot(host, snapshot); err == nil {
+		t.Fatal("an alive terminal was also accepted as exited")
+	}
+	snapshot.Windows[0].Alive = false
+	snapshot.Windows[0].Exited = false
 	snapshot.Windows[0].PaneHash = "safe\x1b]52;c;payload\a"
 	if err := validateHostSnapshot(host, snapshot); err == nil {
 		t.Fatal("expected unsafe pane hash to be rejected")
