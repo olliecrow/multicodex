@@ -1294,9 +1294,6 @@ func (m tuiModel) sidebarTitle() string {
 		}
 		return "Projects"
 	}
-	if m.refreshing {
-		return "Projects · checking"
-	}
 	offline := 0
 	for _, status := range m.statuses {
 		if status.Error != "" {
