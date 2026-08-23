@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 )
 
 type hostRegistry struct {
@@ -19,13 +21,14 @@ type hostRegistry struct {
 }
 
 type hostStore struct {
-	base         string
-	editorRoot   string
-	root         string
-	registryPath string
-	lockPath     string
-	worktreeRoot string
-	instanceID   string
+	base          string
+	editorRoot    string
+	root          string
+	registryPath  string
+	lockPath      string
+	lifecyclePath string
+	worktreeRoot  string
+	instanceID    string
 }
 
 func newHostStore(multicodexHome, instanceID string) (*hostStore, error) {
@@ -35,37 +38,49 @@ func newHostStore(multicodexHome, instanceID string) (*hostStore, error) {
 	editorRoot := filepath.Join(multicodexHome, "editor")
 	root := filepath.Join(editorRoot, "host")
 	return &hostStore{
-		base:         multicodexHome,
-		editorRoot:   editorRoot,
-		root:         root,
-		registryPath: filepath.Join(root, instanceID+".json"),
-		lockPath:     filepath.Join(root, instanceID+".lock"),
-		worktreeRoot: filepath.Join(multicodexHome, "editor", "worktrees", instanceID),
-		instanceID:   instanceID,
+		base:          multicodexHome,
+		editorRoot:    editorRoot,
+		root:          root,
+		registryPath:  filepath.Join(root, instanceID+".json"),
+		lockPath:      filepath.Join(root, instanceID+".lock"),
+		lifecyclePath: filepath.Join(root, "lifecycle.lock"),
+		worktreeRoot:  filepath.Join(multicodexHome, "editor", "worktrees", instanceID),
+		instanceID:    instanceID,
 	}, nil
 }
 
-func (s *hostStore) withLock(fn func(*hostRegistry) error) error {
-	if err := ensurePrivateDir(s.base); err != nil {
-		return err
-	}
-	if err := ensurePrivateDir(s.editorRoot); err != nil {
-		return err
-	}
-	if err := ensurePrivateDir(s.root); err != nil {
-		return err
-	}
-	if err := secureExistingFile(s.lockPath); err != nil {
-		return err
-	}
-	lock, err := os.OpenFile(s.lockPath, os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0o600)
+func (s *hostStore) withLifecycleLock(ctx context.Context, fn func() error) error {
+	lock, err := s.openLock(s.lifecyclePath, "operation")
 	if err != nil {
-		return fmt.Errorf("open editor host lock: %w", err)
+		return err
 	}
 	defer lock.Close()
-	if err := lock.Chmod(0o600); err != nil {
-		return fmt.Errorf("secure editor host lock: %w", err)
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		err = syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EAGAIN) {
+			return errors.New("lock editor host operation")
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
 	}
+	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN) //nolint:errcheck
+	return fn()
+}
+
+func (s *hostStore) withLock(fn func(*hostRegistry) error) error {
+	lock, err := s.openLock(s.lockPath, "state")
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
 		return fmt.Errorf("lock editor host state: %w", err)
 	}
@@ -82,26 +97,11 @@ func (s *hostStore) withLock(fn func(*hostRegistry) error) error {
 }
 
 func (s *hostStore) withReadLock(fn func(hostRegistry) error) error {
-	if err := ensurePrivateDir(s.base); err != nil {
-		return err
-	}
-	if err := ensurePrivateDir(s.editorRoot); err != nil {
-		return err
-	}
-	if err := ensurePrivateDir(s.root); err != nil {
-		return err
-	}
-	if err := secureExistingFile(s.lockPath); err != nil {
-		return err
-	}
-	lock, err := os.OpenFile(s.lockPath, os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0o600)
+	lock, err := s.openLock(s.lockPath, "state")
 	if err != nil {
-		return fmt.Errorf("open editor host lock: %w", err)
+		return err
 	}
 	defer lock.Close()
-	if err := lock.Chmod(0o600); err != nil {
-		return fmt.Errorf("secure editor host lock: %w", err)
-	}
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_SH); err != nil {
 		return fmt.Errorf("lock editor host state: %w", err)
 	}
@@ -113,11 +113,35 @@ func (s *hostStore) withReadLock(fn func(hostRegistry) error) error {
 	return fn(registry)
 }
 
+func (s *hostStore) openLock(path, kind string) (*os.File, error) {
+	if err := ensurePrivateDir(s.base); err != nil {
+		return nil, err
+	}
+	if err := ensurePrivateDir(s.editorRoot); err != nil {
+		return nil, err
+	}
+	if err := ensurePrivateDir(s.root); err != nil {
+		return nil, err
+	}
+	if err := secureExistingFile(path); err != nil {
+		return nil, err
+	}
+	lock, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open editor host %s lock: %w", kind, err)
+	}
+	if err := lock.Chmod(0o600); err != nil {
+		lock.Close()
+		return nil, fmt.Errorf("secure editor host %s lock: %w", kind, err)
+	}
+	return lock, nil
+}
+
 func (s *hostStore) load() (hostRegistry, error) {
 	if err := secureExistingFile(s.registryPath); err != nil {
 		return hostRegistry{}, err
 	}
-	b, err := os.ReadFile(s.registryPath)
+	b, err := readBoundedStateFile(s.registryPath, maxHostState)
 	if errors.Is(err, os.ErrNotExist) {
 		return hostRegistry{Version: stateVersion, InstanceID: s.instanceID}, nil
 	}
@@ -138,6 +162,9 @@ func (s *hostStore) load() (hostRegistry, error) {
 }
 
 func (s *hostStore) validateRegistry(registry hostRegistry) error {
+	if len(registry.Workspaces) > maxStateRecords || len(registry.Windows) > maxStateRecords || len(registry.Attachments) > maxStateRecords {
+		return errors.New("editor host state contains too many records")
+	}
 	workspaceIDs := make(map[string]bool, len(registry.Workspaces))
 	externalWorkspaces := make(map[string]bool, len(registry.Workspaces))
 	nonGitProjects := make(map[string]bool)
@@ -277,6 +304,9 @@ func (s *hostStore) save(registry hostRegistry) error {
 	b, err := json.MarshalIndent(registry, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode editor host state: %w", err)
+	}
+	if len(b)+1 > maxHostState {
+		return errors.New("editor host state exceeds its safety limit")
 	}
 	tmp, err := os.CreateTemp(s.root, ".host-state.*")
 	if err != nil {

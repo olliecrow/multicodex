@@ -3023,7 +3023,7 @@ func renderFormField(field formField, marker string, width int) string {
 
 func plainDisplayText(value string) string {
 	return strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) || r == '\x1b' {
+		if unsafeDisplayRune(r) {
 			return -1
 		}
 		return r

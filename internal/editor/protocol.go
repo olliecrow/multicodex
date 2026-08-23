@@ -295,7 +295,7 @@ func startHostClient(ctx context.Context, executable, multicodexHome, instanceID
 	processContext, cancelProcess := context.WithCancel(context.Background())
 	var cmd *exec.Cmd
 	if host.ID == localHostID {
-		cmd = exec.CommandContext(processContext, executable, "__editor-host", "--instance", instanceID)
+		cmd = editorCommandContext(processContext, executable, "__editor-host", "--instance", instanceID)
 	} else {
 		if err := validateSSHAlias(host.SSHAlias); err != nil {
 			cancelProcess()
@@ -316,7 +316,7 @@ func startHostClient(ctx context.Context, executable, multicodexHome, instanceID
 		}
 		args := append([]string{"-T"}, options...)
 		args = append(args, host.SSHAlias, "multicodex", "__editor-host", "--instance", instanceID)
-		cmd = exec.CommandContext(processContext, "ssh", args...)
+		cmd = editorCommandContext(processContext, "ssh", args...)
 	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {

@@ -88,8 +88,8 @@ References: `internal/editor/`, `docs/command-spec.md`, `docs/security-and-priva
 
 Decision: Give each editor instance a private host registry and two-phase resource lifecycle.
 Context: Git worktrees, branches, tmux sessions, and attachments can outlive a client process or be left half-created after sleep, SSH loss, or a failed state write.
-Rationale: The client stores minimal navigation state. Each host records exact ownership and workspace, window, or attachment intent before external mutation. Startup and hourly reconciliation can then resume known operations and refuse uncertain ones without scanning or changing unrelated projects. Force consent is invocation-local and is never replayed after interruption.
-Trade-offs: Loss of the client instance identifier prevents automatic adoption of its old resources, and safe cleanup preserves dirty, unique, live, altered, or uncertain resources for manual review.
+Rationale: The client stores minimal navigation state. Each host records exact ownership and workspace, window, or attachment intent before external mutation. One host-local operation lock serializes lifecycle changes across connections. Startup and hourly reconciliation can then resume known operations and refuse uncertain ones without scanning or changing unrelated projects. Automatic cleanup never removes Git worktrees because external writers cannot be excluded between a safety check and deletion. Force consent is invocation-local and is never replayed after interruption.
+Trade-offs: Loss of the client instance identifier prevents automatic adoption of its old resources. Stale Git workspaces require explicit deletion after review, while safe cleanup still removes exact dead windows, expired attachments, and stale non-Git records.
 References: `internal/editor/host_store.go`, `internal/editor/host_service.go`, `docs/security-and-privacy.md`
 
 Decision: Separate preserved resources from editor-created resources with two explicit flags.
