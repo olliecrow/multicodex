@@ -146,6 +146,51 @@ func TestSidebarLivePulseAdvancesAfterEachRefresh(t *testing.T) {
 	}
 }
 
+func TestPreferredWindowRetriesOnlyExistingSessions(t *testing.T) {
+	stoppedID := "111111111111111111111111"
+	liveID := "222222222222222222222222"
+	manager := &Manager{state: ClientState{SelectedWindowID: stoppedID}}
+	model := tuiModel{manager: manager, rows: []sidebarRow{
+		{kind: "window", window: Window{ID: stoppedID}},
+		{kind: "window", window: Window{ID: liveID, Alive: true}},
+	}}
+	row, ok := model.preferredWindow()
+	if !ok || row.window.ID != liveID {
+		t.Fatalf("preferred window = %+v, %v; want live fallback %q", row, ok, liveID)
+	}
+
+	model.rows[1].window.Alive = false
+	if row, ok := model.preferredWindow(); ok {
+		t.Fatalf("stopped window was selected for repeated attach: %+v", row)
+	}
+
+	model.rows[0].window.Alive = true
+	model.rows[0].offline = true
+	if row, ok := model.preferredWindow(); !ok || row.window.ID != stoppedID {
+		t.Fatalf("temporarily offline live session was not retained for reconnect: %+v, %v", row, ok)
+	}
+}
+
+func TestRefreshExplainsStoppedTerminalWithoutRetryingIt(t *testing.T) {
+	projectID := "111111111111111111111111"
+	windowID := "222222222222222222222222"
+	project := Project{ID: projectID, Name: "Project", Path: "/tmp/project"}
+	host := Host{ID: localHostID, Name: localHostName, Projects: []Project{project}}
+	state := ClientState{Version: stateVersion, InstanceID: testInstanceID, SelectedWindowID: windowID, Hosts: []Host{host}}
+	model := tuiModel{manager: &Manager{state: state}, width: minimumWidth, height: minimumHeight, refreshing: true, selectedRow: -1}
+
+	updated, cmd := model.Update(refreshMsg{statuses: []HostStatus{{Host: host, Snapshot: HostSnapshot{Windows: []Window{{
+		ID: windowID, ProjectID: projectID, ProjectPath: project.Path, Name: projectWindowName,
+	}}}}}})
+	got := updated.(tuiModel)
+	if cmd != nil || got.attachingID != "" {
+		t.Fatalf("stopped terminal started another attach: %+v, %v", got, cmd)
+	}
+	if !strings.Contains(got.message, "terminal stopped") || !strings.Contains(got.message, "Delete selected") {
+		t.Fatalf("stopped terminal recovery message = %q", got.message)
+	}
+}
+
 func TestWindowSlotShortcutsAreDynamicAndDoNotStealPlainTerminalDigits(t *testing.T) {
 	if got := windowSlotKey(tea.KeyPressMsg{Code: '3'}); got != 0 {
 		t.Fatalf("plain terminal digit selected slot %d", got)
@@ -940,7 +985,7 @@ func TestMinimumViewportShowsTitleUsageSidebarAndFooter(t *testing.T) {
 	state := ClientState{Version: stateVersion, InstanceID: testInstanceID, Hosts: []Host{{ID: localHostID, Name: localHostName}}}
 	model := tuiModel{manager: &Manager{state: state}, width: minimumWidth, height: minimumHeight, usage: accountUsageState{accounts: []accountUsage{{label: "alpha", usedPercent: 42, available: true}}}, message: "ready"}
 	view := ansi.Strip(model.View().Content)
-	for _, want := range []string{"multicodex editor", "[ Actions ]", "[ Help ]", "Codex use · resets in", "alpha", "42% used · ?", "Projects", "No projects", "Set up your first terminal", "Click Actions, or ⌘B/Ctrl+G then Tab", "ready", "┌", "┬", "├", "┤", "┴"} {
+	for _, want := range []string{"multicodex editor", "[ Actions ]", "[ Help ]", "Codex use · resets in", "alpha", "42% used · ?", "Projects", "No projects", "Set up your first terminal", "Click Actions, or ⌘B/Ctrl+G then Tab", "original directory", "Ctrl+N", "ready", "┌", "┬", "├", "┤", "┴"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("missing %q in view:\n%s", want, view)
 		}
