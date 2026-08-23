@@ -295,6 +295,18 @@ func TestRemoteHostHelloRequiresVerifiableBuilds(t *testing.T) {
 	}
 }
 
+func TestConnectionHandshakeErrorDescribesStartupFailure(t *testing.T) {
+	host := Host{ID: "111111111111111111111111", Name: "Remote"}
+	want := `SSH host "Remote" did not start the multicodex editor host; verify the connection and installed multicodex command`
+	got := connectionHandshakeError(host).Error()
+	if got != want {
+		t.Fatalf("connection handshake error = %q, want %q", got, want)
+	}
+	if strings.Contains(got, "compatible") {
+		t.Fatal("connection failure was described as a compatibility failure")
+	}
+}
+
 func TestHostCallDeadlineInterruptsBlockedRequestWrite(t *testing.T) {
 	cmd := exec.Command("sh", "-c", "sleep 30")
 	stdin, err := cmd.StdinPipe()
