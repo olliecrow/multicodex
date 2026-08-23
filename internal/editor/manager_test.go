@@ -41,7 +41,7 @@ func TestActivityOrderingKeepsPopulatedProjectsFirst(t *testing.T) {
 		{HostID: hostID, WindowID: newWindowID, ChangedAt: newActivity},
 	}}
 
-	locations := sortedProjectsByActivity(state, []HostStatus{status})
+	locations := sortedProjectsByActivity(state, []HostStatus{status}, time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC))
 	got := []string{locations[0].Project.Name, locations[1].Project.Name, locations[2].Project.Name}
 	want := []string{"Z newer", "B older", "A empty"}
 	if !reflect.DeepEqual(got, want) {
@@ -69,12 +69,19 @@ func TestActivityOrderingKeepsChangingProjectsStable(t *testing.T) {
 		{HostID: hostID, WindowID: bravoWindowID, ChangedAt: now.Add(-time.Second)},
 	}}
 
-	locations := sortedProjectsByActivityAt(state, []HostStatus{status}, now)
+	locations := sortedProjectsByActivity(state, []HostStatus{status}, now)
 	if got := []string{locations[0].Project.Name, locations[1].Project.Name}; !reflect.DeepEqual(got, []string{"Alpha", "Bravo"}) {
 		t.Fatalf("changing project order = %v, want stable name order", got)
 	}
+	state.Activities[0].ChangedAt = now.Add(-time.Second)
+	state.Activities[1].ChangedAt = now.Add(-10 * time.Second)
+	locations = sortedProjectsByActivity(state, []HostStatus{status}, now)
+	if got := []string{locations[0].Project.Name, locations[1].Project.Name}; !reflect.DeepEqual(got, []string{"Alpha", "Bravo"}) {
+		t.Fatalf("changed output timestamps reordered changing projects: %v", got)
+	}
 	state.Activities[0].ChangedAt = now.Add(-16 * time.Second)
-	locations = sortedProjectsByActivityAt(state, []HostStatus{status}, now)
+	state.Activities[1].ChangedAt = now.Add(-time.Second)
+	locations = sortedProjectsByActivity(state, []HostStatus{status}, now)
 	if got := []string{locations[0].Project.Name, locations[1].Project.Name}; !reflect.DeepEqual(got, []string{"Bravo", "Alpha"}) {
 		t.Fatalf("changing and quiet project order = %v, want changing first", got)
 	}
@@ -109,7 +116,7 @@ func TestActivityOrderingKeepsChangingWorkspacesAndWindowsStable(t *testing.T) {
 		{HostID: hostID, WindowID: bravoWindowID, ChangedAt: now.Add(-time.Second)},
 	}}
 
-	locations := sortedProjectsByActivityAt(state, []HostStatus{status}, now)
+	locations := sortedProjectsByActivity(state, []HostStatus{status}, now)
 	if got := []string{locations[0].Workspaces[0].Name, locations[0].Workspaces[1].Name}; !reflect.DeepEqual(got, []string{"Alpha", "Bravo"}) {
 		t.Fatalf("changing workspace order = %v, want stable name order", got)
 	}
@@ -129,7 +136,7 @@ func TestActivityOrderingIncludesProjectTerminal(t *testing.T) {
 		{ID: projectID, Name: "Z active", Path: "/srv/active"},
 	}}
 	window := Window{ID: windowID, ProjectID: projectID, ProjectPath: "/srv/active", Name: projectWindowName, LastUsedAt: changed}
-	locations := sortedProjectsByActivity(ClientState{}, []HostStatus{{Host: host, Snapshot: HostSnapshot{Windows: []Window{window}}}})
+	locations := sortedProjectsByActivity(ClientState{}, []HostStatus{{Host: host, Snapshot: HostSnapshot{Windows: []Window{window}}}}, time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC))
 	if len(locations) != 2 || locations[0].Project.ID != projectID || locations[0].ProjectWindow.ID != windowID || !locations[0].LastActivity.Equal(changed) {
 		t.Fatalf("project terminal ordering = %+v", locations)
 	}
@@ -168,7 +175,7 @@ func TestActivityOrderingSortsWorkspacesAndWindowsWithoutMutatingSnapshot(t *tes
 		{HostID: hostID, WindowID: newestWindowID, ChangedAt: base.Add(2 * time.Hour)},
 	}}
 
-	locations := sortedProjectsByActivity(state, []HostStatus{status})
+	locations := sortedProjectsByActivity(state, []HostStatus{status}, time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC))
 	if len(locations) != 1 {
 		t.Fatalf("locations = %+v", locations)
 	}
@@ -204,7 +211,7 @@ func TestActivityOrderingPlacesProjectsWithTerminalsBeforeWorkspaceOnlyProjects(
 		Windows:    []Window{{ID: windowID, ProjectID: terminalProjectID, Name: projectWindowName, LastUsedAt: old}},
 	}}
 
-	locations := sortedProjectsByActivity(ClientState{}, []HostStatus{status})
+	locations := sortedProjectsByActivity(ClientState{}, []HostStatus{status}, time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC))
 	if len(locations) != 2 || locations[0].Project.ID != terminalProjectID || locations[1].Project.ID != workspaceProjectID {
 		t.Fatalf("project tiers = %+v", locations)
 	}
