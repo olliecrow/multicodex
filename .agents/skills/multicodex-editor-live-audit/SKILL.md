@@ -1,5 +1,5 @@
 ---
-name: editor-live-audit
+name: multicodex-editor-live-audit
 description: Verify the multicodex editor end to end on local and approved SSH hosts with isolated state, exact builds, real TUI interaction, reconnect checks, and residue-safe cleanup.
 ---
 
