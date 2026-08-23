@@ -1044,18 +1044,7 @@ func (m tuiModel) renderSidebar() string {
 			prefix = "›"
 		}
 		label = fitPlain(prefix+label, width)
-		style := lipgloss.NewStyle().Width(width)
-		if index == m.selectedRow && m.controlMode {
-			style = style.Reverse(true).Bold(true)
-		} else if index == m.selectedRow {
-			style = style.Foreground(lipgloss.Cyan).Bold(true)
-		} else if row.signal == sidebarOffline || row.signal == sidebarUnavailable || row.signal == sidebarStopped {
-			style = style.Foreground(lipgloss.Yellow)
-		} else if row.signal == sidebarActive {
-			style = style.Foreground(lipgloss.Cyan)
-		} else if row.kind == "project" {
-			style = style.Bold(true)
-		}
+		style := sidebarRowStyle(row, index == m.selectedRow, m.controlMode, width)
 		lines = append(lines, style.Render(label))
 	}
 	if len(lines) == 0 {
@@ -1072,6 +1061,30 @@ func (m tuiModel) renderSidebar() string {
 		lines = append(lines, strings.Repeat(" ", width))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func sidebarRowStyle(row sidebarRow, selected, controlMode bool, width int) lipgloss.Style {
+	style := lipgloss.NewStyle().Width(width)
+	if selected && controlMode {
+		return style.Reverse(true).Bold(true)
+	}
+	if selected {
+		return style.Foreground(lipgloss.Cyan).Bold(true)
+	}
+	switch row.signal {
+	case sidebarActive:
+		style = style.Foreground(lipgloss.Cyan)
+	case sidebarQuiet:
+		style = style.Foreground(lipgloss.Green)
+	case sidebarEmpty:
+		style = style.Faint(true)
+	case sidebarStopped, sidebarOffline, sidebarUnavailable:
+		style = style.Foreground(lipgloss.Yellow)
+	}
+	if row.kind == "project" && row.signal != sidebarEmpty {
+		style = style.Bold(true)
+	}
+	return style
 }
 
 func (m tuiModel) renderMain() string {
