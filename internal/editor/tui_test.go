@@ -198,6 +198,10 @@ func TestSidebarLivePulseAdvancesAfterEachRefresh(t *testing.T) {
 	if title := second.sidebarTitle(); title != "Projects · 1 offline ·" {
 		t.Fatalf("offline refresh title = %q", title)
 	}
+	second.refreshing = true
+	if title := second.sidebarTitle(); title != "Projects · 1 offline ·" {
+		t.Fatalf("in-flight refresh replaced stable health title with %q", title)
+	}
 }
 
 func TestPreferredWindowRetriesOnlyExistingSessions(t *testing.T) {
