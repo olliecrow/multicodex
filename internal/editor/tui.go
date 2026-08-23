@@ -1092,6 +1092,10 @@ func renderContextPanel(row sidebarRow, choices []choice, width, height int) str
 	title := "Project selected"
 	detail := row.project.Name + " · " + row.host.Name
 	hint := "Enter: open project terminal · Ctrl+N: new workspace · Tab: all actions"
+	if row.kind == "project" && row.window.ID != "" && !row.window.Alive && !row.offline {
+		title = "Project terminal stopped"
+		hint = "Delete the stopped terminal before creating a replacement."
+	}
 	if row.kind == "workspace" {
 		title = "Workspace selected"
 		detail = row.workspace.Name + " · " + row.project.Name + " · " + row.host.Name
@@ -1160,6 +1164,9 @@ func (m tuiModel) sidebarFooter() string {
 			reason = "connection unavailable"
 		}
 		return row.host.Name + " offline · " + reason
+	}
+	if row.window.ID != "" && !row.offline && !row.window.Alive {
+		return "Stopped · Actions → Delete selected to create a replacement"
 	}
 	switch row.kind {
 	case "project":

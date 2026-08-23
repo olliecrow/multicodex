@@ -202,6 +202,13 @@ func TestRefreshExplainsStoppedTerminalWithoutRetryingIt(t *testing.T) {
 	if cmd != nil || !got.controlMode || !strings.Contains(got.message, "terminal stopped") {
 		t.Fatalf("stopped project selection attempted an attach: %+v, %v", got, cmd)
 	}
+	context := ansi.Strip(got.renderMain())
+	if !strings.Contains(context, "Project terminal stopped") || !strings.Contains(context, "Delete project terminal") || strings.Contains(context, "Enter: open project terminal") {
+		t.Fatalf("stopped project options are misleading: %q", context)
+	}
+	if footer := got.sidebarFooter(); !strings.Contains(footer, "Stopped") || !strings.Contains(footer, "Delete selected") {
+		t.Fatalf("stopped project footer = %q", footer)
+	}
 }
 
 func TestStoppedWorkspaceWindowShowsReplacementPathWithoutAttaching(t *testing.T) {
