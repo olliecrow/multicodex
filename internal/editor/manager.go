@@ -964,7 +964,7 @@ func (m *Manager) maybeSaveLocked(force bool) error {
 	return nil
 }
 
-func sortedProjectsByActivity(state ClientState, statuses []HostStatus) []ProjectLocation {
+func sortedProjectsByActivity(state ClientState, statuses []HostStatus, now time.Time) []ProjectLocation {
 	type score struct {
 		location ProjectLocation
 		activity time.Time
@@ -1012,8 +1012,8 @@ func sortedProjectsByActivity(state ClientState, statuses []HostStatus) []Projec
 				sort.SliceStable(windows, func(i, j int) bool {
 					left := windowActivity(status.Host.ID, windows[i], activities)
 					right := windowActivity(status.Host.ID, windows[j], activities)
-					if !left.Equal(right) {
-						return left.After(right)
+					if order := compareActivity(left, right, now); order != 0 {
+						return order < 0
 					}
 					if windows[i].Name != windows[j].Name {
 						return windows[i].Name < windows[j].Name
@@ -1031,7 +1031,11 @@ func sortedProjectsByActivity(state ClientState, statuses []HostStatus) []Projec
 				if workspaceScores[i].populated != workspaceScores[j].populated {
 					return workspaceScores[i].populated
 				}
-				if !workspaceScores[i].activity.Equal(workspaceScores[j].activity) {
+				if workspaceScores[i].populated {
+					if order := compareActivity(workspaceScores[i].activity, workspaceScores[j].activity, now); order != 0 {
+						return order < 0
+					}
+				} else if !workspaceScores[i].activity.Equal(workspaceScores[j].activity) {
 					return workspaceScores[i].activity.After(workspaceScores[j].activity)
 				}
 				if workspaceScores[i].workspace.Name != workspaceScores[j].workspace.Name {
@@ -1065,7 +1069,11 @@ func sortedProjectsByActivity(state ClientState, statuses []HostStatus) []Projec
 		if scored[i].rank != scored[j].rank {
 			return scored[i].rank < scored[j].rank
 		}
-		if !scored[i].activity.Equal(scored[j].activity) {
+		if scored[i].rank == 0 {
+			if order := compareActivity(scored[i].activity, scored[j].activity, now); order != 0 {
+				return order < 0
+			}
+		} else if !scored[i].activity.Equal(scored[j].activity) {
 			return scored[i].activity.After(scored[j].activity)
 		}
 		if scored[i].location.Project.Name != scored[j].location.Project.Name {
@@ -1081,6 +1089,30 @@ func sortedProjectsByActivity(state ClientState, statuses []HostStatus) []Projec
 		result[i] = scored[i].location
 	}
 	return result
+}
+
+func isRecentActivity(activity, now time.Time) bool {
+	age := now.Sub(activity)
+	return !activity.IsZero() && age >= 0 && age <= recentOutputWindow
+}
+
+func compareActivity(left, right, now time.Time) int {
+	leftRecent := isRecentActivity(left, now)
+	rightRecent := isRecentActivity(right, now)
+	switch {
+	case leftRecent && !rightRecent:
+		return -1
+	case rightRecent && !leftRecent:
+		return 1
+	case leftRecent:
+		return 0
+	case left.After(right):
+		return -1
+	case right.After(left):
+		return 1
+	default:
+		return 0
+	}
 }
 
 func windowActivity(hostID string, window Window, activities map[string]time.Time) time.Time {

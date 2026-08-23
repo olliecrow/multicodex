@@ -69,8 +69,8 @@ func TestSidebarShowsProjectsGroupsWorkspacesAndUsesDynamicSlots(t *testing.T) {
 		index int
 		want  sidebarSignal
 	}{
-		{0, sidebarActive}, {1, sidebarActive}, {2, sidebarActive},
-		{3, sidebarQuiet}, {4, sidebarQuiet}, {5, sidebarQuiet},
+		{0, sidebarEmpty}, {1, sidebarActive}, {2, sidebarActive},
+		{3, sidebarEmpty}, {4, sidebarQuiet}, {5, sidebarQuiet},
 		{6, sidebarEmpty},
 	} {
 		if got := model.rows[check.index].signal; got != check.want {
@@ -427,7 +427,7 @@ func TestEditorControlsUseNavigationAndAVisibleActionMenu(t *testing.T) {
 		}
 	}
 	help := ansi.Strip(renderModal(modal{kind: "help", title: "Controls"}, helpWidth, (tuiModel{width: minimumWidth, height: minimumHeight}).bodyHeight()))
-	for _, want := range []string{"Click project/window: open", "⌘B or Ctrl+G: focus the sidebar", "⌥↑/⌥↓: previous/next terminal", "numbered terminal", "⌘⌫: delete", "scroll terminal history", "No terminal or sidebar: Ctrl+C quits", "● changing", "○ live, quiet", "× stopped", "Need terminal Ctrl+G?", "[ Close ]"} {
+	for _, want := range []string{"Click project/window: open", "⌘B or Ctrl+G: focus the sidebar", "⌥↑/⌥↓: previous/next terminal", "numbered terminal", "⌘⌫: delete", "scroll terminal history", "No terminal or sidebar: Ctrl+C quits", "● changing", "○ quiet", "◇ no terminal", "× stopped", "Need terminal Ctrl+G?", "[ Close ]"} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("minimum-width help truncated %q:\n%s", want, help)
 		}

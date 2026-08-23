@@ -49,7 +49,7 @@ const (
 	contextInsetX       = 1
 	contextInsetY       = 1
 	contextActionRow    = 4
-	recentOutputWindow  = 5 * time.Second
+	recentOutputWindow  = 15 * time.Second
 )
 
 var (
@@ -1420,8 +1420,8 @@ func helpModalContent() []string {
 		"  ⌘R: rename · ⌘⌫: delete · Esc: terminal",
 		"  ⌘1–9 or ⌥1–9: open the numbered terminal",
 		"  No terminal or sidebar: Ctrl+C quits",
-		"Signals: ● changing   ○ live, quiet   ◇ empty",
-		"         × stopped · ? offline · ! unavailable",
+		"Row: ● changing · ○ quiet · ◇ no terminal",
+		"     × stopped · ? offline · ! unavailable",
 		"Need terminal Ctrl+G? Use Actions → Send Ctrl+G.",
 		closeButtonLabel + " · Enter, ?, or Esc: close",
 	}
@@ -1467,7 +1467,8 @@ func modalChoiceButtonLine() string {
 
 func (m *tuiModel) rebuildRows() {
 	state := m.manager.State()
-	locations := sortedProjectsByActivity(state, m.statuses)
+	now := time.Now()
+	locations := sortedProjectsByActivity(state, m.statuses, now)
 	activities := make(map[string]time.Time, len(state.Activities))
 	for _, activity := range state.Activities {
 		activities[activity.HostID+"/"+activity.WindowID] = activity.ChangedAt
@@ -1478,9 +1479,8 @@ func (m *tuiModel) rebuildRows() {
 	}
 	rows := []sidebarRow{}
 	slot := 0
-	now := time.Now()
 	for _, location := range locations {
-		projectWindows := append([]Window(nil), location.Windows...)
+		projectWindows := []Window{}
 		if location.ProjectWindow.ID != "" {
 			projectWindows = append(projectWindows, location.ProjectWindow)
 		}
@@ -1551,8 +1551,7 @@ func summarizeSidebarWindows(offline, unavailable bool, hostID string, windows [
 		}
 		quiet = true
 		changed := activities[hostID+"/"+window.ID]
-		age := now.Sub(changed)
-		if !changed.IsZero() && age >= 0 && age <= recentOutputWindow {
+		if isRecentActivity(changed, now) {
 			return sidebarActive
 		}
 	}
