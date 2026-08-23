@@ -1225,6 +1225,22 @@ func TestSizeBlockerNeverForwardsHiddenTerminalInput(t *testing.T) {
 	}
 }
 
+func TestProjectWithoutTerminalOmitsTerminalActions(t *testing.T) {
+	host := Host{ID: localHostID, Name: localHostName}
+	project := Project{ID: "111111111111111111111111", Name: "Project", Path: "/tmp/project"}
+	model := tuiModel{rows: []sidebarRow{{kind: "project", host: host, project: project}}, selectedRow: 0}
+
+	if _, ok := model.currentAttachedRow(); ok {
+		t.Fatal("empty attachment ID matched a project without a terminal")
+	}
+	model.openActionMenu()
+	for _, action := range []string{"attach_file", "attach_clipboard", "scrollback", "send_control_g"} {
+		if modalHasAction(model.modal, action) {
+			t.Fatalf("project without terminal offers %q: %+v", action, model.modal.choices)
+		}
+	}
+}
+
 func TestMouseModeRoutesClicksToVisibleEditorControls(t *testing.T) {
 	model := tuiModel{width: 100, height: 30, selectedRow: -1}
 	view := model.View()

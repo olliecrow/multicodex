@@ -2280,6 +2280,9 @@ func (m tuiModel) rowIndexForWindow(id string) int {
 }
 
 func (m tuiModel) currentAttachedRow() (sidebarRow, bool) {
+	if m.attachedID == "" {
+		return sidebarRow{}, false
+	}
 	for _, row := range m.rows {
 		if row.window.ID == m.attachedID {
 			return row, true
