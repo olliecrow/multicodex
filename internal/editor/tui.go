@@ -541,6 +541,9 @@ func (m tuiModel) handleKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if slot := windowSlotKey(key); slot > 0 {
 		return m.selectWindowSlot(slot)
 	}
+	if key.Keystroke() == "ctrl+c" && m.attachment == nil {
+		return m, tea.Quit
+	}
 	if !m.controlMode {
 		if isSidebarFocusKey(key) {
 			m.controlMode = true
@@ -988,9 +991,9 @@ func (m tuiModel) View() tea.View {
 	} else if m.loadingProjects() {
 		footerLeft = "Loading projects…"
 	} else if len(m.rows) == 0 {
-		footerLeft = "No projects · Click Actions, or ⌘B/Ctrl+G then Tab"
+		footerLeft = "No projects · Click Actions or press Ctrl+G, then Tab · Ctrl+C: quit"
 	} else if m.attachment == nil {
-		footerLeft = "No terminal · Select a project, workspace, or terminal, then Enter"
+		footerLeft = "No terminal · Enter: open or create · Ctrl+C: quit"
 	}
 	footer := joinKeepRight(footerLeft, m.message, m.width)
 	content := header + "\n" + strings.Join(bodyLines, "\n") + "\n" + footer
@@ -1416,7 +1419,7 @@ func helpModalContent() []string {
 		"  Tab: Actions · ⌘N/Ctrl+N: create · ?: Help",
 		"  ⌘R: rename · ⌘⌫: delete · Esc: terminal",
 		"  ⌘1–9 or ⌥1–9: open the numbered terminal",
-		"  In the sidebar, Ctrl+C: quit",
+		"  No terminal or sidebar: Ctrl+C quits",
 		"Signals: ● changing   ○ live, quiet   ◇ empty",
 		"         × stopped · ? offline · ! unavailable",
 		"Need terminal Ctrl+G? Use Actions → Send Ctrl+G.",
