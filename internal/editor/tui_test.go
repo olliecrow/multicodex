@@ -189,6 +189,52 @@ func TestRefreshExplainsStoppedTerminalWithoutRetryingIt(t *testing.T) {
 	if !strings.Contains(got.message, "terminal stopped") || !strings.Contains(got.message, "Delete selected") {
 		t.Fatalf("stopped terminal recovery message = %q", got.message)
 	}
+	for _, action := range got.primaryActions(got.rows[got.selectedRow]) {
+		if action.action == "open_project_window" {
+			t.Fatalf("stopped project terminal still offered Open: %+v", action)
+		}
+	}
+	if rendered := ansi.Strip(got.renderMain()); !strings.Contains(rendered, "Project terminal stopped") || !strings.Contains(rendered, "create a replacement") {
+		t.Fatalf("stopped project guidance = %q", rendered)
+	}
+	updated, cmd = got.selectCurrentRow()
+	got = updated.(tuiModel)
+	if cmd != nil || !got.controlMode || !strings.Contains(got.message, "terminal stopped") {
+		t.Fatalf("stopped project selection attempted an attach: %+v, %v", got, cmd)
+	}
+}
+
+func TestStoppedWorkspaceWindowShowsReplacementPathWithoutAttaching(t *testing.T) {
+	model := tuiModel{
+		width: minimumWidth, height: minimumHeight, selectedRow: 0,
+		rows: []sidebarRow{{kind: "window", workspace: Workspace{Name: "Work"}, window: Window{ID: "111111111111111111111111", Name: "Terminal"}}},
+	}
+	updated, cmd := model.selectCurrentRow()
+	got := updated.(tuiModel)
+	if cmd != nil || !got.controlMode || !strings.Contains(got.message, "terminal stopped") {
+		t.Fatalf("stopped workspace window attempted an attach: %+v, %v", got, cmd)
+	}
+	if rendered := ansi.Strip(got.renderMain()); !strings.Contains(rendered, "Terminal stopped") || !strings.Contains(rendered, "select the workspace") {
+		t.Fatalf("stopped workspace terminal guidance = %q", rendered)
+	}
+}
+
+func TestContextDeleteButtonsNameTheExactResource(t *testing.T) {
+	tests := []struct {
+		choice choice
+		want   string
+	}{
+		{choice: choice{action: "delete", window: Window{ID: "111111111111111111111111"}}, want: "[ Delete project terminal… ]"},
+		{choice: choice{action: "delete", workspace: Workspace{ID: "222222222222222222222222"}, window: Window{ID: "333333333333333333333333"}}, want: "[ Delete terminal… ]"},
+		{choice: choice{action: "delete", workspace: Workspace{ID: "444444444444444444444444"}}, want: "[ Delete workspace… ]"},
+		{choice: choice{action: "delete", workspace: Workspace{ID: "555555555555555555555555", External: true}}, want: "[ Remove preserved workspace… ]"},
+		{choice: choice{action: "delete", window: Window{ID: "666666666666666666666666", Adopted: true}}, want: "[ Release tmux session… ]"},
+	}
+	for _, test := range tests {
+		if got := contextActionButton(test.choice); got != test.want {
+			t.Fatalf("context delete button = %q, want %q for %+v", got, test.want, test.choice)
+		}
+	}
 }
 
 func TestWindowSlotShortcutsAreDynamicAndDoNotStealPlainTerminalDigits(t *testing.T) {
@@ -1236,7 +1282,7 @@ func TestMouseSelectsSidebarRowsAndForwardsTerminalEvents(t *testing.T) {
 	windowID := "111111111111111111111111"
 	rows := []sidebarRow{
 		{kind: "workspace", workspace: Workspace{ID: "222222222222222222222222", Name: "Work"}},
-		{kind: "window", window: Window{ID: windowID, Name: "Terminal"}},
+		{kind: "window", window: Window{ID: windowID, Name: "Terminal", Alive: true}},
 		{kind: "workspace", workspace: Workspace{ID: "333333333333333333333333", Name: "Other"}},
 		{kind: "workspace", workspace: Workspace{ID: "444444444444444444444444", Name: "More"}},
 		{kind: "workspace", workspace: Workspace{ID: "555555555555555555555555", Name: "Last"}},
@@ -1628,7 +1674,7 @@ func TestAttachmentPasteWaitsForItsTargetAndRetriesBusyInput(t *testing.T) {
 }
 
 func TestSelectingAttachedWindowQueuesLatestChoiceWithoutAnotherAttach(t *testing.T) {
-	windowA := Window{ID: "111111111111111111111111"}
+	windowA := Window{ID: "111111111111111111111111", Alive: true}
 	model := tuiModel{
 		rows:        []sidebarRow{{kind: "window", window: windowA}},
 		selectedRow: 0,
@@ -1643,9 +1689,9 @@ func TestSelectingAttachedWindowQueuesLatestChoiceWithoutAnotherAttach(t *testin
 }
 
 func TestRapidWindowSelectionKeepsOnlyLatestQueuedAttach(t *testing.T) {
-	windowB := Window{ID: "222222222222222222222222"}
-	windowC := Window{ID: "333333333333333333333333"}
-	windowD := Window{ID: "444444444444444444444444"}
+	windowB := Window{ID: "222222222222222222222222", Alive: true}
+	windowC := Window{ID: "333333333333333333333333", Alive: true}
+	windowD := Window{ID: "444444444444444444444444", Alive: true}
 	model := tuiModel{
 		manager:     &Manager{},
 		rows:        []sidebarRow{{kind: "window", window: windowC}, {kind: "window", window: windowD}},
