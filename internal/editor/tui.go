@@ -77,6 +77,18 @@ type attachmentUpdateMsg struct {
 	closed     bool
 }
 
+type exitedWindowRemovalMsg struct {
+	hostID   string
+	windowID string
+	result   DeleteResult
+	err      error
+}
+
+type windowRef struct {
+	hostID   string
+	windowID string
+}
+
 type actionResultMsg struct {
 	action    string
 	hostID    string
@@ -186,6 +198,7 @@ type tuiModel struct {
 	refreshPulse      bool
 	actionBusy        bool
 	cleanupBusy       bool
+	exitRemovalBusy   bool
 	usageBusy         bool
 	modal             *modal
 	attachment        *Attachment
@@ -197,6 +210,7 @@ type tuiModel struct {
 	selectOnRefreshID string
 	resizePending     bool
 	pendingPastes     map[string]string
+	exitRemovalTried  map[windowRef]struct{}
 	message           string
 	usage             accountUsageState
 }
@@ -318,15 +332,21 @@ func (m tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.mergeStatuses(msg.statuses)
 		m.rebuildRows()
 		m.flushPendingPaste(m.attachedID)
+		exitRemovalCmd := m.startExitedWindowRemoval(msg.statuses)
 		if m.layout().fits() && m.attachedID == "" && m.attachingID == "" {
 			if row, ok := m.preferredWindow(); ok {
 				m.selectedRow = m.rowIndexForWindow(row.window.ID)
-				return m, m.requestAttach(row)
+				return m, tea.Batch(exitRemovalCmd, m.requestAttach(row))
 			}
 			if row, ok := m.selectedSidebarRow(); ok && row.window.ID != "" && !row.offline && !row.window.Alive {
-				m.message = "terminal stopped · use Actions → Delete selected to replace it"
+				if row.window.Exited {
+					m.message = "terminal exited · removing…"
+				} else {
+					m.message = "terminal stopped · use Actions → Delete selected to replace it"
+				}
 			}
 		}
+		return m, exitRemovalCmd
 	case usageMsg:
 		m.usageBusy = false
 		m.applyUsage(msg)
@@ -413,12 +433,38 @@ func (m tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.windowID != m.attachedID || msg.attachment != m.attachment {
 			return m, nil
 		}
+		ref := windowRef{hostID: m.attachedHost, windowID: msg.windowID}
 		_ = m.attachment.Close()
 		m.attachment = nil
 		m.resizePending = false
 		m.attachedHost = ""
 		m.attachedID = ""
-		m.message = "terminal disconnected; reconnecting…"
+		if _, removing := m.exitRemovalTried[ref]; removing {
+			m.message = "terminal exited · removing…"
+		} else {
+			m.message = "terminal disconnected; reconnecting…"
+		}
+		return m, m.startRefresh()
+	case exitedWindowRemovalMsg:
+		m.exitRemovalBusy = false
+		if msg.result.Deleted || msg.result.Reason == "window no longer exists" {
+			if msg.windowID == m.attachedID && m.attachment != nil {
+				_ = m.attachment.Close()
+				m.attachment, m.attachedID, m.attachedHost = nil, "", ""
+			}
+			m.message = "terminal exited and was removed"
+			if msg.err != nil {
+				m.message = "terminal was removed, but reconnect selection was not saved"
+			}
+			return m, m.startRefresh()
+		}
+		if msg.err != nil {
+			m.message = "terminal exited, but automatic removal did not complete"
+			return m, m.startRefresh()
+		}
+		if msg.result.Forceable {
+			delete(m.exitRemovalTried, windowRef{hostID: msg.hostID, windowID: msg.windowID})
+		}
 		return m, m.startRefresh()
 	case actionResultMsg:
 		return m.handleActionResult(msg)
@@ -2488,6 +2534,68 @@ func (m *tuiModel) startRefresh() tea.Cmd {
 	}
 	m.refreshing = true
 	return m.track(refreshCmd(m.manager))
+}
+
+func (m *tuiModel) startExitedWindowRemoval(statuses []HostStatus) tea.Cmd {
+	if m.exitRemovalTried == nil {
+		m.exitRemovalTried = make(map[windowRef]struct{})
+	}
+	reachable := make(map[string]bool, len(statuses))
+	present := make(map[windowRef]bool)
+	for _, status := range statuses {
+		if status.Error != "" {
+			for ref := range m.exitRemovalTried {
+				if ref.hostID == status.Host.ID {
+					delete(m.exitRemovalTried, ref)
+				}
+			}
+			continue
+		}
+		reachable[status.Host.ID] = true
+		for _, window := range status.Snapshot.Windows {
+			ref := windowRef{hostID: status.Host.ID, windowID: window.ID}
+			present[ref] = true
+			if !window.Exited {
+				delete(m.exitRemovalTried, ref)
+			}
+		}
+	}
+	for ref := range m.exitRemovalTried {
+		if reachable[ref.hostID] && !present[ref] {
+			delete(m.exitRemovalTried, ref)
+		}
+	}
+	if m.exitRemovalBusy || m.actionBusy || m.cleanupBusy {
+		return nil
+	}
+	for _, status := range statuses {
+		if status.Error != "" {
+			continue
+		}
+		for _, window := range status.Snapshot.Windows {
+			if window.Alive || !window.Exited {
+				continue
+			}
+			ref := windowRef{hostID: status.Host.ID, windowID: window.ID}
+			if _, tried := m.exitRemovalTried[ref]; tried {
+				continue
+			}
+			m.exitRemovalTried[ref] = struct{}{}
+			m.exitRemovalBusy = true
+			m.message = "terminal exited · removing…"
+			return m.track(removeExitedWindowCmd(m.manager, ref))
+		}
+	}
+	return nil
+}
+
+func removeExitedWindowCmd(manager *Manager, ref windowRef) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(manager.Context(), 30*time.Second)
+		defer cancel()
+		result, err := manager.DeleteWindow(ctx, ref.hostID, DeleteRequest{ID: ref.windowID})
+		return exitedWindowRemovalMsg{hostID: ref.hostID, windowID: ref.windowID, result: result, err: err}
+	}
 }
 
 func attachmentDoneCmd(windowID string, attachment *Attachment) tea.Cmd {

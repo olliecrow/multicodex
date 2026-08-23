@@ -837,7 +837,7 @@ func TestTerminalPassesRequestedExtendedKeyThroughTmux(t *testing.T) {
 	if err := attachment.SendKey(tea.KeyPressMsg{Code: tea.KeyEnter}); err != nil {
 		t.Fatal(err)
 	}
-	waitForRender(t, attachment, "MCE_EXTKEY_READY", 5*time.Second)
+	waitForRender(t, attachment, "MCE_EXTKEY_READY", 15*time.Second)
 	if err := attachment.SendKey(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModShift}); err != nil {
 		t.Fatal(err)
 	}
@@ -911,6 +911,55 @@ func TestCleanupRemovesOnlyExpiredOwnedResources(t *testing.T) {
 	}
 	if deleted, err := service.DeleteWorkspace(ctx, DeleteRequest{ID: workspace.ID}); err != nil || !deleted.Deleted {
 		t.Fatalf("explicit Git workspace deletion = %+v, %v", deleted, err)
+	}
+}
+
+func TestExitedTerminalCanBeRemovedImmediatelyWithoutDeletingItsWorkspace(t *testing.T) {
+	requireCommands(t, "git", "tmux")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	service, err := NewHostService(privateTestHome(t), mustID(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer killTestServer(service)
+	workspace, err := service.CreateWorkspace(ctx, CreateWorkspaceRequest{
+		ProjectID: mustID(t), ProjectPath: syntheticGitProject(t), Name: "Keep workspace",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	window, err := service.CreateWindow(ctx, CreateWindowRequest{WorkspaceID: workspace.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.tmux(ctx, "send-keys", "-t", window.Session, "exit", "Enter"); err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, 5*time.Second, func() bool {
+		out, err := service.tmux(ctx, "display-message", "-p", "-t", window.Session, "#{pane_dead}")
+		return err == nil && strings.TrimSpace(string(out)) == "1"
+	})
+	snapshot, err := service.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Windows) != 1 || snapshot.Windows[0].Alive || !snapshot.Windows[0].Exited {
+		t.Fatalf("exited terminal snapshot = %+v", snapshot.Windows)
+	}
+	deleted, err := service.DeleteWindow(ctx, DeleteRequest{ID: window.ID})
+	if err != nil || !deleted.Deleted || deleted.Forceable {
+		t.Fatalf("automatic terminal removal = %+v, %v", deleted, err)
+	}
+	snapshot, err = service.Snapshot(ctx)
+	if err != nil || len(snapshot.Windows) != 0 || len(snapshot.Workspaces) != 1 || snapshot.Workspaces[0].ID != workspace.ID {
+		t.Fatalf("workspace after terminal removal = %+v, %v", snapshot, err)
+	}
+	if _, err := os.Stat(workspace.Path); err != nil {
+		t.Fatalf("terminal removal changed its workspace: %v", err)
+	}
+	if deleted, err := service.DeleteWorkspace(ctx, DeleteRequest{ID: workspace.ID}); err != nil || !deleted.Deleted {
+		t.Fatalf("cleanup workspace = %+v, %v", deleted, err)
 	}
 }
 

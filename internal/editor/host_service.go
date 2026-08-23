@@ -205,10 +205,12 @@ func (s *HostService) Snapshot(ctx context.Context) (HostSnapshot, error) {
 		}
 		if state != sessionOwned {
 			window.Alive = false
+			window.Exited = false
 			windows = append(windows, window)
 			continue
 		}
 		window.Alive = alive
+		window.Exited = !alive
 		capture, err := s.tmuxForWindow(ctx, window, "capture-pane", "-p", "-J", "-S", "-"+strconv.Itoa(activityRows), "-t", s.tmuxTarget(window))
 		if err != nil {
 			currentState, currentAlive, inspectErr := s.inspectSession(ctx, window)
@@ -216,6 +218,7 @@ func (s *HostService) Snapshot(ctx context.Context) (HostSnapshot, error) {
 				return HostSnapshot{}, fmt.Errorf("capture owned terminal %q: %w", window.Name, err)
 			}
 			window.Alive = false
+			window.Exited = currentState == sessionOwned && !currentAlive
 			windows = append(windows, window)
 			continue
 		}
