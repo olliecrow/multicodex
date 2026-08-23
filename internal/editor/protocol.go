@@ -703,5 +703,5 @@ func connectionHandshakeError(host Host) error {
 	if host.ID == localHostID {
 		return errors.New("local editor host did not start correctly")
 	}
-	return fmt.Errorf("SSH host %q did not provide a compatible multicodex editor host", host.Name)
+	return fmt.Errorf("SSH host %q did not start the multicodex editor host; verify the connection and installed multicodex command", host.Name)
 }
