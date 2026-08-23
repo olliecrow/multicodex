@@ -20,6 +20,9 @@ const (
 	activityRows      = 100
 	cleanupAfter      = 7 * 24 * time.Hour
 	maxAttachment     = 16 << 20
+	maxClientState    = 8 << 20
+	maxHostState      = 16 << 20
+	maxStateRecords   = 100_000
 	minimumWidth      = 80
 	minimumHeight     = 24
 	localHostID       = "local"
@@ -263,7 +266,7 @@ func validateName(value, field string) error {
 		return fmt.Errorf("%s is longer than 80 characters", field)
 	}
 	for _, r := range value {
-		if unicode.IsControl(r) {
+		if unsafeDisplayRune(r) {
 			return fmt.Errorf("%s contains a control character", field)
 		}
 	}
@@ -292,7 +295,7 @@ func validateAbsolutePath(value, field string) error {
 		return fmt.Errorf("%s must be a clean absolute path", field)
 	}
 	for _, r := range value {
-		if unicode.IsControl(r) {
+		if unsafeDisplayRune(r) {
 			return fmt.Errorf("%s contains a control character", field)
 		}
 	}
@@ -352,7 +355,7 @@ func slug(value string) string {
 
 func safeClientText(value string, limit int) string {
 	value = strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) || r == '\x1b' {
+		if unsafeDisplayRune(r) {
 			return -1
 		}
 		return r
@@ -367,4 +370,8 @@ func safeClientText(value string, limit int) string {
 		return "editor host rejected the request"
 	}
 	return value
+}
+
+func unsafeDisplayRune(r rune) bool {
+	return r == '\x1b' || unicode.IsControl(r) || unicode.Is(unicode.Bidi_Control, r)
 }

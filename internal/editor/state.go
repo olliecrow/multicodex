@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -48,7 +49,7 @@ func (s *StateStore) Load() (ClientState, error) {
 	if err := secureExistingFile(s.path); err != nil {
 		return ClientState{}, err
 	}
-	b, err := os.ReadFile(s.path)
+	b, err := readBoundedStateFile(s.path, maxClientState)
 	if err != nil {
 		return ClientState{}, err
 	}
@@ -78,6 +79,9 @@ func (s *StateStore) Save(state ClientState) error {
 	b, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode editor state: %w", err)
+	}
+	if len(b)+1 > maxClientState {
+		return errors.New("editor state exceeds its safety limit")
 	}
 	tmp, err := os.CreateTemp(s.root, ".state.*")
 	if err != nil {
@@ -159,10 +163,14 @@ func validateClientState(state ClientState) error {
 	if err := validateID(state.InstanceID, "editor instance identifier"); err != nil {
 		return err
 	}
+	if len(state.Hosts) > maxStateRecords || len(state.Activities) > maxStateRecords {
+		return errors.New("editor state contains too many records")
+	}
 	hostIDs := map[string]bool{}
 	hostNames := map[string]bool{}
 	sshAliases := map[string]bool{}
 	projectIDs := map[string]bool{}
+	projectCount := 0
 	for _, host := range state.Hosts {
 		if host.ID != localHostID {
 			if err := validateID(host.ID, "host identifier"); err != nil {
@@ -193,6 +201,10 @@ func validateClientState(state ClientState) error {
 		}
 		projectNames := map[string]bool{}
 		projectPaths := map[string]bool{}
+		projectCount += len(host.Projects)
+		if projectCount > maxStateRecords {
+			return errors.New("editor state contains too many records")
+		}
 		for _, project := range host.Projects {
 			if err := validateID(project.ID, "project identifier"); err != nil {
 				return err
@@ -232,6 +244,22 @@ func validateClientState(state ClientState) error {
 		activityIDs[key] = true
 	}
 	return nil
+}
+
+func readBoundedStateFile(path string, limit int) ([]byte, error) {
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, int64(limit)+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > limit {
+		return nil, errors.New("editor state exceeds its safety limit")
+	}
+	return data, nil
 }
 
 func ensurePrivateDir(path string) error {

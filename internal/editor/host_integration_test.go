@@ -516,6 +516,120 @@ func TestAdoptedTmuxSessionIsPreservedThroughCleanupAndRelease(t *testing.T) {
 	}
 }
 
+func TestCleanupRollsBackCompatiblePartialAdoptionMarkers(t *testing.T) {
+	requireCommands(t, "git", "tmux")
+	ctx := context.Background()
+	project := syntheticGitProject(t)
+	service, err := NewHostService(privateTestHome(t), mustID(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.systemSocket = "mce-partial-" + mustID(t)[:12]
+	defer killTestSystemServer(service)
+	session := "partial-adoption"
+	runTestCommand(t, "tmux", "-L", service.systemSocket, "new-session", "-d", "-s", session, "-c", project)
+	adopted, err := service.AdoptTmuxSession(ctx, AdoptTmuxSessionRequest{
+		ProjectID: mustID(t), ProjectPath: project, WorkspaceName: "Shared checkout", Session: session,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	panePID := commandOutput(t, "tmux", "-L", service.systemSocket, "display-message", "-p", "-t", adopted.Window.TmuxSessionID, "#{pane_pid}")
+	runTestCommand(t, "tmux", "-L", service.systemSocket, "set-environment", "-u", "-t", adopted.Window.TmuxSessionID, "MCE_WORKSPACE")
+	if err := service.store.withLock(func(registry *hostRegistry) error {
+		registry.Windows[0].CreatePending = true
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if result, err := service.Cleanup(ctx); err != nil || result.WindowsDeleted != 0 {
+		t.Fatalf("partial adoption recovery = %+v, %v", result, err)
+	}
+	if err := service.store.withReadLock(func(registry hostRegistry) error {
+		if len(registry.Windows) != 0 || len(registry.Workspaces) != 1 {
+			t.Fatalf("partial adoption records = %+v", registry)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if markers := commandOutput(t, "tmux", "-L", service.systemSocket, "display-message", "-p", "-t", adopted.Window.TmuxSessionID, "#{MCE_INSTANCE}|#{MCE_WINDOW}|#{MCE_WORKSPACE}|#{MCE_PROJECT}"); markers != "|||" {
+		t.Fatalf("partial adoption markers remain: %q", markers)
+	}
+	if got := commandOutput(t, "tmux", "-L", service.systemSocket, "display-message", "-p", "-t", adopted.Window.TmuxSessionID, "#{pane_pid}"); got != panePID {
+		t.Fatalf("partial adoption recovery changed pane %q to %q", panePID, got)
+	}
+	if result, err := service.DeleteWorkspace(ctx, DeleteRequest{ID: adopted.Workspace.ID}); err != nil || !result.Deleted {
+		t.Fatalf("remove recovered preserved workspace = %+v, %v", result, err)
+	}
+}
+
+func TestCleanupCannotRaceTmuxAdoption(t *testing.T) {
+	requireCommands(t, "git", "tmux")
+	ctx := context.Background()
+	project := syntheticGitProject(t)
+	service, err := NewHostService(privateTestHome(t), mustID(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.systemSocket = "mce-serial-" + mustID(t)[:12]
+	defer killTestSystemServer(service)
+	session := "serialized-adoption"
+	runTestCommand(t, "tmux", "-L", service.systemSocket, "new-session", "-d", "-s", session, "-c", project)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	blocked := false
+	delegate := execRunner{}
+	service.runner = runnerFunc(func(commandContext context.Context, name string, args ...string) ([]byte, error) {
+		isMarkerWrite := false
+		for _, arg := range args {
+			if arg == "set-environment" {
+				isMarkerWrite = true
+				break
+			}
+		}
+		if !blocked && name == "tmux" && isMarkerWrite {
+			blocked = true
+			close(started)
+			select {
+			case <-release:
+			case <-commandContext.Done():
+				return nil, commandContext.Err()
+			}
+		}
+		return delegate.run(commandContext, name, args...)
+	})
+	type adoptionResult struct {
+		adopted AdoptedTmuxSession
+		err     error
+	}
+	result := make(chan adoptionResult, 1)
+	projectID := mustID(t)
+	go func() {
+		adopted, err := service.AdoptTmuxSession(ctx, AdoptTmuxSessionRequest{
+			ProjectID: projectID, ProjectPath: project, WorkspaceName: "Shared checkout", Session: session,
+		})
+		result <- adoptionResult{adopted: adopted, err: err}
+	}()
+	<-started
+	cleanupContext, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer cancel()
+	if _, err := service.Cleanup(cleanupContext); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("cleanup entered an active adoption: %v", err)
+	}
+	close(release)
+	adoption := <-result
+	if adoption.err != nil || adoption.adopted.Window.CreatePending {
+		t.Fatalf("serialized adoption = %+v, %v", adoption.adopted, adoption.err)
+	}
+	if deleted, err := service.DeleteWindow(ctx, DeleteRequest{ID: adoption.adopted.Window.ID}); err != nil || !deleted.Deleted {
+		t.Fatalf("release serialized adoption = %+v, %v", deleted, err)
+	}
+	if deleted, err := service.DeleteWorkspace(ctx, DeleteRequest{ID: adoption.adopted.Workspace.ID}); err != nil || !deleted.Deleted {
+		t.Fatalf("remove serialized workspace = %+v, %v", deleted, err)
+	}
+}
+
 func TestReleaseDoesNotTouchAReusedTmuxSessionName(t *testing.T) {
 	requireCommands(t, "git", "tmux")
 	ctx := context.Background()
@@ -638,7 +752,7 @@ func TestGitWorkspaceUsesCachedRemoteBranchWhenFetchIsUnavailable(t *testing.T) 
 	}
 }
 
-func TestCleanupPreservesIgnoredWorkspaceFiles(t *testing.T) {
+func TestCleanupPreservesGitWorkspaceFilesForExplicitDeletion(t *testing.T) {
 	requireCommands(t, "git")
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -679,7 +793,7 @@ func TestCleanupPreservesIgnoredWorkspaceFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.WorkspacesDeleted != 0 || !strings.Contains(strings.Join(result.Skipped, " "), "ignored files") {
+	if result.WorkspacesDeleted != 0 || !strings.Contains(strings.Join(result.Skipped, " "), "explicit deletion") {
 		t.Fatalf("cleanup result = %+v", result)
 	}
 	if _, err := os.Stat(ignoredPath); err != nil {
@@ -767,32 +881,36 @@ func TestCleanupRemovesOnlyExpiredOwnedResources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	attachment, err := attachWindowPTY(ctx, Host{ID: localHostID, Name: localHostName}, "", service.store.instanceID, window, 80, 20)
-	if err != nil {
+	if _, err := service.tmux(ctx, "send-keys", "-t", window.Session, "exit", "Enter"); err != nil {
 		t.Fatal(err)
 	}
-	waitUntil(t, 5*time.Second, func() bool { return strings.TrimSpace(attachment.Render(80, 20)) != "" })
-	_ = attachment.SendKey(tea.KeyPressMsg{Code: 'e', Text: "exit"})
-	_ = attachment.SendKey(tea.KeyPressMsg{Code: tea.KeyEnter})
-	waitUntil(t, 3*time.Second, func() bool {
-		snapshot, err := service.Snapshot(ctx)
-		return err == nil && len(snapshot.Windows) == 1 && !snapshot.Windows[0].Alive
+	waitUntil(t, 5*time.Second, func() bool {
+		out, err := service.tmux(ctx, "display-message", "-p", "-t", window.Session, "#{pane_dead}")
+		return err == nil && strings.TrimSpace(string(out)) == "1"
 	})
-	_ = attachment.Close()
-
+	if snapshot, err := service.Snapshot(ctx); err != nil || len(snapshot.Windows) != 1 || snapshot.Windows[0].Alive {
+		t.Fatalf("stopped window snapshot = %+v, %v", snapshot, err)
+	}
 	if _, err := service.tmux(ctx, "new-session", "-d", "-s", "unowned", "-x", "20", "-y", "10"); err != nil {
 		t.Fatal(err)
 	}
+
 	service.now = func() time.Time { return createdAt.Add(8 * 24 * time.Hour) }
 	result, err := service.Cleanup(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.WindowsDeleted != 1 || result.WorkspacesDeleted != 1 {
+	if result.WindowsDeleted != 1 || result.WorkspacesDeleted != 0 || !strings.Contains(strings.Join(result.Skipped, " "), "explicit deletion") {
 		t.Fatalf("unexpected cleanup: %+v", result)
+	}
+	if _, err := os.Stat(workspace.Path); err != nil {
+		t.Fatalf("automatic cleanup removed a Git worktree: %v", err)
 	}
 	if _, err := service.tmux(ctx, "has-session", "-t", "unowned"); err != nil {
 		t.Fatal("cleanup removed an unowned tmux session")
+	}
+	if deleted, err := service.DeleteWorkspace(ctx, DeleteRequest{ID: workspace.ID}); err != nil || !deleted.Deleted {
+		t.Fatalf("explicit Git workspace deletion = %+v, %v", deleted, err)
 	}
 }
 
@@ -1378,6 +1496,68 @@ func TestInterruptedWorkspaceDeleteRechecksNewCommits(t *testing.T) {
 	}
 	if result, err := service.DeleteWorkspace(ctx, DeleteRequest{ID: workspace.ID, Force: true}); err != nil || !result.Deleted {
 		t.Fatalf("forced cleanup after preservation: %+v, %v", result, err)
+	}
+}
+
+func TestInterruptedWorkspaceDeleteRestoresItsExactLock(t *testing.T) {
+	requireCommands(t, "git", "tmux")
+	ctx := context.Background()
+	project := syntheticGitProject(t)
+	service, err := NewHostService(privateTestHome(t), mustID(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace, err := service.CreateWorkspace(ctx, CreateWorkspaceRequest{ProjectID: mustID(t), ProjectPath: project, Name: "Interrupted unlock"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.store.withLock(func(registry *hostRegistry) error {
+		registry.Workspaces[0].DeletePending = true
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	runTestCommand(t, "git", "-C", project, "worktree", "unlock", workspace.Path)
+	if result, err := service.Cleanup(ctx); err != nil || result.WorkspacesDeleted != 1 {
+		t.Fatalf("interrupted unlock recovery = %+v, %v", result, err)
+	}
+	if _, err := os.Stat(workspace.Path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("recovered deletion left worktree: %v", err)
+	}
+}
+
+func TestFailedWorktreeRemovalRelocksWithFreshContext(t *testing.T) {
+	requireCommands(t, "git", "tmux")
+	ctx, cancel := context.WithCancel(context.Background())
+	project := syntheticGitProject(t)
+	service, err := NewHostService(privateTestHome(t), mustID(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace, err := service.CreateWorkspace(ctx, CreateWorkspaceRequest{ProjectID: mustID(t), ProjectPath: project, Name: "Removal failure"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	delegate := execRunner{}
+	failed := false
+	service.runner = runnerFunc(func(commandContext context.Context, name string, args ...string) ([]byte, error) {
+		joined := strings.Join(args, " ")
+		if !failed && name == "git" && strings.Contains(joined, "worktree remove") {
+			failed = true
+			cancel()
+			return nil, errors.New("synthetic removal failure")
+		}
+		return delegate.run(commandContext, name, args...)
+	})
+	if result, err := service.DeleteWorkspace(ctx, DeleteRequest{ID: workspace.ID}); err == nil || result.Deleted {
+		t.Fatalf("synthetic removal failure = %+v, %v", result, err)
+	}
+	if locked, reason, err := service.gitWorktreeLock(context.Background(), workspace); err != nil || !locked || reason != service.worktreeLockReason(workspace) {
+		t.Fatalf("worktree was not relocked after canceled removal: %v, %q, %v", locked, reason, err)
+	}
+	service.runner = execRunner{}
+	if result, err := service.Cleanup(context.Background()); err != nil || result.WorkspacesDeleted != 1 {
+		t.Fatalf("recovered removal = %+v, %v", result, err)
 	}
 }
 

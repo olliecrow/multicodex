@@ -2,10 +2,13 @@ package editor
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestStateStoreRoundTripCreatesPrivateState(t *testing.T) {
@@ -94,6 +97,80 @@ func TestStateStoreRejectsSymlink(t *testing.T) {
 	store := &StateStore{base: root, root: link, path: filepath.Join(link, "state.json")}
 	if _, err := store.LoadOrCreate(); err == nil {
 		t.Fatal("expected symlink rejection")
+	}
+}
+
+func TestStateStoresRejectOversizedFilesAndRecordSets(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "multicodex")
+	client := NewStateStore(home)
+	state, err := client.LoadOrCreate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Truncate(client.path, int64(maxClientState)+1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Load(); err == nil || !strings.Contains(err.Error(), "safety limit") {
+		t.Fatalf("oversized client state error = %v", err)
+	}
+	state.Activities = make([]Activity, maxStateRecords+1)
+	if err := client.Save(state); err == nil || !strings.Contains(err.Error(), "too many records") {
+		t.Fatalf("oversized client records error = %v", err)
+	}
+
+	hostHome := privateTestHome(t)
+	host, err := newHostStore(hostHome, mustID(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{host.editorRoot, host.root} {
+		if err := ensurePrivateDir(path); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(host.registryPath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Truncate(host.registryPath, int64(maxHostState)+1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := host.load(); err == nil || !strings.Contains(err.Error(), "safety limit") {
+		t.Fatalf("oversized host state error = %v", err)
+	}
+}
+
+func TestHostLifecycleLockIsSharedAndContextAware(t *testing.T) {
+	home := privateTestHome(t)
+	first, err := newHostStore(home, mustID(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := newHostStore(home, mustID(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	acquired := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- first.withLifecycleLock(context.Background(), func() error {
+			close(acquired)
+			<-release
+			return nil
+		})
+	}()
+	<-acquired
+	blockedContext, cancel := context.WithTimeout(context.Background(), 75*time.Millisecond)
+	defer cancel()
+	if err := second.withLifecycleLock(blockedContext, func() error { return nil }); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("contended lifecycle lock error = %v", err)
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if err := second.withLifecycleLock(context.Background(), func() error { return nil }); err != nil {
+		t.Fatalf("released lifecycle lock remained unavailable: %v", err)
 	}
 }
 

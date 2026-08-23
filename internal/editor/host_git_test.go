@@ -111,7 +111,7 @@ func TestAdoptedMarkerStateClassifiesEmptyTmuxReplyByExactID(t *testing.T) {
 				t.Fatalf("unexpected tmux arguments: %v", args)
 				return nil, errors.New("unexpected call")
 			})
-			exists, exact, empty, err := service.adoptedMarkerState(context.Background(), window)
+			exists, exact, empty, _, err := service.adoptedMarkerState(context.Background(), window)
 			if err != nil || exists != test.wantExists || exact || empty {
 				t.Fatalf("adopted marker state = %v, %v, %v, %v; want exists %v", exists, exact, empty, err, test.wantExists)
 			}
@@ -303,6 +303,40 @@ func TestCommandEnvironmentRemovesRepositoryAndTmuxOverrides(t *testing.T) {
 	tmuxEnvironment := strings.Join(sanitizedCommandEnvironment(environment, "tmux"), "|")
 	if strings.Contains(tmuxEnvironment, "TMUX=") || strings.Contains(tmuxEnvironment, "TMUX_TMPDIR=") {
 		t.Fatalf("tmux environment retained nesting overrides: %s", tmuxEnvironment)
+	}
+	sshEnvironment := strings.Join(sanitizedCommandEnvironment(append(environment,
+		"CODEX_HOME=/private/codex", "CODEX_AUTH_TOKEN=secret", "OPENAI_API_KEY=secret",
+		"MULTICODEX_HOME=/private/multicodex", "SSH_AUTH_SOCK=/private/agent"), "ssh"), "|")
+	for _, removed := range []string{"CODEX_", "OPENAI_", "MULTICODEX_"} {
+		if strings.Contains(sshEnvironment, removed) {
+			t.Fatalf("SSH environment retained %q: %s", removed, sshEnvironment)
+		}
+	}
+	if !strings.Contains(sshEnvironment, "SSH_AUTH_SOCK=/private/agent") || !strings.Contains(sshEnvironment, "PATH=/bin") {
+		t.Fatalf("SSH environment removed required process state: %s", sshEnvironment)
+	}
+}
+
+func TestEditorSSHCommandNeverInheritsAccountEnvironment(t *testing.T) {
+	t.Setenv("CODEX_TEST_SECRET", "dummy")
+	t.Setenv("OPENAI_TEST_SECRET", "dummy")
+	t.Setenv("MULTICODEX_TEST_SECRET", "dummy")
+	t.Setenv("SSH_AUTH_SOCK", "/private/test-agent")
+	command := editorCommandContext(context.Background(), "ssh", "test-host")
+	keys := map[string]string{}
+	for _, entry := range command.Env {
+		key, value, ok := strings.Cut(entry, "=")
+		if ok {
+			keys[key] = value
+		}
+	}
+	for _, removed := range []string{"CODEX_TEST_SECRET", "OPENAI_TEST_SECRET", "MULTICODEX_TEST_SECRET"} {
+		if _, ok := keys[removed]; ok {
+			t.Fatalf("SSH command retained %s", removed)
+		}
+	}
+	if keys["SSH_AUTH_SOCK"] != "/private/test-agent" {
+		t.Fatal("SSH command removed its authentication socket")
 	}
 }
 

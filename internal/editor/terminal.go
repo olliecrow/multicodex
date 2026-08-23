@@ -67,7 +67,7 @@ func attachWindowPTY(ctx context.Context, host Host, controlPath, instanceID str
 	}
 	var cmd *exec.Cmd
 	if host.ID == localHostID {
-		cmd = exec.CommandContext(ctx, "tmux", args...)
+		cmd = editorCommandContext(ctx, "tmux", args...)
 	} else {
 		if err := validateSSHAlias(host.SSHAlias); err != nil {
 			return nil, err
@@ -81,9 +81,9 @@ func attachWindowPTY(ctx context.Context, host Host, controlPath, instanceID str
 		for _, arg := range remoteArgs {
 			sshArgs = append(sshArgs, quoteRemoteShellArg(arg))
 		}
-		cmd = exec.CommandContext(ctx, "ssh", sshArgs...)
+		cmd = editorCommandContext(ctx, "ssh", sshArgs...)
 	}
-	cmd.Env = replaceEnvironment(sanitizedCommandEnvironment(os.Environ(), cmd.Path), "TERM", "xterm-256color")
+	cmd.Env = replaceEnvironment(cmd.Env, "TERM", "xterm-256color")
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: uint16(width), Rows: uint16(height)})
 	if err != nil {
 		if host.ID == localHostID {
@@ -99,10 +99,7 @@ func attachWindowPTY(ctx context.Context, host Host, controlPath, instanceID str
 		}
 		return nil, errors.New("prepare non-blocking terminal attachment")
 	}
-	terminal := vt.NewSafeEmulator(width, height)
-	// Tmux is the only scrollback owner. Keep the renderer's private history at
-	// one line so sustained output does not duplicate the long tmux scrollback.
-	terminal.SetScrollbackSize(1)
+	terminal := newTerminalEmulator(width, height)
 	inputPipe, ok := terminal.InputPipe().(io.WriteCloser)
 	if !ok {
 		_ = ptmx.Close()
@@ -178,6 +175,17 @@ func attachWindowPTY(ctx context.Context, host Host, controlPath, instanceID str
 		}
 	}()
 	return a, nil
+}
+
+func newTerminalEmulator(width, height int) *vt.SafeEmulator {
+	terminal := vt.NewSafeEmulator(width, height)
+	// The editor does not render terminal hyperlinks. Discard OSC 8 metadata so
+	// a distinct large link cannot be retained by every visible screen cell.
+	terminal.RegisterOscHandler(8, func([]byte) bool { return true })
+	// Tmux is the only scrollback owner. Keep the renderer's private history at
+	// one line so sustained output does not duplicate the long tmux scrollback.
+	terminal.SetScrollbackSize(1)
+	return terminal
 }
 
 func tmuxAttachArgs(instanceID string, window Window) ([]string, error) {
@@ -475,7 +483,7 @@ func safeTerminalRender(terminal *vt.SafeEmulator, width, height int) string {
 			out.WriteString(cell.Style.Diff(&previous))
 			previous = cell.Style
 			content := strings.Map(func(r rune) rune {
-				if r == '\x1b' || r == 0x7f || r >= 0x80 && r <= 0x9f || r < 0x20 && r != '\t' {
+				if unsafeDisplayRune(r) && r != '\t' {
 					return -1
 				}
 				return r

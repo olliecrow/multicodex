@@ -1,13 +1,14 @@
 package editor
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
+	"unicode"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/x/vt"
 )
 
 func TestTmuxAttachArgsSeparateCreatedAndAdoptedSessions(t *testing.T) {
@@ -62,7 +63,7 @@ func TestModifiedKeySequencesPreserveImportantModifiers(t *testing.T) {
 }
 
 func TestSafeTerminalRenderDoesNotEmitChildOSCSequences(t *testing.T) {
-	term := vt.NewSafeEmulator(24, 4)
+	term := newTerminalEmulator(24, 4)
 	defer term.Close()
 	_, _ = term.Write([]byte("\x1b]52;c;private\a\x1b]8;;https://invalid.test\aSAFE\x1b]8;;\a"))
 	rendered := safeTerminalRender(term, 24, 4)
@@ -72,6 +73,52 @@ func TestSafeTerminalRenderDoesNotEmitChildOSCSequences(t *testing.T) {
 	for _, forbidden := range []string{"\x1b]52", "\x1b]8", "private", "https://invalid.test"} {
 		if strings.Contains(rendered, forbidden) {
 			t.Fatalf("rendered child control data %q: %q", forbidden, rendered)
+		}
+	}
+}
+
+func TestTerminalDiscardsHyperlinkMetadataBeforeCellsRetainIt(t *testing.T) {
+	const width = 20
+	term := newTerminalEmulator(width, 2)
+	defer term.Close()
+	large := strings.Repeat("x", 64<<10)
+	for index := 0; index < width; index++ {
+		_, _ = term.Write([]byte(fmt.Sprintf("\x1b]8;;https://invalid.test/%s/%d\aX", large, index)))
+	}
+	for x := 0; x < width; x++ {
+		cell := term.CellAt(x, 0)
+		if cell == nil || cell.Content != "X" {
+			t.Fatalf("cell %d content = %+v", x, cell)
+		}
+		if cell.Link.URL != "" || cell.Link.Params != "" {
+			t.Fatalf("cell %d retained hyperlink metadata", x)
+		}
+	}
+}
+
+func TestAllBidiControlsAreRejectedOrRemovedFromEditorDisplay(t *testing.T) {
+	for r := rune(0); r <= unicode.MaxRune; r++ {
+		if !unicode.Is(unicode.Bidi_Control, r) {
+			continue
+		}
+		value := "left" + string(r) + "right"
+		if err := validateName(value, "name"); err == nil {
+			t.Fatalf("validateName accepted bidi control U+%04X", r)
+		}
+		for label, got := range map[string]string{
+			"client": safeClientText(value, 100),
+			"view":   plainDisplayText(value),
+		} {
+			if strings.ContainsRune(got, r) {
+				t.Fatalf("%s retained bidi control U+%04X", label, r)
+			}
+		}
+		term := newTerminalEmulator(16, 2)
+		_, _ = term.Write([]byte(value))
+		rendered := safeTerminalRender(term, 16, 2)
+		_ = term.Close()
+		if strings.ContainsRune(rendered, r) {
+			t.Fatalf("terminal render retained bidi control U+%04X", r)
 		}
 	}
 }
