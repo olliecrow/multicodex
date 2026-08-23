@@ -15,7 +15,7 @@ func TestTmuxAttachArgsSeparateCreatedAndAdoptedSessions(t *testing.T) {
 	windowID := "111111111111111111111111"
 	created := Window{ID: windowID, Session: "mce-" + windowID}
 	got, err := tmuxAttachArgs(testInstanceID, created)
-	want := []string{"-L", "mce-" + testInstanceID[:12], "attach-session", "-t", created.Session}
+	want := []string{"-L", "mce-" + testInstanceID[:12], "attach-session", "-t", "=" + created.Session + ":"}
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("created attach args = %v, %v; want %v", got, err, want)
 	}
