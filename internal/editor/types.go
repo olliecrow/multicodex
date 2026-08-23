@@ -106,6 +106,7 @@ type Window struct {
 	LastUsedAt    time.Time `json:"last_used_at"`
 	PaneHash      string    `json:"pane_hash,omitempty"`
 	Alive         bool      `json:"alive"`
+	Exited        bool      `json:"exited,omitempty"`
 	CreatePending bool      `json:"create_pending,omitempty"`
 	DeletePending bool      `json:"delete_pending,omitempty"`
 }

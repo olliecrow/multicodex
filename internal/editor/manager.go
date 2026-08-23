@@ -611,7 +611,7 @@ func validateHostSnapshot(host Host, snapshot HostSnapshot) error {
 	for _, window := range snapshot.Windows {
 		workspaceWindow := window.WorkspaceID != "" && window.ProjectID == "" && window.ProjectPath == "" && workspaceIDs[window.WorkspaceID]
 		projectWindow := window.WorkspaceID == "" && projectPaths[window.ProjectID] != "" && window.ProjectPath == projectPaths[window.ProjectID] && !projectWindows[window.ProjectID] && window.Name == projectWindowName && !window.Adopted
-		if validateID(window.ID, "window identifier") != nil || windowIDs[window.ID] || !workspaceWindow && !projectWindow || validateName(window.Name, "window name") != nil || window.CreatePending || window.PaneHash != "" && !paneHashPattern.MatchString(window.PaneHash) {
+		if validateID(window.ID, "window identifier") != nil || windowIDs[window.ID] || !workspaceWindow && !projectWindow || validateName(window.Name, "window name") != nil || window.CreatePending || window.Alive && window.Exited || window.PaneHash != "" && !paneHashPattern.MatchString(window.PaneHash) {
 			return errors.New("editor host returned unsafe window metadata")
 		}
 		if projectWindow {

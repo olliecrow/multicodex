@@ -226,6 +226,36 @@ func TestStoppedWorkspaceWindowShowsReplacementPathWithoutAttaching(t *testing.T
 	}
 }
 
+func TestExitedWindowsScheduleOneSafeRemovalAtATime(t *testing.T) {
+	host := Host{ID: localHostID, Name: localHostName}
+	first := Window{ID: "111111111111111111111111", Exited: true}
+	second := Window{ID: "222222222222222222222222", Exited: true}
+	stopped := Window{ID: "333333333333333333333333"}
+	offline := Host{ID: "444444444444444444444444", Name: "Offline"}
+	offlineRef := windowRef{hostID: offline.ID, windowID: "555555555555555555555555"}
+	model := tuiModel{manager: &Manager{}, exitRemovalTried: map[windowRef]struct{}{offlineRef: {}}}
+	statuses := []HostStatus{
+		{Host: host, Snapshot: HostSnapshot{Windows: []Window{first, second, stopped}}},
+		{Host: offline, Error: "offline", Snapshot: HostSnapshot{Windows: []Window{{ID: offlineRef.windowID, Exited: true}}}},
+	}
+	if cmd := model.startExitedWindowRemoval(statuses); cmd == nil || !model.exitRemovalBusy || model.message != "terminal exited · removing…" {
+		t.Fatalf("first exited terminal was not scheduled: %+v, %v", model, cmd)
+	}
+	if _, ok := model.exitRemovalTried[windowRef{hostID: host.ID, windowID: first.ID}]; !ok || len(model.exitRemovalTried) != 1 {
+		t.Fatalf("first removal attempts = %+v", model.exitRemovalTried)
+	}
+	if cmd := model.startExitedWindowRemoval(statuses); cmd != nil {
+		t.Fatal("a second removal was scheduled while the first was active")
+	}
+	model.exitRemovalBusy = false
+	if cmd := model.startExitedWindowRemoval(statuses); cmd == nil {
+		t.Fatal("second exited terminal was not scheduled")
+	}
+	if _, ok := model.exitRemovalTried[windowRef{hostID: host.ID, windowID: second.ID}]; !ok || len(model.exitRemovalTried) != 2 {
+		t.Fatalf("removal attempts = %+v", model.exitRemovalTried)
+	}
+}
+
 func TestContextDeleteButtonsNameTheExactResource(t *testing.T) {
 	tests := []struct {
 		choice choice
