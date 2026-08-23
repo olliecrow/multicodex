@@ -181,7 +181,7 @@ func TestSidebarSignalsSummarizeEveryManagedWindow(t *testing.T) {
 	}
 }
 
-func TestSidebarLivePulseAdvancesAfterEachRefresh(t *testing.T) {
+func TestSidebarKeepsHealthTextStableAroundItsPulse(t *testing.T) {
 	host := Host{ID: localHostID, Name: localHostName}
 	model := tuiModel{manager: &Manager{state: ClientState{Version: stateVersion, InstanceID: testInstanceID, Hosts: []Host{host}}}, refreshing: true}
 	updated, _ := model.Update(refreshMsg{statuses: []HostStatus{{Host: host}}})
@@ -360,6 +360,29 @@ func TestControlModeCanSendLiteralControlG(t *testing.T) {
 	}
 }
 
+func TestControlCQuitsOnlyWhenNoTerminalIsOpen(t *testing.T) {
+	key := tea.KeyPressMsg{Code: 'c', Text: "c", Mod: tea.ModCtrl}
+	model := tuiModel{width: minimumWidth, height: minimumHeight}
+	_, cmd := model.handleKey(key)
+	if cmd == nil {
+		t.Fatal("Ctrl+C did not quit when no terminal was open")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Fatal("Ctrl+C returned a non-quit command when no terminal was open")
+	}
+
+	attachment := &Attachment{inputQueue: make(chan terminalInput, 1)}
+	model.attachment = attachment
+	_, cmd = model.handleKey(key)
+	if cmd != nil {
+		t.Fatal("Ctrl+C quit while a terminal was open")
+	}
+	input := <-attachment.inputQueue
+	if input.kind != "key" || input.key.Code != 'c' || input.key.Mod != tea.ModCtrl {
+		t.Fatalf("terminal Ctrl+C input = %+v", input)
+	}
+}
+
 func TestEditorControlsUseNavigationAndAVisibleActionMenu(t *testing.T) {
 	model := tuiModel{width: minimumWidth, height: minimumHeight, controlMode: true}
 	updated, cmd := model.handleKey(tea.KeyPressMsg{Code: 'h', Text: "h"})
@@ -404,7 +427,7 @@ func TestEditorControlsUseNavigationAndAVisibleActionMenu(t *testing.T) {
 		}
 	}
 	help := ansi.Strip(renderModal(modal{kind: "help", title: "Controls"}, helpWidth, (tuiModel{width: minimumWidth, height: minimumHeight}).bodyHeight()))
-	for _, want := range []string{"Click project/window: open", "⌘B or Ctrl+G: focus the sidebar", "⌥↑/⌥↓: previous/next terminal", "numbered terminal", "⌘⌫: delete", "scroll terminal history", "In the sidebar, Ctrl+C: quit", "● changing", "○ live, quiet", "× stopped", "Need terminal Ctrl+G?", "[ Close ]"} {
+	for _, want := range []string{"Click project/window: open", "⌘B or Ctrl+G: focus the sidebar", "⌥↑/⌥↓: previous/next terminal", "numbered terminal", "⌘⌫: delete", "scroll terminal history", "No terminal or sidebar: Ctrl+C quits", "● changing", "○ live, quiet", "× stopped", "Need terminal Ctrl+G?", "[ Close ]"} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("minimum-width help truncated %q:\n%s", want, help)
 		}
@@ -1181,7 +1204,7 @@ func TestMinimumViewportShowsTitleUsageSidebarAndFooter(t *testing.T) {
 	state := ClientState{Version: stateVersion, InstanceID: testInstanceID, Hosts: []Host{{ID: localHostID, Name: localHostName}}}
 	model := tuiModel{manager: &Manager{state: state}, width: minimumWidth, height: minimumHeight, usage: accountUsageState{accounts: []accountUsage{{label: "alpha", usedPercent: 42, available: true}}}, message: "ready"}
 	view := ansi.Strip(model.View().Content)
-	for _, want := range []string{"multicodex editor", "[ Actions ]", "[ Help ]", "Codex use · resets in", "alpha", "42% used · ?", "Projects", "No projects", "Set up your first terminal", "Click Actions, or ⌘B/Ctrl+G then Tab", "original directory", "Ctrl+N", "ready", "┌", "┬", "├", "┤", "┴"} {
+	for _, want := range []string{"multicodex editor", "[ Actions ]", "[ Help ]", "Codex use · resets in", "alpha", "42% used · ?", "Projects", "No projects", "Set up your first terminal", "Click Actions or press Ctrl+G, then Tab", "Ctrl+C: quit", "original directory", "Ctrl+N", "ready", "┌", "┬", "├", "┤", "┴"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("missing %q in view:\n%s", want, view)
 		}
