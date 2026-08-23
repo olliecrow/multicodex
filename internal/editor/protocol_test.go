@@ -267,6 +267,34 @@ func TestBuildIdentityRejectsUnverifiableDevelopmentBuilds(t *testing.T) {
 	}
 }
 
+func TestHostHelloUsesProtocolCompatibilityAcrossCleanBuilds(t *testing.T) {
+	remote := Host{ID: "111111111111111111111111", SSHAlias: "remote"}
+	hello := helloResult{Protocol: hostProtocol, Version: "v2.0.0", Identity: "v2.0.0"}
+	if err := validateHostHello(remote, hello, "0.1.0-dev@abc123"); err != nil {
+		t.Fatalf("compatible clean builds were rejected: %v", err)
+	}
+	hello.Protocol--
+	if err := validateHostHello(remote, hello, "0.1.0-dev@abc123"); err == nil || err.Error() != incompatibleEditorHostMessage {
+		t.Fatalf("incompatible protocol error = %v", err)
+	}
+}
+
+func TestRemoteHostHelloRequiresVerifiableBuilds(t *testing.T) {
+	remote := Host{ID: "111111111111111111111111", SSHAlias: "remote"}
+	hello := helloResult{Protocol: hostProtocol, Identity: "0.1.0-dev@def456"}
+	if err := validateHostHello(remote, hello, ""); err == nil || err.Error() != unverifiableEditorHostBuildMessage {
+		t.Fatalf("unverifiable client error = %v", err)
+	}
+	hello.Identity = ""
+	if err := validateHostHello(remote, hello, "0.1.0-dev@abc123"); err == nil || err.Error() != unverifiableEditorHostBuildMessage {
+		t.Fatalf("unverifiable host error = %v", err)
+	}
+	local := Host{ID: localHostID}
+	if err := validateHostHello(local, hello, ""); err != nil {
+		t.Fatalf("local protocol-compatible host was rejected: %v", err)
+	}
+}
+
 func TestHostCallDeadlineInterruptsBlockedRequestWrite(t *testing.T) {
 	cmd := exec.Command("sh", "-c", "sleep 30")
 	stdin, err := cmd.StdinPipe()
