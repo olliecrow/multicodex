@@ -323,6 +323,9 @@ func (m tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				m.selectedRow = m.rowIndexForWindow(row.window.ID)
 				return m, m.requestAttach(row)
 			}
+			if row, ok := m.selectedSidebarRow(); ok && row.window.ID != "" && !row.offline && !row.window.Alive {
+				m.message = "terminal stopped · use Actions → Delete selected to replace it"
+			}
 		}
 	case usageMsg:
 		m.usageBusy = false
@@ -930,7 +933,7 @@ func (m tuiModel) View() tea.View {
 	} else if len(m.rows) == 0 {
 		footerLeft = "No projects · Click Actions, or ⌘B/Ctrl+G then Tab"
 	} else if m.attachment == nil {
-		footerLeft = "No terminal · Select a project or workspace, then Enter"
+		footerLeft = "No terminal · Select a project, workspace, or terminal, then Enter"
 	}
 	footer := joinKeepRight(footerLeft, m.message, m.width)
 	content := header + "\n" + strings.Join(bodyLines, "\n") + "\n" + footer
@@ -1032,7 +1035,7 @@ func (m tuiModel) renderMain() string {
 		return renderContextPanel(row, choices, width, height)
 	}
 	if m.attachment == nil {
-		text := "Set up your first terminal\n\n1. Open Actions: click [ Actions ].\n   Keyboard: ⌘B or Ctrl+G, then Tab.\n2. Add a project.\n3. Create a named workspace.\n   Its first terminal opens automatically."
+		text := "Set up your first terminal\n\n1. Open Actions: click [ Actions ].\n   Keyboard: ⌘B or Ctrl+G, then Tab.\n2. Add a project.\n3. Click it or press Enter.\n   Its terminal opens in the original directory.\n4. Press Ctrl+N when you need a named workspace."
 		if m.loadingProjects() {
 			text = "Loading projects\n\nConnecting to configured hosts…"
 		}
@@ -1442,12 +1445,12 @@ func (m *tuiModel) mergeStatuses(incoming []HostStatus) {
 func (m tuiModel) preferredWindow() (sidebarRow, bool) {
 	state := m.manager.State()
 	for _, row := range m.rows {
-		if row.window.ID != "" && row.window.ID == state.SelectedWindowID {
+		if row.window.ID != "" && row.window.Alive && row.window.ID == state.SelectedWindowID {
 			return row, true
 		}
 	}
 	for _, row := range m.rows {
-		if row.window.ID != "" {
+		if row.window.ID != "" && row.window.Alive {
 			return row, true
 		}
 	}
