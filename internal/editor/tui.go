@@ -1468,7 +1468,7 @@ func modalChoiceButtonLine() string {
 func (m *tuiModel) rebuildRows() {
 	state := m.manager.State()
 	now := time.Now()
-	locations := sortedProjectsByActivityAt(state, m.statuses, now)
+	locations := sortedProjectsByActivity(state, m.statuses, now)
 	activities := make(map[string]time.Time, len(state.Activities))
 	for _, activity := range state.Activities {
 		activities[activity.HostID+"/"+activity.WindowID] = activity.ChangedAt

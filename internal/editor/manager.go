@@ -964,11 +964,7 @@ func (m *Manager) maybeSaveLocked(force bool) error {
 	return nil
 }
 
-func sortedProjectsByActivity(state ClientState, statuses []HostStatus) []ProjectLocation {
-	return sortedProjectsByActivityAt(state, statuses, time.Now())
-}
-
-func sortedProjectsByActivityAt(state ClientState, statuses []HostStatus, now time.Time) []ProjectLocation {
+func sortedProjectsByActivity(state ClientState, statuses []HostStatus, now time.Time) []ProjectLocation {
 	type score struct {
 		location ProjectLocation
 		activity time.Time
