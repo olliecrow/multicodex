@@ -968,6 +968,7 @@ func sortedProjectsByActivity(state ClientState, statuses []HostStatus) []Projec
 	type score struct {
 		location ProjectLocation
 		activity time.Time
+		rank     int
 	}
 	activities := map[string]time.Time{}
 	for _, activity := range state.Activities {
@@ -982,6 +983,8 @@ func sortedProjectsByActivity(state ClientState, statuses []HostStatus) []Projec
 		for _, project := range status.Host.Projects {
 			workspaces := workspaceByProject[project.ID]
 			location := ProjectLocation{Host: status.Host, Project: project, HostError: status.Error}
+			var terminalActivity time.Time
+			var workspaceActivity time.Time
 			workspaceIDs := map[string]bool{}
 			windowsByWorkspace := map[string][]Window{}
 			for _, workspace := range workspaces {
@@ -990,7 +993,7 @@ func sortedProjectsByActivity(state ClientState, statuses []HostStatus) []Projec
 			for _, window := range status.Snapshot.Windows {
 				if window.ProjectID == project.ID {
 					location.ProjectWindow = window
-					location.LastActivity = windowActivity(status.Host.ID, window, activities)
+					terminalActivity = windowActivity(status.Host.ID, window, activities)
 					continue
 				}
 				if workspaceIDs[window.WorkspaceID] {
@@ -1001,6 +1004,7 @@ func sortedProjectsByActivity(state ClientState, statuses []HostStatus) []Projec
 				workspace Workspace
 				windows   []Window
 				activity  time.Time
+				populated bool
 			}
 			workspaceScores := make([]workspaceScore, 0, len(workspaces))
 			for _, workspace := range workspaces {
@@ -1017,12 +1021,16 @@ func sortedProjectsByActivity(state ClientState, statuses []HostStatus) []Projec
 					return windows[i].ID < windows[j].ID
 				})
 				activity := workspace.LastUsedAt
-				if len(windows) > 0 {
+				populated := len(windows) > 0
+				if populated {
 					activity = windowActivity(status.Host.ID, windows[0], activities)
 				}
-				workspaceScores = append(workspaceScores, workspaceScore{workspace: workspace, windows: windows, activity: activity})
+				workspaceScores = append(workspaceScores, workspaceScore{workspace: workspace, windows: windows, activity: activity, populated: populated})
 			}
 			sort.SliceStable(workspaceScores, func(i, j int) bool {
+				if workspaceScores[i].populated != workspaceScores[j].populated {
+					return workspaceScores[i].populated
+				}
 				if !workspaceScores[i].activity.Equal(workspaceScores[j].activity) {
 					return workspaceScores[i].activity.After(workspaceScores[j].activity)
 				}
@@ -1034,18 +1042,28 @@ func sortedProjectsByActivity(state ClientState, statuses []HostStatus) []Projec
 			for _, workspace := range workspaceScores {
 				location.Workspaces = append(location.Workspaces, workspace.workspace)
 				location.Windows = append(location.Windows, workspace.windows...)
-				if workspace.activity.After(location.LastActivity) {
-					location.LastActivity = workspace.activity
+				if workspace.populated && workspace.activity.After(terminalActivity) {
+					terminalActivity = workspace.activity
+				}
+				if workspace.activity.After(workspaceActivity) {
+					workspaceActivity = workspace.activity
 				}
 			}
-			scored = append(scored, score{location: location, activity: location.LastActivity})
+			rank := 2
+			activity := time.Time{}
+			switch {
+			case location.ProjectWindow.ID != "" || len(location.Windows) > 0:
+				rank, activity = 0, terminalActivity
+			case len(location.Workspaces) > 0:
+				rank, activity = 1, workspaceActivity
+			}
+			location.LastActivity = activity
+			scored = append(scored, score{location: location, activity: activity, rank: rank})
 		}
 	}
 	sort.SliceStable(scored, func(i, j int) bool {
-		leftActive := len(scored[i].location.Workspaces) > 0 || scored[i].location.ProjectWindow.ID != ""
-		rightActive := len(scored[j].location.Workspaces) > 0 || scored[j].location.ProjectWindow.ID != ""
-		if leftActive != rightActive {
-			return leftActive
+		if scored[i].rank != scored[j].rank {
+			return scored[i].rank < scored[j].rank
 		}
 		if !scored[i].activity.Equal(scored[j].activity) {
 			return scored[i].activity.After(scored[j].activity)
