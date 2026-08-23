@@ -80,6 +80,58 @@ func TestInspectAdoptedSessionClassifiesEmptyTmuxReplyByExactID(t *testing.T) {
 	}
 }
 
+func TestInspectCreatedSessionClassifiesEmptyTmuxReplyByExactName(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		present    bool
+		wantAbsent bool
+	}{
+		{name: "absent", wantAbsent: true},
+		{name: "malformed live reply", present: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			service, err := NewHostService(privateTestHome(t), mustID(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			window := Window{ID: mustID(t), WorkspaceID: mustID(t), Name: "Terminal"}
+			window.Session = service.sessionName(window.ID)
+			service.runner = runnerFunc(func(_ context.Context, name string, args ...string) ([]byte, error) {
+				if name != "tmux" {
+					t.Fatalf("unexpected command %q", name)
+				}
+				if slices.Contains(args, "display-message") {
+					if !slices.Contains(args, "="+window.Session+":") {
+						t.Fatalf("created session target is not exact: %v", args)
+					}
+					// tmux 3.4 can report success with no output for a missing
+					// exact session name while the server has other sessions.
+					return nil, nil
+				}
+				if slices.Contains(args, "has-session") {
+					if !slices.Contains(args, "="+window.Session) {
+						t.Fatalf("created session presence target is not exact: %v", args)
+					}
+					if test.present {
+						return nil, nil
+					}
+					return nil, commandFailure{exitCode: 1}
+				}
+				t.Fatalf("unexpected tmux arguments: %v", args)
+				return nil, errors.New("unexpected call")
+			})
+			state, alive, err := service.inspectSession(context.Background(), window)
+			if test.wantAbsent {
+				if err != nil || state != sessionAbsent || alive {
+					t.Fatalf("absent created session = %v, %v, %v", state, alive, err)
+				}
+			} else if err == nil {
+				t.Fatal("a malformed reply from a live created session was accepted")
+			}
+		})
+	}
+}
+
 func TestAdoptedMarkerStateClassifiesEmptyTmuxReplyByExactID(t *testing.T) {
 	for _, test := range []struct {
 		name       string

@@ -205,7 +205,7 @@ func tmuxAttachArgs(instanceID string, window Window) ([]string, error) {
 	if window.Session != session {
 		return nil, errors.New("refuse to attach to a non-deterministic tmux session")
 	}
-	return []string{"-L", "mce-" + instanceID[:12], "attach-session", "-t", session}, nil
+	return []string{"-L", "mce-" + instanceID[:12], "attach-session", "-t", "=" + session + ":"}, nil
 }
 
 func quoteRemoteShellArg(value string) string {
