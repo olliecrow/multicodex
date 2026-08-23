@@ -963,6 +963,54 @@ func TestExitedTerminalCanBeRemovedImmediatelyWithoutDeletingItsWorkspace(t *tes
 	}
 }
 
+func TestMissingTerminalDoesNotTakeItsHostOfflineOrSelectAnotherSession(t *testing.T) {
+	requireCommands(t, "git", "tmux")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	service, err := NewHostService(privateTestHome(t), mustID(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer killTestServer(service)
+	workspace, err := service.CreateWorkspace(ctx, CreateWorkspaceRequest{
+		ProjectID: mustID(t), ProjectPath: syntheticGitProject(t), Name: "Keep host online",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	missing, err := service.CreateWindow(ctx, CreateWindowRequest{WorkspaceID: workspace.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	live, err := service.CreateWindow(ctx, CreateWindowRequest{WorkspaceID: workspace.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.tmux(ctx, "kill-session", "-t", "="+missing.Session); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := service.Snapshot(ctx)
+	if err != nil {
+		t.Fatalf("snapshot with one missing session took its host offline: %v", err)
+	}
+	if len(snapshot.Windows) != 2 {
+		t.Fatalf("windows after one session disappeared = %+v", snapshot.Windows)
+	}
+	states := map[string]Window{}
+	for _, window := range snapshot.Windows {
+		states[window.ID] = window
+	}
+	if states[missing.ID].Alive || states[missing.ID].Exited || !states[live.ID].Alive {
+		t.Fatalf("window states after one session disappeared = %+v", snapshot.Windows)
+	}
+	if deleted, err := service.DeleteWindow(ctx, DeleteRequest{ID: missing.ID}); err != nil || !deleted.Deleted || deleted.Forceable {
+		t.Fatalf("delete missing window = %+v, %v", deleted, err)
+	}
+	if deleted, err := service.DeleteWorkspace(ctx, DeleteRequest{ID: workspace.ID, Force: true}); err != nil || !deleted.Deleted {
+		t.Fatalf("cleanup workspace = %+v, %v", deleted, err)
+	}
+}
+
 func TestTmuxSocketCleanupPreservesUnexpectedPath(t *testing.T) {
 	requireCommands(t, "tmux")
 	service, err := NewHostService(privateTestHome(t), mustID(t))

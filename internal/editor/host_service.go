@@ -2130,7 +2130,7 @@ func (s *HostService) tmuxTarget(window Window) string {
 	if window.Adopted {
 		return window.TmuxSessionID
 	}
-	return window.Session
+	return "=" + window.Session + ":"
 }
 
 func (s *HostService) ownsSession(ctx context.Context, window Window) (bool, error) {
@@ -2172,6 +2172,13 @@ func (s *HostService) inspectSession(ctx context.Context, window Window) (tmuxSe
 		if window.Adopted {
 			return s.classifyUnresponsiveAdoptedSession(ctx, window)
 		}
+		present, presentErr := s.managedTmuxSessionPresent(ctx, window.Session)
+		if presentErr != nil {
+			return sessionAbsent, false, errors.New("inspect tmux session ownership")
+		}
+		if !present {
+			return sessionAbsent, false, nil
+		}
 		return sessionAbsent, false, errors.New("inspect tmux session ownership")
 	}
 	if fields[0] != window.Session || fields[1] != s.store.instanceID || fields[2] != window.ID || fields[3] != window.WorkspaceID || fields[4] != window.ProjectID {
@@ -2184,6 +2191,18 @@ func (s *HostService) inspectSession(ctx context.Context, window Window) (tmuxSe
 		return sessionAltered, false, nil
 	}
 	return sessionOwned, fields[5] == "0", nil
+}
+
+func (s *HostService) managedTmuxSessionPresent(ctx context.Context, session string) (bool, error) {
+	_, err := s.tmux(ctx, "has-session", "-t", "="+session)
+	if err == nil {
+		return true, nil
+	}
+	var failure commandFailure
+	if errors.As(err, &failure) && failure.exitCode == 1 && !failure.notFound {
+		return false, nil
+	}
+	return false, errors.New("inspect editor tmux session")
 }
 
 func (s *HostService) classifyUnresponsiveAdoptedSession(ctx context.Context, window Window) (tmuxSessionState, bool, error) {
@@ -2213,7 +2232,7 @@ func (s *HostService) killOwnedSession(ctx context.Context, window Window) error
 	if err != nil || !owned {
 		return errors.New("refuse to delete a tmux session without exact editor ownership")
 	}
-	if _, err := s.tmux(ctx, "kill-session", "-t", window.Session); err != nil {
+	if _, err := s.tmux(ctx, "kill-session", "-t", s.tmuxTarget(window)); err != nil {
 		return errors.New("delete owned tmux session")
 	}
 	if err := s.cleanupUnusedTmuxSocket(ctx); err != nil {
