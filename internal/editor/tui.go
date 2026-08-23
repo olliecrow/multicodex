@@ -1050,7 +1050,11 @@ func (m tuiModel) renderMain() string {
 			}
 			switch row.kind {
 			case "project":
-				text = "Project selected\n\nPress Enter or click the project to open its terminal in the original project directory.\nPress Ctrl+N to create a named workspace."
+				if row.window.ID != "" && !row.window.Alive {
+					text = "Project terminal stopped\n\nThis tmux session no longer exists.\nUse Actions → Delete selected.\nThen press Enter to create a replacement."
+				} else {
+					text = "Project selected\n\nPress Enter or click the project to open its terminal in the original project directory.\nPress Ctrl+N to create a named workspace."
+				}
 			case "workspace":
 				if row.workspace.Unavailable {
 					text = "Workspace directory is unavailable\n\nIts terminals remain available for recovery, but commands that use the missing directory can fail.\nUse Actions → Delete selected when you no longer need it."
@@ -1058,7 +1062,9 @@ func (m tuiModel) renderMain() string {
 					text = "Workspace selected\n\nPress Enter to create and open a new terminal.\nChoose Rename from Actions to change its name."
 				}
 			case "window":
-				if row.workspace.Unavailable {
+				if !row.window.Alive {
+					text = "Terminal stopped\n\nThis tmux session no longer exists.\nUse Actions → Delete selected.\nThen select the workspace to create a replacement."
+				} else if row.workspace.Unavailable {
 					text = "Workspace directory is unavailable\n\nOpen this terminal to recover its live session. Commands that use the missing directory can fail.\nUse Actions → Delete selected when finished."
 				} else {
 					text = "No terminal is open\n\nPress Enter or click the selected window to open it.\nPress Ctrl+N for another terminal."
@@ -1124,6 +1130,12 @@ func contextActionButton(item choice) string {
 		label = "Rename workspace…"
 	case "delete":
 		switch {
+		case item.window.Adopted:
+			label = "Release tmux session…"
+		case item.window.ID != "" && item.workspace.ID == "":
+			label = "Delete project terminal…"
+		case item.window.ID != "":
+			label = "Delete terminal…"
 		case item.workspace.External:
 			label = "Remove preserved workspace…"
 		default:
@@ -1478,6 +1490,11 @@ func (m tuiModel) selectCurrentRow() (tea.Model, tea.Cmd) {
 		m.message = offlineStatusMessage(row)
 		return m, nil
 	}
+	if row.window.ID != "" && !row.offline && !row.window.Alive {
+		m.controlMode = true
+		m.message = "terminal stopped · use Actions → Delete selected to replace it"
+		return m, nil
+	}
 	switch row.kind {
 	case "project":
 		if row.window.ID == "" {
@@ -1716,7 +1733,9 @@ func (m tuiModel) primaryActions(row sidebarRow) []choice {
 	}
 	switch row.kind {
 	case "project":
-		choices = append(choices, choice{label: "Open project terminal", action: "open_project_window", host: row.host, project: row.project, window: row.window})
+		if row.window.ID == "" || row.window.Alive {
+			choices = append(choices, choice{label: "Open project terminal", action: "open_project_window", host: row.host, project: row.project, window: row.window})
+		}
 		choices = append(choices, choice{label: "New workspace in " + row.project.Name + "…", action: "new_workspace_selected", host: row.host, project: row.project})
 		if !row.offline {
 			choices = append(choices, choice{label: "Adopt existing tmux session…", action: "list_tmux_sessions", host: row.host, project: row.project})
