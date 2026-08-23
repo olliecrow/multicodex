@@ -49,6 +49,75 @@ func TestActivityOrderingKeepsPopulatedProjectsFirst(t *testing.T) {
 	}
 }
 
+func TestActivityOrderingKeepsChangingProjectsStable(t *testing.T) {
+	hostID := "111111111111111111111111"
+	alphaProjectID := "222222222222222222222222"
+	bravoProjectID := "333333333333333333333333"
+	alphaWindowID := "444444444444444444444444"
+	bravoWindowID := "555555555555555555555555"
+	now := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
+	host := Host{ID: hostID, Name: "Build", Projects: []Project{
+		{ID: bravoProjectID, Name: "Bravo", Path: "/srv/bravo"},
+		{ID: alphaProjectID, Name: "Alpha", Path: "/srv/alpha"},
+	}}
+	status := HostStatus{Host: host, Snapshot: HostSnapshot{Windows: []Window{
+		{ID: alphaWindowID, ProjectID: alphaProjectID, Name: projectWindowName},
+		{ID: bravoWindowID, ProjectID: bravoProjectID, Name: projectWindowName},
+	}}}
+	state := ClientState{Activities: []Activity{
+		{HostID: hostID, WindowID: alphaWindowID, ChangedAt: now.Add(-10 * time.Second)},
+		{HostID: hostID, WindowID: bravoWindowID, ChangedAt: now.Add(-time.Second)},
+	}}
+
+	locations := sortedProjectsByActivityAt(state, []HostStatus{status}, now)
+	if got := []string{locations[0].Project.Name, locations[1].Project.Name}; !reflect.DeepEqual(got, []string{"Alpha", "Bravo"}) {
+		t.Fatalf("changing project order = %v, want stable name order", got)
+	}
+	state.Activities[0].ChangedAt = now.Add(-16 * time.Second)
+	locations = sortedProjectsByActivityAt(state, []HostStatus{status}, now)
+	if got := []string{locations[0].Project.Name, locations[1].Project.Name}; !reflect.DeepEqual(got, []string{"Bravo", "Alpha"}) {
+		t.Fatalf("changing and quiet project order = %v, want changing first", got)
+	}
+}
+
+func TestActivityOrderingKeepsChangingWorkspacesAndWindowsStable(t *testing.T) {
+	hostID := "111111111111111111111111"
+	projectID := "222222222222222222222222"
+	alphaWorkspaceID := "333333333333333333333333"
+	bravoWorkspaceID := "444444444444444444444444"
+	alphaWindowID := "555555555555555555555555"
+	bravoWindowID := "666666666666666666666666"
+	charlieWindowID := "777777777777777777777777"
+	now := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
+	status := HostStatus{
+		Host: Host{ID: hostID, Name: "Build", Projects: []Project{{ID: projectID, Name: "Project", Path: "/srv/project"}}},
+		Snapshot: HostSnapshot{
+			Workspaces: []Workspace{
+				{ID: bravoWorkspaceID, ProjectID: projectID, Name: "Bravo"},
+				{ID: alphaWorkspaceID, ProjectID: projectID, Name: "Alpha"},
+			},
+			Windows: []Window{
+				{ID: charlieWindowID, WorkspaceID: alphaWorkspaceID, Name: "Charlie"},
+				{ID: alphaWindowID, WorkspaceID: alphaWorkspaceID, Name: "Alpha"},
+				{ID: bravoWindowID, WorkspaceID: bravoWorkspaceID, Name: "Terminal"},
+			},
+		},
+	}
+	state := ClientState{Activities: []Activity{
+		{HostID: hostID, WindowID: alphaWindowID, ChangedAt: now.Add(-2 * time.Second)},
+		{HostID: hostID, WindowID: charlieWindowID, ChangedAt: now.Add(-time.Second)},
+		{HostID: hostID, WindowID: bravoWindowID, ChangedAt: now.Add(-time.Second)},
+	}}
+
+	locations := sortedProjectsByActivityAt(state, []HostStatus{status}, now)
+	if got := []string{locations[0].Workspaces[0].Name, locations[0].Workspaces[1].Name}; !reflect.DeepEqual(got, []string{"Alpha", "Bravo"}) {
+		t.Fatalf("changing workspace order = %v, want stable name order", got)
+	}
+	if got := []string{locations[0].Windows[0].Name, locations[0].Windows[1].Name}; !reflect.DeepEqual(got, []string{"Alpha", "Charlie"}) {
+		t.Fatalf("changing window order = %v, want stable name order", got)
+	}
+}
+
 func TestActivityOrderingIncludesProjectTerminal(t *testing.T) {
 	hostID := "111111111111111111111111"
 	projectID := "222222222222222222222222"
