@@ -22,6 +22,77 @@ import (
 
 const testInstanceID = "0123456789abcdef01234567"
 
+func TestPaneActivityHashIncludesTmuxActivityTime(t *testing.T) {
+	capture := []byte("the same repeated terminal rows")
+	first := paneActivityHash(capture, "100")
+	if first != paneActivityHash(capture, "100") {
+		t.Fatal("stable pane state changed its activity hash")
+	}
+	if first == paneActivityHash(capture, "101") {
+		t.Fatal("new tmux activity with identical captured rows kept the old hash")
+	}
+}
+
+func TestSnapshotDetectsRepeatedIdenticalOutputActivity(t *testing.T) {
+	requireCommands(t, "tmux")
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	service, err := NewHostService(privateTestHome(t), mustID(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer killTestServer(service)
+	opened, err := service.OpenProjectWindow(ctx, OpenProjectWindowRequest{ProjectID: mustID(t), ProjectPath: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := "i=0; while [ $i -lt 200 ]; do printf 'same output\\n'; i=$((i+1)); done; while :; do printf 'same output\\n'; sleep 1; done"
+	if _, err := service.tmux(ctx, "send-keys", "-l", "-t", service.tmuxTarget(opened.Window), command); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.tmux(ctx, "send-keys", "-t", service.tmuxTarget(opened.Window), "Enter"); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		history, err := service.tmux(ctx, "display-message", "-p", "-t", service.tmuxTarget(opened.Window), "#{history_size}")
+		if err != nil {
+			t.Fatal(err)
+		}
+		size, err := strconv.Atoi(strings.TrimSpace(string(history)))
+		if err == nil && size >= 150 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("repeated terminal output did not fill the sampled history")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	first, err := service.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstCapture, err := service.tmux(ctx, "capture-pane", "-p", "-J", "-S", "-"+strconv.Itoa(activityRows), "-t", service.tmuxTarget(opened.Window))
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(2100 * time.Millisecond)
+	second, err := service.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondCapture, err := service.tmux(ctx, "capture-pane", "-p", "-J", "-S", "-"+strconv.Itoa(activityRows), "-t", service.tmuxTarget(opened.Window))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(firstCapture, secondCapture) {
+		t.Fatal("repeated-output fixture did not keep the sampled terminal rows identical")
+	}
+	if len(first.Windows) != 1 || len(second.Windows) != 1 || first.Windows[0].PaneHash == second.Windows[0].PaneHash {
+		t.Fatalf("repeated identical output was not detected: first=%+v second=%+v", first.Windows, second.Windows)
+	}
+}
+
 func TestProjectTerminalUsesOriginalDirectoryAndIsIdempotent(t *testing.T) {
 	requireCommands(t, "git", "tmux")
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
