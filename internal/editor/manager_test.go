@@ -104,7 +104,7 @@ func TestActivityOrderingSortsWorkspacesAndWindowsWithoutMutatingSnapshot(t *tes
 		t.Fatalf("locations = %+v", locations)
 	}
 	gotWorkspaces := []string{locations[0].Workspaces[0].ID, locations[0].Workspaces[1].ID, locations[0].Workspaces[2].ID}
-	wantWorkspaces := []string{emptyWorkspaceID, newWorkspaceID, oldWorkspaceID}
+	wantWorkspaces := []string{newWorkspaceID, oldWorkspaceID, emptyWorkspaceID}
 	if !reflect.DeepEqual(gotWorkspaces, wantWorkspaces) {
 		t.Fatalf("workspace order = %v, want %v", gotWorkspaces, wantWorkspaces)
 	}
@@ -115,6 +115,29 @@ func TestActivityOrderingSortsWorkspacesAndWindowsWithoutMutatingSnapshot(t *tes
 	}
 	if !reflect.DeepEqual(status.Snapshot.Workspaces, originalWorkspaces) || !reflect.DeepEqual(status.Snapshot.Windows, originalWindows) {
 		t.Fatal("activity ordering mutated the host snapshot")
+	}
+}
+
+func TestActivityOrderingPlacesProjectsWithTerminalsBeforeWorkspaceOnlyProjects(t *testing.T) {
+	hostID := "111111111111111111111111"
+	terminalProjectID := "222222222222222222222222"
+	workspaceProjectID := "333333333333333333333333"
+	workspaceID := "444444444444444444444444"
+	windowID := "555555555555555555555555"
+	old := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	newer := old.Add(24 * time.Hour)
+	host := Host{ID: hostID, Name: "Host", Projects: []Project{
+		{ID: workspaceProjectID, Name: "Workspace only", Path: "/srv/workspace"},
+		{ID: terminalProjectID, Name: "Has terminal", Path: "/srv/terminal"},
+	}}
+	status := HostStatus{Host: host, Snapshot: HostSnapshot{
+		Workspaces: []Workspace{{ID: workspaceID, ProjectID: workspaceProjectID, Name: "Empty", LastUsedAt: newer}},
+		Windows:    []Window{{ID: windowID, ProjectID: terminalProjectID, Name: projectWindowName, LastUsedAt: old}},
+	}}
+
+	locations := sortedProjectsByActivity(ClientState{}, []HostStatus{status})
+	if len(locations) != 2 || locations[0].Project.ID != terminalProjectID || locations[1].Project.ID != workspaceProjectID {
+		t.Fatalf("project tiers = %+v", locations)
 	}
 }
 

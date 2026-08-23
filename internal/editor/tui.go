@@ -118,8 +118,19 @@ type sidebarRow struct {
 	slot      int
 	offline   bool
 	hostError string
-	changedAt time.Time
+	signal    sidebarSignal
 }
+
+type sidebarSignal uint8
+
+const (
+	sidebarEmpty sidebarSignal = iota
+	sidebarQuiet
+	sidebarActive
+	sidebarStopped
+	sidebarOffline
+	sidebarUnavailable
+)
 
 type formField struct {
 	label string
@@ -1009,26 +1020,19 @@ func (m tuiModel) renderSidebar() string {
 		switch row.kind {
 		case "project":
 			marker, slot := "", ""
-			if row.window.ID != "" {
-				marker = m.windowStatusMarker(row) + " "
-				if row.slot > 0 && row.slot <= 9 {
-					slot = fmt.Sprintf("%d ", row.slot)
-				}
+			marker = sidebarSignalMarker(row.signal) + " "
+			if row.slot > 0 && row.slot <= 9 {
+				slot = fmt.Sprintf("%d ", row.slot)
 			}
 			label = slot + marker + row.project.Name + " · " + row.host.Name
 			if row.offline && row.window.ID == "" {
 				label += " · offline"
 			}
 		case "workspace":
-			marker := "◇"
-			if row.offline {
-				marker = "?"
-			} else if row.workspace.Unavailable {
-				marker = "!"
-			}
+			marker := sidebarSignalMarker(row.signal)
 			label = "  " + marker + " " + row.workspace.Name
 		case "window":
-			marker := m.windowStatusMarker(row)
+			marker := sidebarSignalMarker(row.signal)
 			slot := "  "
 			if row.slot > 0 && row.slot <= 9 {
 				slot = fmt.Sprintf("%d ", row.slot)
@@ -1045,14 +1049,12 @@ func (m tuiModel) renderSidebar() string {
 			style = style.Reverse(true).Bold(true)
 		} else if index == m.selectedRow {
 			style = style.Foreground(lipgloss.Cyan).Bold(true)
-		} else if row.offline || row.workspace.Unavailable {
+		} else if row.signal == sidebarOffline || row.signal == sidebarUnavailable || row.signal == sidebarStopped {
 			style = style.Foreground(lipgloss.Yellow)
-		} else if row.window.ID != "" && m.windowStatusMarker(row) == "●" {
+		} else if row.signal == sidebarActive {
 			style = style.Foreground(lipgloss.Cyan)
-		} else if row.window.ID != "" && m.windowStatusMarker(row) == "×" {
-			style = style.Foreground(lipgloss.Yellow)
 		} else if row.kind == "project" {
-			style = style.Foreground(lipgloss.Cyan).Bold(true)
+			style = style.Bold(true)
 		}
 		lines = append(lines, style.Render(label))
 	}
@@ -1301,29 +1303,37 @@ func (m tuiModel) sidebarTitle() string {
 	return "Projects · live ·"
 }
 
-func (m tuiModel) windowStatusMarker(row sidebarRow) string {
-	switch {
-	case row.offline:
-		return "?"
-	case !row.window.Alive:
-		return "×"
-	case !row.changedAt.IsZero() && time.Since(row.changedAt) <= recentOutputWindow:
-		return "●"
-	default:
+func sidebarSignalMarker(signal sidebarSignal) string {
+	switch signal {
+	case sidebarQuiet:
 		return "·"
+	case sidebarActive:
+		return "●"
+	case sidebarStopped:
+		return "×"
+	case sidebarOffline:
+		return "?"
+	case sidebarUnavailable:
+		return "!"
+	default:
+		return "◇"
 	}
 }
 
 func (m tuiModel) windowStatusLabel(row sidebarRow) string {
-	switch m.windowStatusMarker(row) {
-	case "●":
-		return "changing now"
-	case "·":
-		return "quiet · monitored live"
-	case "×":
+	switch row.signal {
+	case sidebarActive:
+		return "output changing"
+	case sidebarQuiet:
+		return "live · quiet"
+	case sidebarStopped:
 		return "stopped"
-	default:
+	case sidebarOffline:
 		return "host offline"
+	case sidebarUnavailable:
+		return "directory unavailable"
+	default:
+		return "no terminal"
 	}
 }
 
@@ -1397,8 +1407,8 @@ func helpModalContent() []string {
 		"  ⌘R: rename · ⌘⌫: delete · Esc: terminal",
 		"  ⌘1–9 or ⌥1–9: open the numbered terminal",
 		"  In the sidebar, Ctrl+C: quit",
-		"Terminals: ● active · · quiet · × stopped · ? offline",
-		"Workspace: ! directory unavailable",
+		"Signals: ● changing · · live/quiet · ◇ empty",
+		"         × stopped · ? offline · ! unavailable",
 		"Need terminal Ctrl+G? Use Actions → Send Ctrl+G.",
 		closeButtonLabel + " · Enter, ?, or Esc: close",
 	}
@@ -1455,22 +1465,34 @@ func (m *tuiModel) rebuildRows() {
 	}
 	rows := []sidebarRow{}
 	slot := 0
+	now := time.Now()
 	for _, location := range locations {
+		projectWindows := append([]Window(nil), location.Windows...)
+		if location.ProjectWindow.ID != "" {
+			projectWindows = append(projectWindows, location.ProjectWindow)
+		}
 		projectRow := sidebarRow{kind: "project", host: location.Host, project: location.Project, window: location.ProjectWindow, offline: location.HostError != "", hostError: location.HostError}
+		projectRow.signal = summarizeSidebarWindows(projectRow.offline, false, location.Host.ID, projectWindows, activities, now)
 		if projectRow.window.ID != "" {
 			slot++
 			projectRow.slot = slot
-			projectRow.changedAt = activities[location.Host.ID+"/"+projectRow.window.ID]
 		}
 		rows = append(rows, projectRow)
 		for _, workspace := range location.Workspaces {
-			rows = append(rows, sidebarRow{kind: "workspace", host: location.Host, project: location.Project, workspace: workspace, offline: location.HostError != "", hostError: location.HostError})
+			workspaceWindows := []Window{}
 			for _, window := range location.Windows {
-				if window.WorkspaceID != workspace.ID {
-					continue
+				if window.WorkspaceID == workspace.ID {
+					workspaceWindows = append(workspaceWindows, window)
 				}
+			}
+			workspaceRow := sidebarRow{kind: "workspace", host: location.Host, project: location.Project, workspace: workspace, offline: location.HostError != "", hostError: location.HostError}
+			workspaceRow.signal = summarizeSidebarWindows(workspaceRow.offline, workspace.Unavailable, location.Host.ID, workspaceWindows, activities, now)
+			rows = append(rows, workspaceRow)
+			for _, window := range workspaceWindows {
 				slot++
-				rows = append(rows, sidebarRow{kind: "window", host: location.Host, project: location.Project, workspace: workspace, window: window, slot: slot, offline: location.HostError != "", hostError: location.HostError, changedAt: activities[location.Host.ID+"/"+window.ID]})
+				windowRow := sidebarRow{kind: "window", host: location.Host, project: location.Project, workspace: workspace, window: window, slot: slot, offline: location.HostError != "", hostError: location.HostError}
+				windowRow.signal = summarizeSidebarWindows(windowRow.offline, false, location.Host.ID, []Window{window}, activities, now)
+				rows = append(rows, windowRow)
 			}
 		}
 	}
@@ -1497,6 +1519,34 @@ func (m *tuiModel) rebuildRows() {
 		m.selectedRow = 0
 	}
 	m.ensureSelectionVisible()
+}
+
+func summarizeSidebarWindows(offline, unavailable bool, hostID string, windows []Window, activities map[string]time.Time, now time.Time) sidebarSignal {
+	if offline {
+		return sidebarOffline
+	}
+	if unavailable {
+		return sidebarUnavailable
+	}
+	if len(windows) == 0 {
+		return sidebarEmpty
+	}
+	quiet := false
+	for _, window := range windows {
+		if !window.Alive {
+			continue
+		}
+		quiet = true
+		changed := activities[hostID+"/"+window.ID]
+		age := now.Sub(changed)
+		if !changed.IsZero() && age >= 0 && age <= recentOutputWindow {
+			return sidebarActive
+		}
+	}
+	if quiet {
+		return sidebarQuiet
+	}
+	return sidebarStopped
 }
 
 func (m *tuiModel) mergeStatuses(incoming []HostStatus) {

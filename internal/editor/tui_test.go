@@ -23,6 +23,7 @@ func TestSidebarShowsProjectsGroupsWorkspacesAndUsesDynamicSlots(t *testing.T) {
 	projectBID := "333333333333333333333333"
 	windowAID := "444444444444444444444444"
 	windowBID := "555555555555555555555555"
+	recent := time.Now().Add(-time.Second)
 	state := ClientState{
 		Version: stateVersion, InstanceID: testInstanceID,
 		Hosts: []Host{
@@ -34,8 +35,8 @@ func TestSidebarShowsProjectsGroupsWorkspacesAndUsesDynamicSlots(t *testing.T) {
 			}},
 		},
 		Activities: []Activity{
-			{HostID: hostID, WindowID: windowAID, ChangedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)},
-			{HostID: hostID, WindowID: windowBID, ChangedAt: time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)},
+			{HostID: hostID, WindowID: windowAID, ChangedAt: recent.Add(-time.Hour)},
+			{HostID: hostID, WindowID: windowBID, ChangedAt: recent},
 		},
 	}
 	host := state.Hosts[1]
@@ -63,6 +64,18 @@ func TestSidebarShowsProjectsGroupsWorkspacesAndUsesDynamicSlots(t *testing.T) {
 	}
 	if model.rows[6].kind != "project" || model.rows[6].project.Name != "Empty" {
 		t.Fatalf("empty project is not directly selectable: %+v", model.rows)
+	}
+	for _, check := range []struct {
+		index int
+		want  sidebarSignal
+	}{
+		{0, sidebarActive}, {1, sidebarActive}, {2, sidebarActive},
+		{3, sidebarQuiet}, {4, sidebarQuiet}, {5, sidebarQuiet},
+		{6, sidebarEmpty},
+	} {
+		if got := model.rows[check.index].signal; got != check.want {
+			t.Fatalf("row %d signal = %v, want %v: %+v", check.index, got, check.want, model.rows)
+		}
 	}
 }
 
@@ -94,36 +107,77 @@ func TestSidebarHasNoManagedWindowLimit(t *testing.T) {
 }
 
 func TestSidebarStatusShowsLiveOutputRunningStoppedAndFailures(t *testing.T) {
-	now := time.Now()
 	model := tuiModel{}
 	tests := []struct {
-		row  sidebarRow
-		want string
+		signal sidebarSignal
+		want   string
 	}{
-		{sidebarRow{window: Window{Alive: true}, changedAt: now}, "●"},
-		{sidebarRow{window: Window{Alive: true}}, "·"},
-		{sidebarRow{window: Window{}}, "×"},
-		{sidebarRow{offline: true, window: Window{Alive: true}}, "?"},
-		{sidebarRow{workspace: Workspace{Unavailable: true}, window: Window{Alive: true}}, "·"},
+		{sidebarActive, "●"},
+		{sidebarQuiet, "·"},
+		{sidebarEmpty, "◇"},
+		{sidebarStopped, "×"},
+		{sidebarOffline, "?"},
+		{sidebarUnavailable, "!"},
 	}
 	for _, test := range tests {
-		if got := model.windowStatusMarker(test.row); got != test.want {
-			t.Fatalf("window status marker = %q, want %q for %+v", got, test.want, test.row)
+		if got := sidebarSignalMarker(test.signal); got != test.want {
+			t.Fatalf("sidebar signal marker = %q, want %q for %v", got, test.want, test.signal)
 		}
 	}
 	labels := []struct {
 		row  sidebarRow
 		want string
 	}{
-		{sidebarRow{window: Window{Alive: true}, changedAt: now}, "changing now"},
-		{sidebarRow{window: Window{Alive: true}}, "quiet · monitored live"},
-		{sidebarRow{window: Window{}}, "stopped"},
-		{sidebarRow{offline: true}, "host offline"},
+		{sidebarRow{signal: sidebarActive}, "output changing"},
+		{sidebarRow{signal: sidebarQuiet}, "live · quiet"},
+		{sidebarRow{signal: sidebarStopped}, "stopped"},
+		{sidebarRow{signal: sidebarOffline}, "host offline"},
+		{sidebarRow{signal: sidebarUnavailable}, "directory unavailable"},
+		{sidebarRow{signal: sidebarEmpty}, "no terminal"},
 	}
 	for _, test := range labels {
 		if got := model.windowStatusLabel(test.row); got != test.want {
 			t.Fatalf("window status label = %q, want %q for %+v", got, test.want, test.row)
 		}
+	}
+}
+
+func TestSidebarSignalsSummarizeEveryManagedWindow(t *testing.T) {
+	hostID := "111111111111111111111111"
+	activeID := "222222222222222222222222"
+	quietID := "333333333333333333333333"
+	stoppedID := "444444444444444444444444"
+	futureID := "555555555555555555555555"
+	now := time.Now()
+	activities := map[string]time.Time{
+		hostID + "/" + activeID: now.Add(-time.Second),
+		hostID + "/" + quietID:  now.Add(-time.Hour),
+		hostID + "/" + futureID: now.Add(time.Hour),
+	}
+	active := Window{ID: activeID, Alive: true}
+	quiet := Window{ID: quietID, Alive: true}
+	stopped := Window{ID: stoppedID}
+
+	for _, test := range []struct {
+		name        string
+		offline     bool
+		unavailable bool
+		windows     []Window
+		want        sidebarSignal
+	}{
+		{name: "empty", want: sidebarEmpty},
+		{name: "active child", windows: []Window{quiet, active, stopped}, want: sidebarActive},
+		{name: "quiet live child", windows: []Window{stopped, quiet}, want: sidebarQuiet},
+		{name: "future timestamp is quiet", windows: []Window{{ID: futureID, Alive: true}}, want: sidebarQuiet},
+		{name: "all stopped", windows: []Window{stopped}, want: sidebarStopped},
+		{name: "offline overrides activity", offline: true, windows: []Window{active}, want: sidebarOffline},
+		{name: "unavailable workspace overrides activity", unavailable: true, windows: []Window{active}, want: sidebarUnavailable},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := summarizeSidebarWindows(test.offline, test.unavailable, hostID, test.windows, activities, now); got != test.want {
+				t.Fatalf("summarized signal = %v, want %v", got, test.want)
+			}
+		})
 	}
 }
 
@@ -346,7 +400,7 @@ func TestEditorControlsUseNavigationAndAVisibleActionMenu(t *testing.T) {
 		}
 	}
 	help := ansi.Strip(renderModal(modal{kind: "help", title: "Controls"}, helpWidth, (tuiModel{width: minimumWidth, height: minimumHeight}).bodyHeight()))
-	for _, want := range []string{"Click project/window: open", "⌘B or Ctrl+G: focus the sidebar", "⌥↑/⌥↓: previous/next terminal", "numbered terminal", "⌘⌫: delete", "scroll terminal history", "In the sidebar, Ctrl+C: quit", "● active · · quiet · × stopped", "Need terminal Ctrl+G?", "[ Close ]"} {
+	for _, want := range []string{"Click project/window: open", "⌘B or Ctrl+G: focus the sidebar", "⌥↑/⌥↓: previous/next terminal", "numbered terminal", "⌘⌫: delete", "scroll terminal history", "In the sidebar, Ctrl+C: quit", "● changing", "· live/quiet", "× stopped", "Need terminal Ctrl+G?", "[ Close ]"} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("minimum-width help truncated %q:\n%s", want, help)
 		}
@@ -1037,7 +1091,7 @@ func TestAttachmentResizesAfterAccountBlockerClears(t *testing.T) {
 func TestUnfocusedSidebarSelectionHasANonColorMarker(t *testing.T) {
 	model := tuiModel{width: minimumWidth, height: minimumHeight, selectedRow: 0, rows: []sidebarRow{{kind: "project", project: Project{Name: "Project"}, host: Host{Name: "Host"}}}}
 	line := strings.Split(ansi.Strip(model.renderSidebar()), "\n")[0]
-	if !strings.HasPrefix(line, "›Project · Host") {
+	if !strings.HasPrefix(line, "›◇ Project · Host") {
 		t.Fatalf("unfocused selection has no text marker: %q", line)
 	}
 }
