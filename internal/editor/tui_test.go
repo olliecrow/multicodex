@@ -113,7 +113,7 @@ func TestSidebarStatusShowsLiveOutputRunningStoppedAndFailures(t *testing.T) {
 		want   string
 	}{
 		{sidebarActive, "●"},
-		{sidebarQuiet, "·"},
+		{sidebarQuiet, "○"},
 		{sidebarEmpty, "◇"},
 		{sidebarStopped, "×"},
 		{sidebarOffline, "?"},
@@ -129,7 +129,7 @@ func TestSidebarStatusShowsLiveOutputRunningStoppedAndFailures(t *testing.T) {
 		want string
 	}{
 		{sidebarRow{signal: sidebarActive}, "output changing"},
-		{sidebarRow{signal: sidebarQuiet}, "live · quiet"},
+		{sidebarRow{signal: sidebarQuiet}, "live, quiet"},
 		{sidebarRow{signal: sidebarStopped}, "stopped"},
 		{sidebarRow{signal: sidebarOffline}, "host offline"},
 		{sidebarRow{signal: sidebarUnavailable}, "directory unavailable"},
@@ -400,7 +400,7 @@ func TestEditorControlsUseNavigationAndAVisibleActionMenu(t *testing.T) {
 		}
 	}
 	help := ansi.Strip(renderModal(modal{kind: "help", title: "Controls"}, helpWidth, (tuiModel{width: minimumWidth, height: minimumHeight}).bodyHeight()))
-	for _, want := range []string{"Click project/window: open", "⌘B or Ctrl+G: focus the sidebar", "⌥↑/⌥↓: previous/next terminal", "numbered terminal", "⌘⌫: delete", "scroll terminal history", "In the sidebar, Ctrl+C: quit", "● changing", "· live/quiet", "× stopped", "Need terminal Ctrl+G?", "[ Close ]"} {
+	for _, want := range []string{"Click project/window: open", "⌘B or Ctrl+G: focus the sidebar", "⌥↑/⌥↓: previous/next terminal", "numbered terminal", "⌘⌫: delete", "scroll terminal history", "In the sidebar, Ctrl+C: quit", "● changing", "○ live, quiet", "× stopped", "Need terminal Ctrl+G?", "[ Close ]"} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("minimum-width help truncated %q:\n%s", want, help)
 		}

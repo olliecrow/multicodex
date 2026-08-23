@@ -1306,7 +1306,7 @@ func (m tuiModel) sidebarTitle() string {
 func sidebarSignalMarker(signal sidebarSignal) string {
 	switch signal {
 	case sidebarQuiet:
-		return "·"
+		return "○"
 	case sidebarActive:
 		return "●"
 	case sidebarStopped:
@@ -1325,7 +1325,7 @@ func (m tuiModel) windowStatusLabel(row sidebarRow) string {
 	case sidebarActive:
 		return "output changing"
 	case sidebarQuiet:
-		return "live · quiet"
+		return "live, quiet"
 	case sidebarStopped:
 		return "stopped"
 	case sidebarOffline:
@@ -1407,7 +1407,7 @@ func helpModalContent() []string {
 		"  ⌘R: rename · ⌘⌫: delete · Esc: terminal",
 		"  ⌘1–9 or ⌥1–9: open the numbered terminal",
 		"  In the sidebar, Ctrl+C: quit",
-		"Signals: ● changing · · live/quiet · ◇ empty",
+		"Signals: ● changing   ○ live, quiet   ◇ empty",
 		"         × stopped · ? offline · ! unavailable",
 		"Need terminal Ctrl+G? Use Actions → Send Ctrl+G.",
 		closeButtonLabel + " · Enter, ?, or Esc: close",
