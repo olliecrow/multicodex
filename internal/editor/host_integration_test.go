@@ -2030,7 +2030,7 @@ func requireCommands(t *testing.T, names ...string) {
 
 func runTestCommand(t *testing.T, name string, args ...string) {
 	t.Helper()
-	cmd := exec.Command(name, args...)
+	cmd := isolatedTestCommand(name, args...)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("%s failed: %v: %s", name, err, output)
 	}
@@ -2038,11 +2038,27 @@ func runTestCommand(t *testing.T, name string, args ...string) {
 
 func commandOutput(t *testing.T, name string, args ...string) string {
 	t.Helper()
-	out, err := exec.Command(name, args...).Output()
+	out, err := isolatedTestCommand(name, args...).Output()
 	if err != nil {
 		t.Fatalf("%s failed: %v", name, err)
 	}
 	return strings.TrimSpace(string(out))
+}
+
+func isolatedTestCommand(name string, args ...string) *exec.Cmd {
+	cmd := exec.Command(name, args...)
+	if name != "tmux" {
+		return cmd
+	}
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		switch key {
+		case "MCE_INSTANCE", "MCE_WINDOW", "MCE_WORKSPACE", "MCE_PROJECT":
+			continue
+		}
+		cmd.Env = append(cmd.Env, entry)
+	}
+	return cmd
 }
 
 func quotePOSIX(value string) string {
