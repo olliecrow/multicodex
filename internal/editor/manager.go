@@ -90,7 +90,6 @@ func (m *Manager) State() ClientState {
 	for i := range state.Hosts {
 		state.Hosts[i].Projects = append([]Project(nil), m.state.Hosts[i].Projects...)
 	}
-	state.Activities = append([]Activity(nil), m.state.Activities...)
 	return state
 }
 
@@ -117,7 +116,6 @@ func (m *Manager) Refresh(ctx context.Context) []HostStatus {
 		}
 		return status
 	})
-	m.updateActivities(statuses)
 	return statuses
 }
 
@@ -611,7 +609,7 @@ func validateHostSnapshot(host Host, snapshot HostSnapshot) error {
 	for _, window := range snapshot.Windows {
 		workspaceWindow := window.WorkspaceID != "" && window.ProjectID == "" && window.ProjectPath == "" && workspaceIDs[window.WorkspaceID]
 		projectWindow := window.WorkspaceID == "" && projectPaths[window.ProjectID] != "" && window.ProjectPath == projectPaths[window.ProjectID] && !projectWindows[window.ProjectID] && window.Name == projectWindowName && !window.Adopted
-		if validateID(window.ID, "window identifier") != nil || windowIDs[window.ID] || !workspaceWindow && !projectWindow || validateName(window.Name, "window name") != nil || window.CreatePending || window.Alive && window.Exited || window.PaneHash != "" && !paneHashPattern.MatchString(window.PaneHash) {
+		if validateID(window.ID, "window identifier") != nil || windowIDs[window.ID] || !workspaceWindow && !projectWindow || validateName(window.Name, "window name") != nil || window.CreatePending || window.Alive && window.Exited {
 			return errors.New("editor host returned unsafe window metadata")
 		}
 		if projectWindow {
@@ -907,50 +905,6 @@ func findProject(host Host, id string) (Project, bool) {
 	return Project{}, false
 }
 
-func (m *Manager) updateActivities(statuses []HostStatus) {
-	now := time.Now().UTC()
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	activityIndex := map[string]int{}
-	for i, activity := range m.state.Activities {
-		m.state.Activities[i].Updating = false
-		activityIndex[activity.HostID+"/"+activity.WindowID] = i
-	}
-	seen := map[string]bool{}
-	reachable := map[string]bool{}
-	for _, status := range statuses {
-		if status.Error != "" {
-			continue
-		}
-		reachable[status.Host.ID] = true
-		for _, window := range status.Snapshot.Windows {
-			key := status.Host.ID + "/" + window.ID
-			seen[key] = true
-			if i, ok := activityIndex[key]; ok {
-				if window.PaneHash != "" && window.PaneHash != m.state.Activities[i].PaneHash {
-					m.state.Activities[i].PaneHash = window.PaneHash
-					m.state.Activities[i].ChangedAt = now
-					m.state.Activities[i].Updating = true
-					m.dirty = true
-				}
-			} else {
-				m.state.Activities = append(m.state.Activities, Activity{HostID: status.Host.ID, WindowID: window.ID, PaneHash: window.PaneHash, ChangedAt: now})
-				m.dirty = true
-			}
-		}
-	}
-	kept := m.state.Activities[:0]
-	for _, activity := range m.state.Activities {
-		if !reachable[activity.HostID] || seen[activity.HostID+"/"+activity.WindowID] {
-			kept = append(kept, activity)
-		} else {
-			m.dirty = true
-		}
-	}
-	m.state.Activities = kept
-	_ = m.maybeSaveLocked(false)
-}
-
 func (m *Manager) maybeSaveLocked(force bool) error {
 	if !m.dirty {
 		return nil
@@ -966,20 +920,10 @@ func (m *Manager) maybeSaveLocked(force bool) error {
 	return nil
 }
 
-type activityScore struct {
-	changedAt time.Time
-	updating  bool
-}
-
-func sortedProjectsByActivity(state ClientState, statuses []HostStatus) []ProjectLocation {
+func sortedProjects(statuses []HostStatus) []ProjectLocation {
 	type score struct {
 		location ProjectLocation
-		activity activityScore
 		rank     int
-	}
-	activities := map[string]Activity{}
-	for _, activity := range state.Activities {
-		activities[activity.HostID+"/"+activity.WindowID] = activity
 	}
 	var scored []score
 	for _, status := range statuses {
@@ -990,8 +934,6 @@ func sortedProjectsByActivity(state ClientState, statuses []HostStatus) []Projec
 		for _, project := range status.Host.Projects {
 			workspaces := workspaceByProject[project.ID]
 			location := ProjectLocation{Host: status.Host, Project: project, HostError: status.Error}
-			var terminalActivity activityScore
-			var workspaceActivity time.Time
 			workspaceIDs := map[string]bool{}
 			windowsByWorkspace := map[string][]Window{}
 			for _, workspace := range workspaces {
@@ -1000,7 +942,6 @@ func sortedProjectsByActivity(state ClientState, statuses []HostStatus) []Projec
 			for _, window := range status.Snapshot.Windows {
 				if window.ProjectID == project.ID {
 					location.ProjectWindow = window
-					terminalActivity = windowActivity(status.Host.ID, window, activities)
 					continue
 				}
 				if workspaceIDs[window.WorkspaceID] {
@@ -1010,40 +951,23 @@ func sortedProjectsByActivity(state ClientState, statuses []HostStatus) []Projec
 			type workspaceScore struct {
 				workspace Workspace
 				windows   []Window
-				activity  activityScore
 				populated bool
 			}
 			workspaceScores := make([]workspaceScore, 0, len(workspaces))
 			for _, workspace := range workspaces {
 				windows := windowsByWorkspace[workspace.ID]
 				sort.SliceStable(windows, func(i, j int) bool {
-					left := windowActivity(status.Host.ID, windows[i], activities)
-					right := windowActivity(status.Host.ID, windows[j], activities)
-					if order := compareActivity(left, right); order != 0 {
-						return order < 0
-					}
 					if windows[i].Name != windows[j].Name {
 						return windows[i].Name < windows[j].Name
 					}
 					return windows[i].ID < windows[j].ID
 				})
-				activity := activityScore{changedAt: workspace.LastUsedAt}
 				populated := len(windows) > 0
-				if populated {
-					activity = windowActivity(status.Host.ID, windows[0], activities)
-				}
-				workspaceScores = append(workspaceScores, workspaceScore{workspace: workspace, windows: windows, activity: activity, populated: populated})
+				workspaceScores = append(workspaceScores, workspaceScore{workspace: workspace, windows: windows, populated: populated})
 			}
 			sort.SliceStable(workspaceScores, func(i, j int) bool {
 				if workspaceScores[i].populated != workspaceScores[j].populated {
 					return workspaceScores[i].populated
-				}
-				if workspaceScores[i].populated {
-					if order := compareActivity(workspaceScores[i].activity, workspaceScores[j].activity); order != 0 {
-						return order < 0
-					}
-				} else if !workspaceScores[i].activity.changedAt.Equal(workspaceScores[j].activity.changedAt) {
-					return workspaceScores[i].activity.changedAt.After(workspaceScores[j].activity.changedAt)
 				}
 				if workspaceScores[i].workspace.Name != workspaceScores[j].workspace.Name {
 					return workspaceScores[i].workspace.Name < workspaceScores[j].workspace.Name
@@ -1053,35 +977,20 @@ func sortedProjectsByActivity(state ClientState, statuses []HostStatus) []Projec
 			for _, workspace := range workspaceScores {
 				location.Workspaces = append(location.Workspaces, workspace.workspace)
 				location.Windows = append(location.Windows, workspace.windows...)
-				if workspace.populated {
-					terminalActivity = mergeActivity(terminalActivity, workspace.activity)
-				}
-				if workspace.activity.changedAt.After(workspaceActivity) {
-					workspaceActivity = workspace.activity.changedAt
-				}
 			}
 			rank := 2
-			activity := activityScore{}
 			switch {
 			case location.ProjectWindow.ID != "" || len(location.Windows) > 0:
-				rank, activity = 0, terminalActivity
+				rank = 0
 			case len(location.Workspaces) > 0:
-				rank, activity = 1, activityScore{changedAt: workspaceActivity}
+				rank = 1
 			}
-			location.LastActivity = activity.changedAt
-			scored = append(scored, score{location: location, activity: activity, rank: rank})
+			scored = append(scored, score{location: location, rank: rank})
 		}
 	}
 	sort.SliceStable(scored, func(i, j int) bool {
 		if scored[i].rank != scored[j].rank {
 			return scored[i].rank < scored[j].rank
-		}
-		if scored[i].rank == 0 {
-			if order := compareActivity(scored[i].activity, scored[j].activity); order != 0 {
-				return order < 0
-			}
-		} else if !scored[i].activity.changedAt.Equal(scored[j].activity.changedAt) {
-			return scored[i].activity.changedAt.After(scored[j].activity.changedAt)
 		}
 		if scored[i].location.Project.Name != scored[j].location.Project.Name {
 			return scored[i].location.Project.Name < scored[j].location.Project.Name
@@ -1098,47 +1007,11 @@ func sortedProjectsByActivity(state ClientState, statuses []HostStatus) []Projec
 	return result
 }
 
-func compareActivity(left, right activityScore) int {
-	switch {
-	case left.updating && !right.updating:
-		return -1
-	case right.updating && !left.updating:
-		return 1
-	case left.updating:
-		return 0
-	case left.changedAt.After(right.changedAt):
-		return -1
-	case right.changedAt.After(left.changedAt):
-		return 1
-	default:
-		return 0
-	}
-}
-
-func mergeActivity(left, right activityScore) activityScore {
-	if right.changedAt.After(left.changedAt) {
-		left.changedAt = right.changedAt
-	}
-	left.updating = left.updating || right.updating
-	return left
-}
-
-func windowActivity(hostID string, window Window, activities map[string]Activity) activityScore {
-	if activity, ok := activities[hostID+"/"+window.ID]; ok {
-		return activityScore{changedAt: activity.ChangedAt, updating: activity.Updating}
-	}
-	if !window.LastUsedAt.IsZero() {
-		return activityScore{changedAt: window.LastUsedAt}
-	}
-	return activityScore{changedAt: window.CreatedAt}
-}
-
 type ProjectLocation struct {
 	Host          Host
 	Project       Project
 	ProjectWindow Window
 	Workspaces    []Workspace
 	Windows       []Window
-	LastActivity  time.Time
 	HostError     string
 }

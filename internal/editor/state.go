@@ -163,7 +163,7 @@ func validateClientState(state ClientState) error {
 	if err := validateID(state.InstanceID, "editor instance identifier"); err != nil {
 		return err
 	}
-	if len(state.Hosts) > maxStateRecords || len(state.Activities) > maxStateRecords {
+	if len(state.Hosts) > maxStateRecords {
 		return errors.New("editor state contains too many records")
 	}
 	hostIDs := map[string]bool{}
@@ -234,14 +234,6 @@ func validateClientState(state ClientState) error {
 	}
 	if state.SelectedWindowID != "" && validateID(state.SelectedWindowID, "selected window identifier") != nil {
 		return errors.New("editor state contains an invalid selected window")
-	}
-	activityIDs := map[string]bool{}
-	for _, activity := range state.Activities {
-		key := activity.HostID + "/" + activity.WindowID
-		if !hostIDs[activity.HostID] || validateID(activity.WindowID, "activity window identifier") != nil || activity.PaneHash != "" && !paneHashPattern.MatchString(activity.PaneHash) || activity.ChangedAt.IsZero() || activityIDs[key] {
-			return errors.New("editor state contains invalid activity metadata")
-		}
-		activityIDs[key] = true
 	}
 	return nil
 }

@@ -3,8 +3,6 @@ package editor
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"image"
@@ -211,18 +209,6 @@ func (s *HostService) Snapshot(ctx context.Context) (HostSnapshot, error) {
 		}
 		window.Alive = alive
 		window.Exited = !alive
-		capture, err := s.tmuxForWindow(ctx, window, "capture-pane", "-p", "-J", "-S", "-"+strconv.Itoa(activityRows), "-t", s.tmuxTarget(window))
-		if err != nil {
-			currentState, currentAlive, inspectErr := s.inspectSession(ctx, window)
-			if inspectErr != nil || currentState == sessionOwned && currentAlive {
-				return HostSnapshot{}, fmt.Errorf("capture owned terminal %q: %w", window.Name, err)
-			}
-			window.Alive = false
-			window.Exited = currentState == sessionOwned && !currentAlive
-			windows = append(windows, window)
-			continue
-		}
-		window.PaneHash = paneActivityHash(capture)
 		windows = append(windows, window)
 	}
 	snapshot.Windows = windows
@@ -2192,11 +2178,6 @@ func (s *HostService) inspectSession(ctx context.Context, window Window) (tmuxSe
 		return sessionAltered, false, nil
 	}
 	return sessionOwned, fields[5] == "0", nil
-}
-
-func paneActivityHash(capture []byte) string {
-	digest := sha256.Sum256(capture)
-	return hex.EncodeToString(digest[:])
 }
 
 func (s *HostService) managedTmuxSessionPresent(ctx context.Context, session string) (bool, error) {
