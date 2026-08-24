@@ -246,7 +246,11 @@ func (s *HostService) observePane(windowID string, capture []byte) bool {
 	now := s.now()
 	hash := sha256.Sum256(capture)
 	observation, ok := s.panes[windowID]
-	if !ok || observation.hash != hash {
+	if !ok {
+		s.panes[windowID] = paneObservation{hash: hash, changedAt: now.Add(-activityQuietAfter)}
+		return false
+	}
+	if observation.hash != hash {
 		observation = paneObservation{hash: hash, changedAt: now}
 		s.panes[windowID] = observation
 	}
