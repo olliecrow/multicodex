@@ -14,20 +14,22 @@ import (
 )
 
 const (
-	stateVersion      = 1
-	hostProtocol      = 4
-	historyLimit      = 60000
-	cleanupAfter      = 7 * 24 * time.Hour
-	maxAttachment     = 16 << 20
-	maxClientState    = 8 << 20
-	maxHostState      = 16 << 20
-	maxStateRecords   = 100_000
-	minimumWidth      = 80
-	minimumHeight     = 24
-	localHostID       = "local"
-	localHostName     = "Local"
-	defaultWindowName = "Terminal"
-	projectWindowName = "Project terminal"
+	stateVersion       = 1
+	hostProtocol       = 5
+	historyLimit       = 60000
+	activityRows       = 200
+	activityQuietAfter = 30 * time.Second
+	cleanupAfter       = 7 * 24 * time.Hour
+	maxAttachment      = 16 << 20
+	maxClientState     = 8 << 20
+	maxHostState       = 16 << 20
+	maxStateRecords    = 100_000
+	minimumWidth       = 80
+	minimumHeight      = 24
+	localHostID        = "local"
+	localHostName      = "Local"
+	defaultWindowName  = "Terminal"
+	projectWindowName  = "Project terminal"
 )
 
 var (
@@ -98,6 +100,7 @@ type Window struct {
 	Exited        bool      `json:"exited,omitempty"`
 	CreatePending bool      `json:"create_pending,omitempty"`
 	DeletePending bool      `json:"delete_pending,omitempty"`
+	RecentOutput  bool      `json:"recent_output,omitempty"`
 }
 
 type CreateWorkspaceRequest struct {

@@ -64,8 +64,8 @@ func TestSidebarShowsProjectsGroupsWorkspacesAndUsesDynamicSlots(t *testing.T) {
 		index int
 		want  sidebarSignal
 	}{
-		{0, sidebarEmpty}, {1, sidebarLive}, {2, sidebarLive},
-		{3, sidebarEmpty}, {4, sidebarLive}, {5, sidebarLive},
+		{0, sidebarEmpty}, {1, sidebarQuiet}, {2, sidebarQuiet},
+		{3, sidebarEmpty}, {4, sidebarQuiet}, {5, sidebarQuiet},
 		{6, sidebarEmpty},
 	} {
 		if got := model.rows[check.index].signal; got != check.want {
@@ -107,7 +107,8 @@ func TestSidebarStatusShowsOnlyPortableTerminalState(t *testing.T) {
 		signal sidebarSignal
 		want   string
 	}{
-		{sidebarLive, ""},
+		{sidebarRecent, "●"},
+		{sidebarQuiet, "○"},
 		{sidebarEmpty, "◇"},
 		{sidebarStopped, "×"},
 		{sidebarOffline, "?"},
@@ -122,7 +123,8 @@ func TestSidebarStatusShowsOnlyPortableTerminalState(t *testing.T) {
 		row  sidebarRow
 		want string
 	}{
-		{sidebarRow{signal: sidebarLive}, "live terminal"},
+		{sidebarRow{signal: sidebarRecent}, "output changed within 30s"},
+		{sidebarRow{signal: sidebarQuiet}, "no output change for 30s"},
 		{sidebarRow{signal: sidebarStopped}, "stopped"},
 		{sidebarRow{signal: sidebarOffline}, "host offline"},
 		{sidebarRow{signal: sidebarUnavailable}, "directory unavailable"},
@@ -133,9 +135,9 @@ func TestSidebarStatusShowsOnlyPortableTerminalState(t *testing.T) {
 			t.Fatalf("window status label = %q, want %q for %+v", got, test.want, test.row)
 		}
 	}
-	model.rows = []sidebarRow{{kind: "project", window: Window{ID: "111111111111111111111111", Alive: true}, signal: sidebarLive}}
+	model.rows = []sidebarRow{{kind: "project", window: Window{ID: "111111111111111111111111", Alive: true}, signal: sidebarQuiet}}
 	model.selectedRow = 0
-	if got := model.sidebarFooter(); !strings.Contains(got, "Project · live terminal") {
+	if got := model.sidebarFooter(); !strings.Contains(got, "Project · no output change for 30s") {
 		t.Fatalf("live project-terminal footer = %q", got)
 	}
 }
@@ -152,7 +154,8 @@ func TestSidebarSignalsSummarizeEveryManagedWindow(t *testing.T) {
 		want        sidebarSignal
 	}{
 		{name: "empty", want: sidebarEmpty},
-		{name: "live child", windows: []Window{stopped, live}, want: sidebarLive},
+		{name: "quiet live child", windows: []Window{stopped, live}, want: sidebarQuiet},
+		{name: "recent output", windows: []Window{stopped, {ID: live.ID, Alive: true, RecentOutput: true}}, want: sidebarRecent},
 		{name: "all stopped", windows: []Window{stopped}, want: sidebarStopped},
 		{name: "offline overrides liveness", offline: true, windows: []Window{live}, want: sidebarOffline},
 		{name: "unavailable workspace overrides liveness", unavailable: true, windows: []Window{live}, want: sidebarUnavailable},
@@ -434,7 +437,7 @@ func TestEditorControlsUseNavigationAndAVisibleActionMenu(t *testing.T) {
 		}
 	}
 	help := ansi.Strip(renderModal(modal{kind: "help", title: "Controls"}, helpWidth, (tuiModel{width: minimumWidth, height: minimumHeight}).bodyHeight()))
-	for _, want := range []string{"Click project/window: open", "⌘B or Ctrl+G: focus the sidebar", "⌥↑/⌥↓: previous/next terminal", "numbered terminal", "⌘⌫: delete", "scroll terminal history", "No terminal or sidebar: Ctrl+C quits", "no activity marker", "◇ none", "× stopped", "Need terminal Ctrl+G?", "[ Close ]"} {
+	for _, want := range []string{"Click project/window: open", "⌘B or Ctrl+G: focus the sidebar", "⌥↑/⌥↓: previous/next terminal", "numbered terminal", "⌘⌫: delete", "scroll terminal history", "No terminal or sidebar: Ctrl+C quits", "● recent output", "○ quiet for 30s", "◇ none", "× stopped", "Need terminal Ctrl+G?", "[ Close ]"} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("minimum-width help truncated %q:\n%s", want, help)
 		}
@@ -1140,11 +1143,12 @@ func TestSidebarStylesCommunicateStateWithoutCompetingWithSelection(t *testing.T
 		faint      bool
 		bold       bool
 	}{
-		{name: "live", row: sidebarRow{kind: "window", signal: sidebarLive}, foreground: lipgloss.Green},
+		{name: "recent", row: sidebarRow{kind: "window", signal: sidebarRecent}, foreground: lipgloss.Cyan},
+		{name: "quiet", row: sidebarRow{kind: "window", signal: sidebarQuiet}, foreground: lipgloss.BrightBlack},
 		{name: "empty project", row: sidebarRow{kind: "project", signal: sidebarEmpty}, faint: true},
 		{name: "empty workspace", row: sidebarRow{kind: "workspace", signal: sidebarEmpty}, faint: true},
 		{name: "attention", row: sidebarRow{kind: "window", signal: sidebarOffline}, foreground: lipgloss.Yellow},
-		{name: "project hierarchy", row: sidebarRow{kind: "project", signal: sidebarLive}, foreground: lipgloss.Green, bold: true},
+		{name: "project hierarchy", row: sidebarRow{kind: "project", signal: sidebarQuiet}, foreground: lipgloss.BrightBlack, bold: true},
 	}
 	for _, test := range tests {
 		style := sidebarRowStyle(test.row, false, 20)

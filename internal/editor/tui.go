@@ -125,7 +125,8 @@ type sidebarSignal uint8
 
 const (
 	sidebarEmpty sidebarSignal = iota
-	sidebarLive
+	sidebarQuiet
+	sidebarRecent
 	sidebarStopped
 	sidebarOffline
 	sidebarUnavailable
@@ -1079,8 +1080,10 @@ func sidebarRowStyle(row sidebarRow, selected bool, width int) lipgloss.Style {
 		return selectedStyle.Width(width)
 	}
 	switch row.signal {
-	case sidebarLive:
-		style = style.Foreground(lipgloss.Green)
+	case sidebarRecent:
+		style = style.Foreground(lipgloss.Cyan)
+	case sidebarQuiet:
+		style = style.Foreground(lipgloss.BrightBlack)
 	case sidebarEmpty:
 		style = style.Faint(true)
 	case sidebarStopped, sidebarOffline, sidebarUnavailable:
@@ -1251,7 +1254,7 @@ func (m tuiModel) sidebarFooter() string {
 	switch row.kind {
 	case "project":
 		if row.window.ID != "" {
-			return "Project · live terminal · Enter/click: focus · Ctrl+N: new workspace"
+			return "Project · " + m.windowStatusLabel(row) + " · Enter/click: focus · Ctrl+N: new workspace"
 		}
 		return "Project · Enter/click: open project terminal · Ctrl+N: new workspace"
 	case "workspace":
@@ -1323,8 +1326,10 @@ func (m tuiModel) sidebarTitle() string {
 
 func sidebarSignalMarker(signal sidebarSignal) string {
 	switch signal {
-	case sidebarLive:
-		return ""
+	case sidebarRecent:
+		return "●"
+	case sidebarQuiet:
+		return "○"
 	case sidebarStopped:
 		return "×"
 	case sidebarOffline:
@@ -1338,8 +1343,10 @@ func sidebarSignalMarker(signal sidebarSignal) string {
 
 func (m tuiModel) windowStatusLabel(row sidebarRow) string {
 	switch row.signal {
-	case sidebarLive:
-		return "live terminal"
+	case sidebarRecent:
+		return "output changed within 30s"
+	case sidebarQuiet:
+		return "no output change for 30s"
 	case sidebarStopped:
 		return "stopped"
 	case sidebarOffline:
@@ -1421,7 +1428,7 @@ func helpModalContent() []string {
 		"  ⌘R: rename · ⌘⌫: delete · Esc: terminal",
 		"  ⌘1–9 or ⌥1–9: open the numbered terminal",
 		"  No terminal or sidebar: Ctrl+C quits",
-		"Row: live terminal · no activity marker",
+		"Row: ● recent output · ○ quiet for 30s",
 		"     ◇ none · × stopped · ? offline · ! unavailable",
 		"Need terminal Ctrl+G? Use Actions → Send Ctrl+G.",
 		closeButtonLabel + " · Enter, ?, or Esc: close",
@@ -1540,10 +1547,17 @@ func summarizeSidebarWindows(offline, unavailable bool, windows []Window) sideba
 	if len(windows) == 0 {
 		return sidebarEmpty
 	}
+	quiet := false
 	for _, window := range windows {
 		if window.Alive {
-			return sidebarLive
+			quiet = true
+			if window.RecentOutput {
+				return sidebarRecent
+			}
 		}
+	}
+	if quiet {
+		return sidebarQuiet
 	}
 	return sidebarStopped
 }
