@@ -22,24 +22,27 @@ import (
 
 const testInstanceID = "0123456789abcdef01234567"
 
-func TestPaneObservationBecomesQuietThirtySecondsAfterLastChange(t *testing.T) {
+func TestPaneObservationTracksOnlyChangesForThirtySeconds(t *testing.T) {
 	now := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
 	service := &HostService{now: func() time.Time { return now }, panes: map[string]paneObservation{}}
 	windowID := mustID(t)
 
-	if !service.observePane(windowID, []byte("first display")) {
-		t.Fatal("first display sample was not recent")
-	}
-	now = now.Add(activityQuietAfter - time.Nanosecond)
-	if !service.observePane(windowID, []byte("first display")) {
-		t.Fatal("unchanged display became quiet before 30 seconds")
-	}
-	now = now.Add(time.Nanosecond)
 	if service.observePane(windowID, []byte("first display")) {
-		t.Fatal("unchanged display remained recent at 30 seconds")
+		t.Fatal("first display sample was guessed to be recent")
+	}
+	if service.observePane(windowID, []byte("first display")) {
+		t.Fatal("unchanged display became recent")
 	}
 	if !service.observePane(windowID, []byte("second display")) {
 		t.Fatal("changed display did not renew the signal")
+	}
+	now = now.Add(activityQuietAfter - time.Nanosecond)
+	if !service.observePane(windowID, []byte("second display")) {
+		t.Fatal("changed display became quiet before 30 seconds")
+	}
+	now = now.Add(time.Nanosecond)
+	if service.observePane(windowID, []byte("second display")) {
+		t.Fatal("unchanged display remained recent at 30 seconds")
 	}
 }
 
@@ -61,29 +64,14 @@ func TestSnapshotTracksOnlyRecentRenderedOutput(t *testing.T) {
 	}
 
 	first, err := service.Snapshot(ctx)
-	if err != nil || len(first.Windows) != 1 || !first.Windows[0].RecentOutput {
-		t.Fatalf("first snapshot = %+v, %v; want recent output", first.Windows, err)
-	}
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		now = now.Add(activityQuietAfter)
-		quiet, snapshotErr := service.Snapshot(ctx)
-		if snapshotErr != nil {
-			t.Fatal(snapshotErr)
-		}
-		if len(quiet.Windows) == 1 && !quiet.Windows[0].RecentOutput {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("pane did not become quiet after startup output settled: %+v", quiet.Windows)
-		}
-		time.Sleep(20 * time.Millisecond)
+	if err != nil || len(first.Windows) != 1 || first.Windows[0].RecentOutput {
+		t.Fatalf("first snapshot = %+v, %v; want a quiet baseline", first.Windows, err)
 	}
 
 	if _, err := service.tmux(ctx, "send-keys", "-t", service.tmuxTarget(opened.Window), "printf mce-output-change", "Enter"); err != nil {
 		t.Fatal(err)
 	}
-	deadline = time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(2 * time.Second)
 	for {
 		changed, snapshotErr := service.Snapshot(ctx)
 		if snapshotErr != nil {
@@ -219,7 +207,7 @@ func TestHostServiceGitWindowReconnectAndSafeDeletion(t *testing.T) {
 	if len(renamed.Workspaces) != 1 || renamed.Workspaces[0].Name != "Parser work" || renamed.Workspaces[0].Branch != branch || len(renamed.Windows) != 1 || renamed.Windows[0].Name != "Main terminal" {
 		t.Fatalf("display rename changed ownership identity: %+v", renamed)
 	}
-	if got := commandOutput(t, "tmux", "-L", service.socketName(), "show-options", "-g", "-v", "history-limit"); got != "60000" {
+	if got := commandOutput(t, "tmux", "-L", service.socketName(), "show-options", "-g", "-v", "history-limit"); got != "70000" {
 		t.Fatalf("history-limit = %q", got)
 	}
 	if got := commandOutput(t, "tmux", "-L", service.socketName(), "show-options", "-g", "-v", "set-clipboard"); got != "off" {
