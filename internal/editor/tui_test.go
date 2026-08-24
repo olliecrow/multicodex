@@ -320,7 +320,7 @@ func TestContextDeleteButtonsNameTheExactResource(t *testing.T) {
 }
 
 func TestWindowSlotShortcutsAreScopedToTheSidebar(t *testing.T) {
-	if got := windowSlotKey(tea.KeyPressMsg{Code: '3'}); got != 0 {
+	if got := commandWindowSlotKey(tea.KeyPressMsg{Code: '3'}); got != 0 {
 		t.Fatalf("plain terminal digit selected slot %d", got)
 	}
 	if got := sidebarWindowSlotKey(tea.KeyPressMsg{Code: '3'}); got != 3 {
@@ -335,11 +335,14 @@ func TestWindowSlotShortcutsAreScopedToTheSidebar(t *testing.T) {
 	if got := sidebarWindowSlotKey(tea.KeyPressMsg{Code: '3', Text: "3", Mod: tea.ModCapsLock}); got != 3 {
 		t.Fatalf("Caps Lock blocked sidebar slot %d", got)
 	}
-	if got := windowSlotKey(tea.KeyPressMsg{Code: '3', Mod: tea.ModSuper}); got != 3 {
+	if got := commandWindowSlotKey(tea.KeyPressMsg{Code: '3', Mod: tea.ModSuper}); got != 3 {
 		t.Fatalf("Command+3 selected slot %d", got)
 	}
-	if got := windowSlotKey(tea.KeyPressMsg{Code: '3', Mod: tea.ModAlt}); got != 3 {
-		t.Fatalf("Alt+3 selected slot %d", got)
+	if got := commandWindowSlotKey(tea.KeyPressMsg{Code: '3', Mod: tea.ModAlt}); got != 0 {
+		t.Fatalf("Option+3 stole slot %d from terminal input", got)
+	}
+	if got := commandWindowSlotKey(tea.KeyPressMsg{Code: '3', Mod: tea.ModShift | tea.ModSuper}); got != 0 {
+		t.Fatalf("Command+Shift+3 selected slot %d", got)
 	}
 }
 
@@ -520,6 +523,7 @@ func TestPortableSidebarKeysRemainTerminalInput(t *testing.T) {
 		{Code: 'a', Text: "a"}, {Code: 'd', Text: "d"}, {Code: 'h', Text: "h"},
 		{Code: 'j', Text: "j"}, {Code: 'k', Text: "k"}, {Code: 'n', Text: "n"},
 		{Code: 'r', Text: "r"}, {Code: '3', Text: "3"},
+		{Code: '3', Mod: tea.ModAlt},
 		{Code: 'd', Mod: tea.ModCtrl}, {Code: 'r', Mod: tea.ModCtrl},
 	} {
 		attachment := &Attachment{inputQueue: make(chan terminalInput, 1)}
