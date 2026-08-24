@@ -133,6 +133,11 @@ func TestSidebarStatusShowsOnlyPortableTerminalState(t *testing.T) {
 			t.Fatalf("window status label = %q, want %q for %+v", got, test.want, test.row)
 		}
 	}
+	model.rows = []sidebarRow{{kind: "project", window: Window{ID: "111111111111111111111111", Alive: true}, signal: sidebarLive}}
+	model.selectedRow = 0
+	if got := model.sidebarFooter(); !strings.Contains(got, "Project · live terminal") {
+		t.Fatalf("live project-terminal footer = %q", got)
+	}
 }
 
 func TestSidebarSignalsSummarizeEveryManagedWindow(t *testing.T) {
