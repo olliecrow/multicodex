@@ -360,6 +360,29 @@ func TestControlModeCanSendLiteralControlG(t *testing.T) {
 	}
 }
 
+func TestAddProjectSkipsRedundantSingleHostChoice(t *testing.T) {
+	local := Host{ID: localHostID, Name: localHostName}
+	model := tuiModel{manager: &Manager{state: ClientState{Hosts: []Host{local}}}}
+
+	updated, cmd := model.activateEditorChoice(choice{action: "add_project"})
+	got := updated.(tuiModel)
+	if cmd != nil || got.modal == nil || got.modal.kind != "form" || got.modal.action != "add_project" || got.modal.host.ID != local.ID {
+		t.Fatalf("single-host Add project did not open its form directly: %+v", got.modal)
+	}
+}
+
+func TestAddProjectKeepsHostChoiceForMultipleHosts(t *testing.T) {
+	local := Host{ID: localHostID, Name: localHostName}
+	remote := Host{ID: "aaaaaaaaaaaaaaaaaaaaaaaa", Name: "Remote", SSHAlias: "remote"}
+	model := tuiModel{manager: &Manager{state: ClientState{Hosts: []Host{local, remote}}}}
+
+	updated, cmd := model.activateEditorChoice(choice{action: "add_project"})
+	got := updated.(tuiModel)
+	if cmd != nil || got.modal == nil || got.modal.kind != "choice" || got.modal.action != "add_project" || len(got.modal.choices) != 2 {
+		t.Fatalf("multi-host Add project did not offer a host choice: %+v", got.modal)
+	}
+}
+
 func TestControlCQuitsOnlyWhenNoTerminalIsOpen(t *testing.T) {
 	key := tea.KeyPressMsg{Code: 'c', Text: "c", Mod: tea.ModCtrl}
 	model := tuiModel{width: minimumWidth, height: minimumHeight}
@@ -1115,11 +1138,13 @@ func TestAttachmentResizesAfterAccountBlockerClears(t *testing.T) {
 	}
 }
 
-func TestUnfocusedSidebarSelectionHasANonColorMarker(t *testing.T) {
-	model := tuiModel{width: minimumWidth, height: minimumHeight, selectedRow: 0, rows: []sidebarRow{{kind: "project", project: Project{Name: "Project"}, host: Host{Name: "Host"}}}}
-	line := strings.Split(ansi.Strip(model.renderSidebar()), "\n")[0]
-	if !strings.HasPrefix(line, "›◇ Project · Host") {
-		t.Fatalf("unfocused selection has no text marker: %q", line)
+func TestSidebarSelectionAlwaysHasANonColorMarker(t *testing.T) {
+	for _, controlMode := range []bool{false, true} {
+		model := tuiModel{width: minimumWidth, height: minimumHeight, controlMode: controlMode, selectedRow: 0, rows: []sidebarRow{{kind: "project", project: Project{Name: "Project"}, host: Host{Name: "Host"}}}}
+		line := strings.Split(ansi.Strip(model.renderSidebar()), "\n")[0]
+		if !strings.HasPrefix(line, "›◇ Project · Host") {
+			t.Fatalf("controlMode=%v selection has no text marker: %q", controlMode, line)
+		}
 	}
 }
 
@@ -1139,7 +1164,7 @@ func TestSidebarStylesCommunicateStateWithoutCompetingWithSelection(t *testing.T
 		{name: "project hierarchy", row: sidebarRow{kind: "project", signal: sidebarQuiet}, foreground: lipgloss.Green, bold: true},
 	}
 	for _, test := range tests {
-		style := sidebarRowStyle(test.row, false, false, 20)
+		style := sidebarRowStyle(test.row, false, 20)
 		if got := style.GetForeground(); test.foreground != nil && got != test.foreground {
 			t.Fatalf("%s foreground = %v, want %v", test.name, got, test.foreground)
 		}
@@ -1147,9 +1172,9 @@ func TestSidebarStylesCommunicateStateWithoutCompetingWithSelection(t *testing.T
 			t.Fatalf("%s style faint=%v bold=%v, want faint=%v bold=%v", test.name, style.GetFaint(), style.GetBold(), test.faint, test.bold)
 		}
 	}
-	selected := sidebarRowStyle(sidebarRow{kind: "workspace", signal: sidebarEmpty}, true, true, 20)
-	if selected.GetFaint() || !selected.GetBold() || !selected.GetReverse() {
-		t.Fatalf("selection did not override empty styling: faint=%v bold=%v reverse=%v", selected.GetFaint(), selected.GetBold(), selected.GetReverse())
+	selected := sidebarRowStyle(sidebarRow{kind: "workspace", signal: sidebarEmpty}, true, 20)
+	if selected.GetFaint() || !selected.GetBold() || selected.GetForeground() != lipgloss.BrightWhite || selected.GetBackground() != lipgloss.Blue {
+		t.Fatalf("selection style = faint=%v bold=%v foreground=%v background=%v", selected.GetFaint(), selected.GetBold(), selected.GetForeground(), selected.GetBackground())
 	}
 }
 
