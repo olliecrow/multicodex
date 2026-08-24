@@ -40,6 +40,7 @@ const (
 	headerTitleText     = " multicodex editor "
 	actionsButtonLabel  = "[ Actions ]"
 	helpButtonLabel     = "[ Help ]"
+	copyViewButtonLabel = "[ Copy view ]"
 	cancelButtonLabel   = "[ Cancel ]"
 	deleteButtonLabel   = "[ Delete ]"
 	closeButtonLabel    = "[ Close ]"
@@ -205,6 +206,7 @@ type tuiModel struct {
 	selectedRow       int
 	sidebarOffset     int
 	controlMode       bool
+	copyView          bool
 	refreshing        bool
 	refreshPulse      bool
 	actionBusy        bool
@@ -332,9 +334,9 @@ func (m tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 		m.ensureSelectionVisible()
 		if m.attachment != nil {
-			m.resizePending = !m.layout().fits()
+			m.resizePending = !m.copyView && !m.layout().fits()
 			if !m.resizePending {
-				_ = m.attachment.Resize(m.terminalWidth(), m.bodyHeight())
+				m.resizeAttachment()
 			}
 		}
 	case refreshMsg:
@@ -363,7 +365,7 @@ func (m tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyUsage(msg)
 		m.ensureSelectionVisible()
 		if m.attachment != nil && m.resizePending && m.layout().fits() {
-			_ = m.attachment.Resize(m.terminalWidth(), m.bodyHeight())
+			m.resizeAttachment()
 			m.resizePending = false
 		}
 	case refreshTickMsg:
@@ -416,7 +418,7 @@ func (m tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.attachment = msg.attachment
 		m.attachedHost, m.attachedID = msg.host.ID, msg.window.ID
 		if m.layout().fits() {
-			_ = m.attachment.Resize(m.terminalWidth(), m.bodyHeight())
+			m.resizeAttachment()
 			m.resizePending = false
 		} else {
 			m.resizePending = true
@@ -447,6 +449,7 @@ func (m tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		ref := windowRef{hostID: m.attachedHost, windowID: msg.windowID}
 		_ = m.attachment.Close()
 		m.attachment = nil
+		m.copyView = false
 		m.resizePending = false
 		m.attachedHost = ""
 		m.attachedID = ""
@@ -461,7 +464,7 @@ func (m tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.result.Deleted || msg.result.Reason == "window no longer exists" {
 			if msg.windowID == m.attachedID && m.attachment != nil {
 				_ = m.attachment.Close()
-				m.attachment, m.attachedID, m.attachedHost = nil, "", ""
+				m.attachment, m.attachedID, m.attachedHost, m.copyView = nil, "", "", false
 			}
 			m.message = "terminal exited and was removed"
 			if msg.err != nil {
@@ -525,6 +528,20 @@ func (m tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) handleKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.copyView {
+		if isSidebarFocusKey(key) {
+			m.copyView = false
+			m.controlMode = true
+			m.resizeAttachment()
+			return m, nil
+		}
+		if m.attachment != nil {
+			if err := m.attachment.SendKey(key); err != nil {
+				m.message = err.Error()
+			}
+		}
+		return m, nil
+	}
 	if !m.layout().fits() {
 		if key.Keystroke() == "ctrl+c" {
 			return m, tea.Quit
@@ -578,6 +595,10 @@ func (m tuiModel) handleKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	if slot := sidebarWindowSlotKey(key); slot > 0 {
 		return m.selectWindowSlot(slot)
+	}
+	if isPlainSidebarKey(key, 'c') {
+		m.openCopyView()
+		return m, nil
 	}
 	if isPlainSidebarKey(key, 'a') {
 		m.openActionMenu()
@@ -729,6 +750,12 @@ func (m tuiModel) handleModalKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 func (m tuiModel) handleMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
 	mouse := event.Mouse()
+	if m.copyView {
+		if !m.isTerminalMousePosition(mouse.X, mouse.Y) {
+			return m, nil
+		}
+		return m.forwardTerminalMouse(event)
+	}
 	layout := m.layout()
 	if !layout.fits() || mouse.X < 0 || mouse.X >= m.width || mouse.Y < 0 || mouse.Y >= m.height {
 		return m, nil
@@ -760,11 +787,13 @@ func (m tuiModel) handleMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if click.Y == 0 {
-			switch headerButtonAt(click.X) {
+			switch headerButtonAt(click.X, m.attachment != nil) {
 			case "actions":
 				m.openActionMenu()
 			case "help":
 				m.modal = &modal{kind: "help", title: "Controls"}
+			case "copy":
+				m.openCopyView()
 			}
 			return m, nil
 		}
@@ -912,6 +941,9 @@ func (m tuiModel) submitModalForm() (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) isTerminalMousePosition(x, y int) bool {
+	if m.copyView {
+		return m.attachment != nil && x >= 0 && x < m.width && y >= 0 && y < m.height
+	}
 	layout := m.layout()
 	_, _, contextOpen := m.selectedContextActions()
 	return m.attachment != nil && !contextOpen && layout.fits() && x >= layout.terminalX && x < layout.terminalX+layout.terminalWidth && y >= layout.bodyContent && y < layout.bodyContent+layout.bodyHeight
@@ -919,9 +951,13 @@ func (m tuiModel) isTerminalMousePosition(x, y int) bool {
 
 func (m tuiModel) forwardTerminalMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
 	mouse := event.Mouse()
-	layout := m.layout()
-	x, y := mouse.X-layout.terminalX, mouse.Y-layout.bodyContent
-	if !m.isTerminalMousePosition(mouse.X, mouse.Y) || x < 0 || x >= m.terminalWidth() || y < 0 || y >= m.bodyHeight() {
+	x, y := mouse.X, mouse.Y
+	width, height := m.terminalDimensions()
+	if !m.copyView {
+		layout := m.layout()
+		x, y = mouse.X-layout.terminalX, mouse.Y-layout.bodyContent
+	}
+	if !m.isTerminalMousePosition(mouse.X, mouse.Y) || x < 0 || x >= width || y < 0 || y >= height {
 		return m, nil
 	}
 	m.controlMode = false
@@ -931,7 +967,7 @@ func (m tuiModel) forwardTerminalMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) 
 	return m, nil
 }
 
-func headerButtonAt(x int) string {
+func headerButtonAt(x int, copyViewAvailable bool) string {
 	actionsStart := lipgloss.Width(headerTitleText) + 1
 	if x >= actionsStart && x < actionsStart+lipgloss.Width(actionsButtonLabel) {
 		return "actions"
@@ -939,6 +975,10 @@ func headerButtonAt(x int) string {
 	helpStart := actionsStart + lipgloss.Width(actionsButtonLabel) + 1
 	if x >= helpStart && x < helpStart+lipgloss.Width(helpButtonLabel) {
 		return "help"
+	}
+	copyStart := helpStart + lipgloss.Width(helpButtonLabel) + 1
+	if copyViewAvailable && x >= copyStart && x < copyStart+lipgloss.Width(copyViewButtonLabel) {
+		return "copy"
 	}
 	return ""
 }
@@ -969,6 +1009,15 @@ func (m tuiModel) View() tea.View {
 		view.AltScreen = true
 		return view
 	}
+	if m.copyView && m.attachment != nil {
+		view := tea.NewView(m.attachment.Render(m.width, m.height))
+		view.AltScreen = true
+		view.ReportFocus = true
+		view.MouseMode = tea.MouseModeCellMotion
+		x, y := m.attachment.CursorPosition()
+		view.Cursor = tea.NewCursor(x, y)
+		return view
+	}
 	layout := m.layout()
 	if !layout.fits() {
 		message := fmt.Sprintf(
@@ -981,6 +1030,9 @@ func (m tuiModel) View() tea.View {
 	}
 	buttonStyle := lipgloss.NewStyle().Reverse(true).Bold(true).Foreground(lipgloss.Cyan)
 	headerLeft := accentStyle.Render(headerTitleText) + " " + buttonStyle.Render(actionsButtonLabel) + " " + buttonStyle.Render(helpButtonLabel)
+	if m.attachment != nil {
+		headerLeft += " " + buttonStyle.Render(copyViewButtonLabel)
+	}
 	header := joinKeepLeft(headerLeft, accentStyle.Render(m.focusLabel()), m.width)
 	sidebar := m.renderSidebar()
 	main := m.renderMain()
@@ -1025,9 +1077,9 @@ func (m tuiModel) View() tea.View {
 
 func terminalFooter() string {
 	if os.Getenv("TERM_PROGRAM") == "iTerm.app" {
-		return "Terminal · ⌥-drag: select · ⌘C/⌘V: copy/paste · Ctrl+G: shortcuts"
+		return "Terminal · ⌥-drag: select · Ctrl+G then C: clean view · ⌘C/⌘V"
 	}
-	return "Terminal · Ctrl+G: shortcuts · ⌘B when supported"
+	return "Terminal · Ctrl+G then C: clean copy view · ⌘B when supported"
 }
 
 func (m tuiModel) renderSidebar() string {
@@ -1437,10 +1489,10 @@ func helpModalContent() []string {
 		"Mouse",
 		"  Click project/window: open · workspace: options",
 		"  Wheel: move lists or scroll terminal history",
-		"  Copy: iTerm2 ⌥-drag · others Shift-drag · ⌘C",
+		"  Copy: C clean view · ⌥/Shift-drag · ⌘C",
 		"  Paste: ⌘V · focuses the attached terminal",
 		"Keyboard · portable sidebar shortcuts",
-		"  Ctrl+G: sidebar shortcuts · Esc: terminal",
+		"  Ctrl+G: sidebar/leave copy view · Esc: terminal",
 		"  ↑/↓ or J/K: one row · Ctrl+A/E: first/last",
 		"  Enter: open/focus/create · 1–9: terminal",
 		"  A/Tab: Actions · N/Ctrl+N: create · H/?: Help",
@@ -2247,7 +2299,7 @@ func (m tuiModel) handleActionResult(msg actionResultMsg) (tea.Model, tea.Cmd) {
 		if value, ok := msg.value.(DeleteResult); ok && value.Deleted {
 			if msg.action == "delete_window" && msg.targetID == m.attachedID && m.attachment != nil {
 				_ = m.attachment.Close()
-				m.attachment, m.attachedID, m.attachedHost = nil, "", ""
+				m.attachment, m.attachedID, m.attachedHost, m.copyView = nil, "", "", false
 			}
 			m.message = "deleted, but client reconnect state was not saved: " + msg.err.Error()
 			return m, m.startRefresh()
@@ -2340,7 +2392,7 @@ func (m tuiModel) handleActionResult(msg actionResultMsg) (tea.Model, tea.Cmd) {
 			}
 			if msg.action == "delete_window" && msg.targetID == m.attachedID && m.attachment != nil {
 				_ = m.attachment.Close()
-				m.attachment, m.attachedID, m.attachedHost = nil, "", ""
+				m.attachment, m.attachedID, m.attachedHost, m.copyView = nil, "", "", false
 			}
 			if msg.action == "delete_workspace" {
 				if err := m.forgetDeletedWorkspace(msg.windowIDs); err != nil {
@@ -2382,7 +2434,7 @@ func (m *tuiModel) forgetDeletedWorkspace(windowIDs []string) error {
 	}
 	if attachedWindowDeleted && m.attachment != nil {
 		_ = m.attachment.Close()
-		m.attachment, m.attachedID, m.attachedHost = nil, "", ""
+		m.attachment, m.attachedID, m.attachedHost, m.copyView = nil, "", "", false
 	}
 	if selectedWindowDeleted {
 		return m.manager.clearSelectedWindow(selectedWindowID)
@@ -2486,6 +2538,34 @@ func (m *tuiModel) beginAction(message string) bool {
 	m.actionBusy = true
 	m.message = message
 	return true
+}
+
+func (m *tuiModel) openCopyView() {
+	if m.attachment == nil {
+		m.message = "open a terminal before using Copy view"
+		return
+	}
+	m.copyView = true
+	m.controlMode = false
+	m.message = ""
+	m.resizeAttachment()
+}
+
+func (m *tuiModel) resizeAttachment() {
+	if m.attachment == nil {
+		return
+	}
+	width, height := m.terminalDimensions()
+	if err := m.attachment.Resize(width, height); err != nil {
+		m.message = err.Error()
+	}
+}
+
+func (m tuiModel) terminalDimensions() (int, int) {
+	if m.copyView {
+		return max(1, m.width), max(1, m.height)
+	}
+	return m.terminalWidth(), m.bodyHeight()
 }
 
 func (m tuiModel) hasUsableSize() bool { return m.width >= minimumWidth && m.height >= minimumHeight }
