@@ -3,6 +3,7 @@ package editor
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -25,19 +26,8 @@ func TestStateStoreRoundTripCreatesPrivateState(t *testing.T) {
 		t.Fatal(err)
 	}
 	state.Hosts[0].Projects = []Project{{ID: projectID, Name: "Demo", Path: "/tmp/demo"}}
-	state.Activities = []Activity{{
-		HostID: localHostID, WindowID: mustID(t), PaneHash: strings.Repeat("a", 64),
-		ChangedAt: time.Now().UTC(), Updating: true,
-	}}
 	if err := store.Save(state); err != nil {
 		t.Fatal(err)
-	}
-	stored, err := os.ReadFile(store.path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(stored), "updating") {
-		t.Fatal("transient display state was persisted")
 	}
 	got, err := store.Load()
 	if err != nil {
@@ -45,9 +35,6 @@ func TestStateStoreRoundTripCreatesPrivateState(t *testing.T) {
 	}
 	if got.Hosts[0].Projects[0].Name != "Demo" {
 		t.Fatalf("round trip mismatch: %+v", got)
-	}
-	if got.Activities[0].Updating {
-		t.Fatal("transient display state survived a state reload")
 	}
 	if runtime.GOOS != "windows" {
 		for _, path := range []string{store.root, store.path} {
@@ -63,6 +50,33 @@ func TestStateStoreRoundTripCreatesPrivateState(t *testing.T) {
 				t.Fatalf("%s mode = %o, want %o", path, info.Mode().Perm(), want)
 			}
 		}
+	}
+}
+
+func TestStateStoreDropsRetiredActivityMetadata(t *testing.T) {
+	store := NewStateStore(filepath.Join(t.TempDir(), "multicodex"))
+	state, err := store.LoadOrCreate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := fmt.Sprintf(`{"version":%d,"instance_id":%q,"hosts":[{"id":"local","name":"Local"}],"activities":[{"host_id":"local","window_id":"111111111111111111111111","pane_hash":"%s","changed_at":"2026-08-24T00:00:00Z"}]}`,
+		stateVersion, state.InstanceID, strings.Repeat("a", 64))
+	if err := os.WriteFile(store.path, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := store.Load()
+	if err != nil {
+		t.Fatalf("load state from the retired activity schema: %v", err)
+	}
+	if err := store.Save(loaded); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := os.ReadFile(store.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(stored), "activities") || strings.Contains(string(stored), "pane_hash") {
+		t.Fatalf("retired activity metadata survived migration: %s", stored)
 	}
 }
 
@@ -127,7 +141,7 @@ func TestStateStoresRejectOversizedFilesAndRecordSets(t *testing.T) {
 	if _, err := client.Load(); err == nil || !strings.Contains(err.Error(), "safety limit") {
 		t.Fatalf("oversized client state error = %v", err)
 	}
-	state.Activities = make([]Activity, maxStateRecords+1)
+	state.Hosts = make([]Host, maxStateRecords+1)
 	if err := client.Save(state); err == nil || !strings.Contains(err.Error(), "too many records") {
 		t.Fatalf("oversized client records error = %v", err)
 	}

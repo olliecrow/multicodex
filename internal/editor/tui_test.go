@@ -23,7 +23,6 @@ func TestSidebarShowsProjectsGroupsWorkspacesAndUsesDynamicSlots(t *testing.T) {
 	projectBID := "333333333333333333333333"
 	windowAID := "444444444444444444444444"
 	windowBID := "555555555555555555555555"
-	recent := time.Now().Add(-time.Second)
 	state := ClientState{
 		Version: stateVersion, InstanceID: testInstanceID,
 		Hosts: []Host{
@@ -33,10 +32,6 @@ func TestSidebarShowsProjectsGroupsWorkspacesAndUsesDynamicSlots(t *testing.T) {
 				{ID: projectBID, Name: "Beta", Path: "/srv/beta"},
 				{ID: "666666666666666666666666", Name: "Empty", Path: "/srv/empty"},
 			}},
-		},
-		Activities: []Activity{
-			{HostID: hostID, WindowID: windowAID, ChangedAt: recent.Add(-time.Hour)},
-			{HostID: hostID, WindowID: windowBID, ChangedAt: recent, Updating: true},
 		},
 	}
 	host := state.Hosts[1]
@@ -56,10 +51,10 @@ func TestSidebarShowsProjectsGroupsWorkspacesAndUsesDynamicSlots(t *testing.T) {
 	if len(model.rows) != 7 {
 		t.Fatalf("rows = %+v", model.rows)
 	}
-	if model.rows[0].project.Name != "Beta" || model.rows[2].slot != 1 {
-		t.Fatalf("newest project and first dynamic slot mismatch: %+v", model.rows)
+	if model.rows[0].project.Name != "Alpha" || model.rows[2].slot != 1 {
+		t.Fatalf("first name-ordered project and dynamic slot mismatch: %+v", model.rows)
 	}
-	if model.rows[3].project.Name != "Alpha" || model.rows[5].slot != 2 {
+	if model.rows[3].project.Name != "Beta" || model.rows[5].slot != 2 {
 		t.Fatalf("second project and slot mismatch: %+v", model.rows)
 	}
 	if model.rows[6].kind != "project" || model.rows[6].project.Name != "Empty" {
@@ -69,8 +64,8 @@ func TestSidebarShowsProjectsGroupsWorkspacesAndUsesDynamicSlots(t *testing.T) {
 		index int
 		want  sidebarSignal
 	}{
-		{0, sidebarEmpty}, {1, sidebarUpdating}, {2, sidebarUpdating},
-		{3, sidebarEmpty}, {4, sidebarQuiet}, {5, sidebarQuiet},
+		{0, sidebarEmpty}, {1, sidebarLive}, {2, sidebarLive},
+		{3, sidebarEmpty}, {4, sidebarLive}, {5, sidebarLive},
 		{6, sidebarEmpty},
 	} {
 		if got := model.rows[check.index].signal; got != check.want {
@@ -106,14 +101,13 @@ func TestSidebarHasNoManagedWindowLimit(t *testing.T) {
 	}
 }
 
-func TestSidebarStatusShowsLiveOutputRunningStoppedAndFailures(t *testing.T) {
+func TestSidebarStatusShowsOnlyPortableTerminalState(t *testing.T) {
 	model := tuiModel{}
 	tests := []struct {
 		signal sidebarSignal
 		want   string
 	}{
-		{sidebarUpdating, "●"},
-		{sidebarQuiet, "○"},
+		{sidebarLive, ""},
 		{sidebarEmpty, "◇"},
 		{sidebarStopped, "×"},
 		{sidebarOffline, "?"},
@@ -128,8 +122,7 @@ func TestSidebarStatusShowsLiveOutputRunningStoppedAndFailures(t *testing.T) {
 		row  sidebarRow
 		want string
 	}{
-		{sidebarRow{signal: sidebarUpdating}, "display updating"},
-		{sidebarRow{signal: sidebarQuiet}, "live, unchanged"},
+		{sidebarRow{signal: sidebarLive}, "live terminal"},
 		{sidebarRow{signal: sidebarStopped}, "stopped"},
 		{sidebarRow{signal: sidebarOffline}, "host offline"},
 		{sidebarRow{signal: sidebarUnavailable}, "directory unavailable"},
@@ -143,20 +136,8 @@ func TestSidebarStatusShowsLiveOutputRunningStoppedAndFailures(t *testing.T) {
 }
 
 func TestSidebarSignalsSummarizeEveryManagedWindow(t *testing.T) {
-	hostID := "111111111111111111111111"
-	activeID := "222222222222222222222222"
-	quietID := "333333333333333333333333"
-	stoppedID := "444444444444444444444444"
-	futureID := "555555555555555555555555"
-	now := time.Now()
-	activities := map[string]Activity{
-		hostID + "/" + activeID: {ChangedAt: now.Add(-time.Second), Updating: true},
-		hostID + "/" + quietID:  {ChangedAt: now.Add(-time.Hour)},
-		hostID + "/" + futureID: {ChangedAt: now.Add(time.Hour)},
-	}
-	active := Window{ID: activeID, Alive: true}
-	quiet := Window{ID: quietID, Alive: true}
-	stopped := Window{ID: stoppedID}
+	live := Window{ID: "222222222222222222222222", Alive: true}
+	stopped := Window{ID: "333333333333333333333333"}
 
 	for _, test := range []struct {
 		name        string
@@ -166,15 +147,13 @@ func TestSidebarSignalsSummarizeEveryManagedWindow(t *testing.T) {
 		want        sidebarSignal
 	}{
 		{name: "empty", want: sidebarEmpty},
-		{name: "updating child", windows: []Window{quiet, active, stopped}, want: sidebarUpdating},
-		{name: "quiet live child", windows: []Window{stopped, quiet}, want: sidebarQuiet},
-		{name: "future timestamp is quiet", windows: []Window{{ID: futureID, Alive: true}}, want: sidebarQuiet},
+		{name: "live child", windows: []Window{stopped, live}, want: sidebarLive},
 		{name: "all stopped", windows: []Window{stopped}, want: sidebarStopped},
-		{name: "offline overrides activity", offline: true, windows: []Window{active}, want: sidebarOffline},
-		{name: "unavailable workspace overrides activity", unavailable: true, windows: []Window{active}, want: sidebarUnavailable},
+		{name: "offline overrides liveness", offline: true, windows: []Window{live}, want: sidebarOffline},
+		{name: "unavailable workspace overrides liveness", unavailable: true, windows: []Window{live}, want: sidebarUnavailable},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if got := summarizeSidebarWindows(test.offline, test.unavailable, hostID, test.windows, activities); got != test.want {
+			if got := summarizeSidebarWindows(test.offline, test.unavailable, test.windows); got != test.want {
 				t.Fatalf("summarized signal = %v, want %v", got, test.want)
 			}
 		})
@@ -450,7 +429,7 @@ func TestEditorControlsUseNavigationAndAVisibleActionMenu(t *testing.T) {
 		}
 	}
 	help := ansi.Strip(renderModal(modal{kind: "help", title: "Controls"}, helpWidth, (tuiModel{width: minimumWidth, height: minimumHeight}).bodyHeight()))
-	for _, want := range []string{"Click project/window: open", "⌘B or Ctrl+G: focus the sidebar", "⌥↑/⌥↓: previous/next terminal", "numbered terminal", "⌘⌫: delete", "scroll terminal history", "No terminal or sidebar: Ctrl+C quits", "● updating", "○ unchanged", "◇ no terminal", "× stopped", "Need terminal Ctrl+G?", "[ Close ]"} {
+	for _, want := range []string{"Click project/window: open", "⌘B or Ctrl+G: focus the sidebar", "⌥↑/⌥↓: previous/next terminal", "numbered terminal", "⌘⌫: delete", "scroll terminal history", "No terminal or sidebar: Ctrl+C quits", "no activity marker", "◇ none", "× stopped", "Need terminal Ctrl+G?", "[ Close ]"} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("minimum-width help truncated %q:\n%s", want, help)
 		}
@@ -1156,12 +1135,11 @@ func TestSidebarStylesCommunicateStateWithoutCompetingWithSelection(t *testing.T
 		faint      bool
 		bold       bool
 	}{
-		{name: "updating", row: sidebarRow{kind: "window", signal: sidebarUpdating}, foreground: lipgloss.Cyan},
-		{name: "live and quiet", row: sidebarRow{kind: "window", signal: sidebarQuiet}, foreground: lipgloss.Green},
+		{name: "live", row: sidebarRow{kind: "window", signal: sidebarLive}, foreground: lipgloss.Green},
 		{name: "empty project", row: sidebarRow{kind: "project", signal: sidebarEmpty}, faint: true},
 		{name: "empty workspace", row: sidebarRow{kind: "workspace", signal: sidebarEmpty}, faint: true},
 		{name: "attention", row: sidebarRow{kind: "window", signal: sidebarOffline}, foreground: lipgloss.Yellow},
-		{name: "project hierarchy", row: sidebarRow{kind: "project", signal: sidebarQuiet}, foreground: lipgloss.Green, bold: true},
+		{name: "project hierarchy", row: sidebarRow{kind: "project", signal: sidebarLive}, foreground: lipgloss.Green, bold: true},
 	}
 	for _, test := range tests {
 		style := sidebarRowStyle(test.row, false, 20)
@@ -1640,17 +1618,6 @@ func TestOfflineHostRemainsVisibleWithLastSnapshot(t *testing.T) {
 	model.rebuildRows()
 	if len(model.rows) != 2 || !model.rows[0].offline || !model.rows[1].offline {
 		t.Fatalf("offline project and workspace were not retained and marked: %+v", model.rows)
-	}
-}
-
-func TestOfflineHostKeepsSavedActivity(t *testing.T) {
-	hostID := "111111111111111111111111"
-	windowID := "222222222222222222222222"
-	changedAt := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
-	manager := &Manager{state: ClientState{Activities: []Activity{{HostID: hostID, WindowID: windowID, PaneHash: "hash", ChangedAt: changedAt}}}}
-	manager.updateActivities([]HostStatus{{Host: Host{ID: hostID}, Error: "offline"}})
-	if len(manager.state.Activities) != 1 || !manager.state.Activities[0].ChangedAt.Equal(changedAt) {
-		t.Fatalf("offline activity was discarded: %+v", manager.state.Activities)
 	}
 }
 
