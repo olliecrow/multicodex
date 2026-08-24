@@ -14,9 +14,12 @@ import (
 )
 
 const (
-	stateVersion       = 1
-	hostProtocol       = 5
-	historyLimit       = 60000
+	stateVersion = 1
+	hostProtocol = 5
+
+	// tmux drops the oldest tenth when history reaches its limit. A 70,000
+	// limit therefore keeps at least 63,000 effective rows.
+	historyLimit       = 70000
 	activityRows       = 200
 	activityQuietAfter = 30 * time.Second
 	cleanupAfter       = 7 * 24 * time.Hour
