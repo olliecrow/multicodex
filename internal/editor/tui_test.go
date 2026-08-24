@@ -319,9 +319,21 @@ func TestContextDeleteButtonsNameTheExactResource(t *testing.T) {
 	}
 }
 
-func TestWindowSlotShortcutsAreDynamicAndDoNotStealPlainTerminalDigits(t *testing.T) {
+func TestWindowSlotShortcutsAreScopedToTheSidebar(t *testing.T) {
 	if got := windowSlotKey(tea.KeyPressMsg{Code: '3'}); got != 0 {
 		t.Fatalf("plain terminal digit selected slot %d", got)
+	}
+	if got := sidebarWindowSlotKey(tea.KeyPressMsg{Code: '3'}); got != 3 {
+		t.Fatalf("plain sidebar digit selected slot %d", got)
+	}
+	if got := sidebarWindowSlotKey(tea.KeyPressMsg{Code: '3', Mod: tea.ModCtrl}); got != 0 {
+		t.Fatalf("modified sidebar digit selected slot %d", got)
+	}
+	if got := sidebarWindowSlotKey(tea.KeyPressMsg{Code: '3', Text: "#", Mod: tea.ModShift}); got != 0 {
+		t.Fatalf("shifted symbol selected slot %d", got)
+	}
+	if got := sidebarWindowSlotKey(tea.KeyPressMsg{Code: '3', Text: "3", Mod: tea.ModCapsLock}); got != 3 {
+		t.Fatalf("Caps Lock blocked sidebar slot %d", got)
 	}
 	if got := windowSlotKey(tea.KeyPressMsg{Code: '3', Mod: tea.ModSuper}); got != 3 {
 		t.Fatalf("Command+3 selected slot %d", got)
@@ -397,9 +409,10 @@ func TestEditorControlsUseNavigationAndAVisibleActionMenu(t *testing.T) {
 	model := tuiModel{width: minimumWidth, height: minimumHeight, controlMode: true}
 	updated, cmd := model.handleKey(tea.KeyPressMsg{Code: 'h', Text: "h"})
 	got := updated.(tuiModel)
-	if cmd != nil || got.modal != nil {
-		t.Fatalf("legacy mnemonic key opened an action: %+v", got)
+	if cmd != nil || got.modal == nil || got.modal.kind != "help" {
+		t.Fatalf("sidebar H did not open Help: %+v", got)
 	}
+	got.modal = nil
 	updated, cmd = got.handleKey(tea.KeyPressMsg{Code: '?', Text: "?"})
 	got = updated.(tuiModel)
 	if cmd != nil || got.modal == nil || got.modal.kind != "help" {
@@ -408,13 +421,13 @@ func TestEditorControlsUseNavigationAndAVisibleActionMenu(t *testing.T) {
 	got.modal = nil
 	updated, cmd = got.handleKey(tea.KeyPressMsg{Code: '3', Text: "3"})
 	got = updated.(tuiModel)
-	if cmd != nil || got.modal != nil {
-		t.Fatalf("plain digit opened an action: %+v", got)
+	if cmd != nil || got.message != "numbered window 3 is not visible" {
+		t.Fatalf("sidebar digit did not select its numbered window: %+v", got)
 	}
-	updated, cmd = got.handleKey(tea.KeyPressMsg{Code: tea.KeyTab})
+	updated, cmd = got.handleKey(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got = updated.(tuiModel)
 	if cmd != nil || got.modal == nil || got.modal.kind != "actions" {
-		t.Fatalf("Tab did not open the action menu: %+v", got)
+		t.Fatalf("sidebar A did not open the action menu: %+v", got)
 	}
 	if got.modal.choices[0].action != "add_project" {
 		t.Fatalf("empty editor first action = %q, want add_project", got.modal.choices[0].action)
@@ -437,9 +450,84 @@ func TestEditorControlsUseNavigationAndAVisibleActionMenu(t *testing.T) {
 		}
 	}
 	help := ansi.Strip(renderModal(modal{kind: "help", title: "Controls"}, helpWidth, (tuiModel{width: minimumWidth, height: minimumHeight}).bodyHeight()))
-	for _, want := range []string{"Click project/window: open", "⌘B or Ctrl+G: focus the sidebar", "⌥↑/⌥↓: previous/next terminal", "numbered terminal", "⌘⌫: delete", "scroll terminal history", "No terminal or sidebar: Ctrl+C quits", "● recent output", "○ quiet live terminal", "◇ none", "× stopped", "Need terminal Ctrl+G?", "[ Close ]"} {
+	for _, want := range []string{"Click project/window: open", "Ctrl+G: sidebar shortcuts", "J/K: one row", "1–9: terminal", "D/Ctrl+D: delete", "scroll terminal history", "Sidebar or no terminal: Ctrl+C quits", "● recent output", "○ quiet live terminal", "◇ none", "× stopped", "Need terminal Ctrl+G?", "[ Close ]"} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("minimum-width help truncated %q:\n%s", want, help)
+		}
+	}
+}
+
+func TestPortableSidebarShortcutsNavigateAndAct(t *testing.T) {
+	rows := []sidebarRow{
+		{kind: "project", host: Host{Name: "Local"}, project: Project{ID: "111111111111111111111111", Name: "First"}},
+		{kind: "workspace", host: Host{Name: "Local"}, project: Project{Name: "First"}, workspace: Workspace{ID: "222222222222222222222222", Name: "Work"}},
+		{kind: "window", host: Host{Name: "Local"}, project: Project{Name: "First"}, workspace: Workspace{ID: "222222222222222222222222", Name: "Work"}, window: Window{ID: "333333333333333333333333", Name: "Terminal", Alive: true}, slot: 1},
+	}
+	model := tuiModel{width: 100, height: 30, controlMode: true, rows: rows, selectedRow: 0}
+
+	updated, _ := model.handleKey(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	got := updated.(tuiModel)
+	if got.selectedRow != 1 {
+		t.Fatalf("J selected row %d", got.selectedRow)
+	}
+	updated, _ = got.handleKey(tea.KeyPressMsg{Code: 'k', Text: "k"})
+	got = updated.(tuiModel)
+	if got.selectedRow != 0 {
+		t.Fatalf("K selected row %d", got.selectedRow)
+	}
+	updated, _ = got.handleKey(tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl})
+	got = updated.(tuiModel)
+	if got.selectedRow != len(rows)-1 {
+		t.Fatalf("Ctrl+E selected row %d", got.selectedRow)
+	}
+	updated, _ = got.handleKey(tea.KeyPressMsg{Code: 'a', Mod: tea.ModCtrl})
+	got = updated.(tuiModel)
+	if got.selectedRow != 0 {
+		t.Fatalf("Ctrl+A selected row %d", got.selectedRow)
+	}
+	updated, cmd := got.handleKey(tea.KeyPressMsg{Code: '1', Text: "1"})
+	got = updated.(tuiModel)
+	if got.selectedRow != 2 || got.attachingID != rows[2].window.ID {
+		t.Fatalf("1 did not open numbered terminal: %+v, %v", got, cmd)
+	}
+	got.selectedRow = 0
+	got.attachingID = ""
+	got.queuedAttach = nil
+	got.controlMode = true
+
+	updated, cmd = got.handleKey(tea.KeyPressMsg{Code: 'n', Text: "n"})
+	got = updated.(tuiModel)
+	if cmd != nil || got.modal == nil || got.modal.action != "create_workspace" {
+		t.Fatalf("N did not create for the selected project: %+v", got)
+	}
+	got.modal = nil
+	got.selectedRow = 1
+	updated, cmd = got.handleKey(tea.KeyPressMsg{Code: 'r', Text: "r"})
+	got = updated.(tuiModel)
+	if cmd != nil || got.modal == nil || got.modal.action != "rename_workspace" {
+		t.Fatalf("R did not rename the selected workspace: %+v", got)
+	}
+	got.modal = nil
+	updated, cmd = got.handleKey(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	got = updated.(tuiModel)
+	if cmd != nil || got.modal == nil || got.modal.action != "delete_workspace" || got.modal.choice != 0 {
+		t.Fatalf("D did not open the cancel-first delete dialog: %+v", got)
+	}
+}
+
+func TestPortableSidebarKeysRemainTerminalInput(t *testing.T) {
+	for _, key := range []tea.KeyPressMsg{
+		{Code: 'a', Text: "a"}, {Code: 'd', Text: "d"}, {Code: 'h', Text: "h"},
+		{Code: 'j', Text: "j"}, {Code: 'k', Text: "k"}, {Code: 'n', Text: "n"},
+		{Code: 'r', Text: "r"}, {Code: '3', Text: "3"},
+		{Code: 'd', Mod: tea.ModCtrl}, {Code: 'r', Mod: tea.ModCtrl},
+	} {
+		attachment := &Attachment{inputQueue: make(chan terminalInput, 1)}
+		model := tuiModel{width: minimumWidth, height: minimumHeight, attachment: attachment}
+		updated, cmd := model.handleKey(key)
+		got := updated.(tuiModel)
+		if cmd != nil || got.controlMode || got.modal != nil || len(attachment.inputQueue) != 1 {
+			t.Fatalf("terminal key %q was stolen: %+v", key.Keystroke(), got)
 		}
 	}
 }
@@ -1218,7 +1306,7 @@ func TestMinimumViewportShowsTitleUsageSidebarAndFooter(t *testing.T) {
 	state := ClientState{Version: stateVersion, InstanceID: testInstanceID, Hosts: []Host{{ID: localHostID, Name: localHostName}}}
 	model := tuiModel{manager: &Manager{state: state}, width: minimumWidth, height: minimumHeight, usage: accountUsageState{accounts: []accountUsage{{label: "alpha", usedPercent: 42, available: true}}}, message: "ready"}
 	view := ansi.Strip(model.View().Content)
-	for _, want := range []string{"multicodex editor", "[ Actions ]", "[ Help ]", "Codex use · resets in", "alpha", "42% used · ?", "Projects", "No projects", "Set up your first terminal", "Click Actions or press Ctrl+G, then Tab", "Ctrl+C: quit", "original directory", "Ctrl+N", "ready", "┌", "┬", "├", "┤", "┴"} {
+	for _, want := range []string{"multicodex editor", "[ Actions ]", "[ Help ]", "Codex use · resets in", "alpha", "42% used · ?", "Projects", "No projects", "Set up your first terminal", "Click Actions or press Ctrl+G, then A", "Ctrl+C: quit", "original directory", "Press N", "ready", "┌", "┬", "├", "┤", "┴"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("missing %q in view:\n%s", want, view)
 		}
@@ -1316,13 +1404,14 @@ func TestHelpShowsEveryCoreControlAtMinimumSize(t *testing.T) {
 	view := ansi.Strip(model.View().Content)
 	for _, want := range []string{
 		"Click project/window: open · workspace: options",
-		"⌘B or Ctrl+G: focus the sidebar",
-		"⌥↑/⌥↓: previous/next terminal",
-		"⌘↑/⌘↓: first/last",
-		"⌘N/Ctrl+N: create",
-		"⌘R: rename",
-		"⌘⌫: delete",
-		"⌘1–9 or ⌥1–9: open the numbered terminal",
+		"Ctrl+G: sidebar shortcuts",
+		"↑/↓ or J/K: one row",
+		"Ctrl+A/E: first/last",
+		"N/Ctrl+N: create",
+		"R/Ctrl+R: rename",
+		"D/Ctrl+D: delete",
+		"1–9: terminal",
+		"⌘/⌥ shortcuts remain available",
 		"Copy: iTerm2 ⌥-drag",
 		"Paste: ⌘V",
 		"[ Close ]",
@@ -1386,7 +1475,7 @@ func TestITermFooterShowsNativeCopyAndPasteControls(t *testing.T) {
 		t.Fatalf("iTerm footer = %q", got)
 	}
 	t.Setenv("TERM_PROGRAM", "unknown")
-	if got := terminalFooter(); strings.Contains(got, "⌥-drag") || !strings.Contains(got, "Ctrl+G: sidebar") {
+	if got := terminalFooter(); strings.Contains(got, "⌥-drag") || !strings.Contains(got, "Ctrl+G: shortcuts") {
 		t.Fatalf("generic terminal footer = %q", got)
 	}
 }
