@@ -64,16 +64,26 @@ func TestSnapshotTracksOnlyRecentRenderedOutput(t *testing.T) {
 	if err != nil || len(first.Windows) != 1 || !first.Windows[0].RecentOutput {
 		t.Fatalf("first snapshot = %+v, %v; want recent output", first.Windows, err)
 	}
-	now = now.Add(activityQuietAfter)
-	quiet, err := service.Snapshot(ctx)
-	if err != nil || len(quiet.Windows) != 1 || quiet.Windows[0].RecentOutput {
-		t.Fatalf("quiet snapshot = %+v, %v; want no recent output", quiet.Windows, err)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		now = now.Add(activityQuietAfter)
+		quiet, snapshotErr := service.Snapshot(ctx)
+		if snapshotErr != nil {
+			t.Fatal(snapshotErr)
+		}
+		if len(quiet.Windows) == 1 && !quiet.Windows[0].RecentOutput {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("pane did not become quiet after startup output settled: %+v", quiet.Windows)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 
 	if _, err := service.tmux(ctx, "send-keys", "-t", service.tmuxTarget(opened.Window), "printf mce-output-change", "Enter"); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(2 * time.Second)
+	deadline = time.Now().Add(2 * time.Second)
 	for {
 		changed, snapshotErr := service.Snapshot(ctx)
 		if snapshotErr != nil {
