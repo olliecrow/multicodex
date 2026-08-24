@@ -453,7 +453,7 @@ func TestEditorControlsUseNavigationAndAVisibleActionMenu(t *testing.T) {
 		}
 	}
 	help := ansi.Strip(renderModal(modal{kind: "help", title: "Controls"}, helpWidth, (tuiModel{width: minimumWidth, height: minimumHeight}).bodyHeight()))
-	for _, want := range []string{"Click project/window: open", "Ctrl+G: sidebar shortcuts", "J/K: one row", "1–9: terminal", "D/Ctrl+D: delete", "scroll terminal history", "Sidebar or no terminal: Ctrl+C quits", "● recent output", "○ quiet live terminal", "◇ none", "× stopped", "Need terminal Ctrl+G?", "[ Close ]"} {
+	for _, want := range []string{"Click project/window: open", "Ctrl+G: sidebar/leave copy view", "Copy: C clean view", "J/K: one row", "1–9: terminal", "D/Ctrl+D: delete", "scroll terminal history", "Sidebar or no terminal: Ctrl+C quits", "● recent output", "○ quiet live terminal", "◇ none", "× stopped", "Need terminal Ctrl+G?", "[ Close ]"} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("minimum-width help truncated %q:\n%s", want, help)
 		}
@@ -1397,12 +1397,15 @@ func TestFramedLayoutShowsEveryAccountAcrossViewportSizes(t *testing.T) {
 
 func TestLongFocusLabelNeverHidesHeaderButtons(t *testing.T) {
 	windowID := "111111111111111111111111"
+	normal := tuiModel{width: minimumWidth, height: minimumHeight}
+	terminal := newTerminalEmulator(normal.terminalWidth(), normal.bodyHeight())
+	defer terminal.Close()
 	model := tuiModel{
-		width: minimumWidth, height: minimumHeight, attachedID: windowID,
+		width: minimumWidth, height: minimumHeight, attachedID: windowID, attachment: &Attachment{terminal: terminal},
 		rows: []sidebarRow{{kind: "window", host: Host{Name: strings.Repeat("host", 20)}, window: Window{ID: windowID, Name: strings.Repeat("window", 20)}}},
 	}
 	header := ansi.Strip(strings.Split(model.View().Content, "\n")[0])
-	for _, want := range []string{"multicodex editor", actionsButtonLabel, helpButtonLabel} {
+	for _, want := range []string{"multicodex editor", actionsButtonLabel, helpButtonLabel, copyViewButtonLabel} {
 		if !strings.Contains(header, want) {
 			t.Fatalf("long focus label hid %q: %q", want, header)
 		}
@@ -1426,7 +1429,7 @@ func TestHelpShowsEveryCoreControlAtMinimumSize(t *testing.T) {
 	view := ansi.Strip(model.View().Content)
 	for _, want := range []string{
 		"Click project/window: open · workspace: options",
-		"Ctrl+G: sidebar shortcuts",
+		"Ctrl+G: sidebar/leave copy view",
 		"↑/↓ or J/K: one row",
 		"Ctrl+A/E: first/last",
 		"N/Ctrl+N: create",
@@ -1434,7 +1437,8 @@ func TestHelpShowsEveryCoreControlAtMinimumSize(t *testing.T) {
 		"D/Ctrl+D: delete",
 		"1–9: terminal",
 		"⌘/⌥ shortcuts remain available",
-		"Copy: iTerm2 ⌥-drag",
+		"Copy: C clean view",
+		"⌥/Shift-drag · ⌘C",
 		"Paste: ⌘V",
 		"[ Close ]",
 	} {
@@ -1493,12 +1497,98 @@ func TestPasteWithoutATerminalExplainsWhatToDo(t *testing.T) {
 
 func TestITermFooterShowsNativeCopyAndPasteControls(t *testing.T) {
 	t.Setenv("TERM_PROGRAM", "iTerm.app")
-	if got := terminalFooter(); !strings.Contains(got, "⌥-drag: select") || !strings.Contains(got, "⌘C/⌘V: copy/paste") {
+	if got := terminalFooter(); !strings.Contains(got, "⌥-drag: select") || !strings.Contains(got, "Ctrl+G then C: clean view") || !strings.Contains(got, "⌘C/⌘V") {
 		t.Fatalf("iTerm footer = %q", got)
 	}
 	t.Setenv("TERM_PROGRAM", "unknown")
-	if got := terminalFooter(); strings.Contains(got, "⌥-drag") || !strings.Contains(got, "Ctrl+G: shortcuts") {
+	if got := terminalFooter(); strings.Contains(got, "⌥-drag") || !strings.Contains(got, "Ctrl+G then C: clean copy view") {
 		t.Fatalf("generic terminal footer = %q", got)
+	}
+}
+
+func TestCopyViewContainsOnlyTheFullScreenTerminal(t *testing.T) {
+	master, slave, err := pty.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer master.Close()
+	defer slave.Close()
+	normal := tuiModel{width: minimumWidth, height: minimumHeight}
+	terminal := newTerminalEmulator(normal.terminalWidth(), normal.bodyHeight())
+	defer terminal.Close()
+	_, _ = terminal.Write([]byte("FIRST PROMPT LINE\r\nSECOND PROMPT LINE"))
+	attachment := &Attachment{pty: master, terminal: terminal, inputQueue: make(chan terminalInput, 2)}
+	model := tuiModel{
+		width: minimumWidth, height: minimumHeight, attachment: attachment, controlMode: true,
+		rows: []sidebarRow{{kind: "project", project: Project{Name: "Sidebar project"}, host: Host{Name: "Host"}}},
+	}
+
+	updated, cmd := model.handleKey(tea.KeyPressMsg{Code: 'c', Text: "c"})
+	got := updated.(tuiModel)
+	if cmd != nil || !got.copyView || got.controlMode {
+		t.Fatalf("C did not open Copy view: %+v", got)
+	}
+	if terminal.Width() != minimumWidth || terminal.Height() != minimumHeight {
+		t.Fatalf("Copy view terminal = %dx%d, want %dx%d", terminal.Width(), terminal.Height(), minimumWidth, minimumHeight)
+	}
+	view := ansi.Strip(got.View().Content)
+	for _, want := range []string{"FIRST PROMPT LINE", "SECOND PROMPT LINE"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("Copy view omitted %q:\n%s", want, view)
+		}
+	}
+	for _, unwanted := range []string{"multicodex editor", "Sidebar project", "Projects", "│", "┌", "Terminal ·"} {
+		if strings.Contains(view, unwanted) {
+			t.Fatalf("Copy view contains editor chrome %q:\n%s", unwanted, view)
+		}
+	}
+	lines := strings.Split(view, "\n")
+	if len(lines) != minimumHeight {
+		t.Fatalf("Copy view has %d lines, want %d", len(lines), minimumHeight)
+	}
+	for index, line := range lines {
+		if width := lipgloss.Width(line); width != minimumWidth {
+			t.Fatalf("Copy view line %d width = %d, want %d", index, width, minimumWidth)
+		}
+	}
+
+	updated, cmd = got.handleMouse(tea.MouseClickMsg{X: 4, Y: 3, Button: tea.MouseLeft})
+	got = updated.(tuiModel)
+	if cmd != nil {
+		t.Fatal("Copy view mouse input returned an asynchronous command")
+	}
+	input := <-attachment.inputQueue
+	if input.kind != "raw" || input.text != "\x1b[<0;5;4M" {
+		t.Fatalf("Copy view mouse input = %+v", input)
+	}
+
+	updated, cmd = got.handleKey(tea.KeyPressMsg{Code: 'x', Text: "x"})
+	got = updated.(tuiModel)
+	if cmd != nil || !got.copyView {
+		t.Fatalf("Copy view did not preserve terminal input: %+v", got)
+	}
+	input = <-attachment.inputQueue
+	if input.kind != "text" || input.text != "x" {
+		t.Fatalf("Copy view terminal key = %+v", input)
+	}
+
+	updated, cmd = got.handleKey(tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
+	got = updated.(tuiModel)
+	if cmd != nil || got.copyView || !got.controlMode {
+		t.Fatalf("Ctrl+G did not leave Copy view for the sidebar: %+v", got)
+	}
+	if terminal.Width() != got.terminalWidth() || terminal.Height() != got.bodyHeight() {
+		t.Fatalf("normal terminal size was not restored: %dx%d", terminal.Width(), terminal.Height())
+	}
+}
+
+func TestCopyViewHeaderButtonIsAvailableOnlyWithATerminal(t *testing.T) {
+	copyStart := lipgloss.Width(headerTitleText) + 1 + lipgloss.Width(actionsButtonLabel) + 1 + lipgloss.Width(helpButtonLabel) + 1
+	if got := headerButtonAt(copyStart, true); got != "copy" {
+		t.Fatalf("Copy view header button = %q", got)
+	}
+	if got := headerButtonAt(copyStart, false); got != "" {
+		t.Fatalf("Copy view header button exists without a terminal: %q", got)
 	}
 }
 
