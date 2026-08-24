@@ -576,6 +576,21 @@ func (m tuiModel) handleKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if isMacOptionArrowKey(key, tea.KeyDown) {
 		return m.selectAdjacentWindow(1)
 	}
+	if slot := sidebarWindowSlotKey(key); slot > 0 {
+		return m.selectWindowSlot(slot)
+	}
+	if isPlainSidebarKey(key, 'a') {
+		m.openActionMenu()
+		return m, nil
+	}
+	if isPlainSidebarKey(key, 'k') {
+		m.moveSelection(-1)
+		return m.openSelectedWindowFromSidebar()
+	}
+	if isPlainSidebarKey(key, 'j') {
+		m.moveSelection(1)
+		return m.openSelectedWindowFromSidebar()
+	}
 	if isCreateKey(key) {
 		return m.createForSelection()
 	}
@@ -604,10 +619,10 @@ func (m tuiModel) handleKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "down":
 		m.moveSelection(1)
 		return m.openSelectedWindowFromSidebar()
-	case "home":
+	case "home", "ctrl+a":
 		m.selectSidebarEdge(false)
 		return m.openSelectedWindowFromSidebar()
-	case "end":
+	case "end", "ctrl+e":
 		m.selectSidebarEdge(true)
 		return m.openSelectedWindowFromSidebar()
 	case "pgup":
@@ -991,7 +1006,7 @@ func (m tuiModel) View() tea.View {
 	} else if m.loadingProjects() {
 		footerLeft = "Loading projects…"
 	} else if len(m.rows) == 0 {
-		footerLeft = "No projects · Click Actions or press Ctrl+G, then Tab · Ctrl+C: quit"
+		footerLeft = "No projects · Click Actions or press Ctrl+G, then A · Ctrl+C: quit"
 	} else if m.attachment == nil {
 		footerLeft = "No terminal · Enter: open or create · Ctrl+C: quit"
 	}
@@ -1010,9 +1025,9 @@ func (m tuiModel) View() tea.View {
 
 func terminalFooter() string {
 	if os.Getenv("TERM_PROGRAM") == "iTerm.app" {
-		return "Terminal · ⌥-drag: select · ⌘C/⌘V: copy/paste · Ctrl+G: sidebar"
+		return "Terminal · ⌥-drag: select · ⌘C/⌘V: copy/paste · Ctrl+G: shortcuts"
 	}
-	return "Terminal · ⌘B/Ctrl+G: sidebar · ⌘?: Help"
+	return "Terminal · Ctrl+G: shortcuts · ⌘B when supported"
 }
 
 func (m tuiModel) renderSidebar() string {
@@ -1108,7 +1123,7 @@ func (m tuiModel) renderMain() string {
 		return renderContextPanel(row, choices, width, height)
 	}
 	if m.attachment == nil {
-		text := "Set up your first terminal\n\n1. Open Actions: click [ Actions ].\n   Keyboard: ⌘B or Ctrl+G, then Tab.\n2. Add a project.\n3. Click it or press Enter.\n   Its terminal opens in the original directory.\n4. Press Ctrl+N when you need a named workspace."
+		text := "Set up your first terminal\n\n1. Open Actions: click [ Actions ].\n   Keyboard: Ctrl+G, then A.\n2. Add a project.\n3. Click it or press Enter.\n   Its terminal opens in the original directory.\n4. Press N when you need a named workspace."
 		if m.loadingProjects() {
 			text = "Loading projects\n\nConnecting to configured hosts…"
 		}
@@ -1177,7 +1192,7 @@ func renderContextPanel(row sidebarRow, choices []choice, width, height int) str
 	if row.kind == "workspace" {
 		title = "Workspace selected"
 		detail = row.workspace.Name + " · " + row.project.Name + " · " + row.host.Name
-		hint = "Enter: new terminal · ⌘R: rename · Tab: all actions"
+		hint = "Enter: new terminal · R: rename · A/Tab: all actions"
 		if row.workspace.Unavailable {
 			hint = "Directory unavailable · use Delete only when recovery is complete"
 		}
@@ -1243,7 +1258,7 @@ func (m tuiModel) loadingProjects() bool {
 func (m tuiModel) sidebarFooter() string {
 	row, ok := m.selectedSidebarRow()
 	if !ok {
-		return "Sidebar · ↑/↓: select · Tab: Actions · Esc: terminal"
+		return "Sidebar · ↑/↓ or J/K: select · A/Tab: Actions · Esc: terminal"
 	}
 	if row.offline && row.window.ID == "" {
 		reason := safeClientText(row.hostError, 100)
@@ -1258,15 +1273,15 @@ func (m tuiModel) sidebarFooter() string {
 	switch row.kind {
 	case "project":
 		if row.window.ID != "" {
-			return "Project · " + m.windowStatusLabel(row) + " · Enter/click: focus · Ctrl+N: new workspace"
+			return "Project · " + m.windowStatusLabel(row) + " · Enter/click: focus · N: new workspace"
 		}
-		return "Project · Enter/click: open project terminal · Ctrl+N: new workspace"
+		return "Project · Enter/click: open project terminal · N: new workspace"
 	case "workspace":
-		return "Workspace · Choose an option on the right · ⌘R: rename"
+		return "Workspace · Enter: new terminal · R: rename · A: Actions"
 	case "window":
-		return "Window · " + m.windowStatusLabel(row) + " · Enter: focus · ⌘N/Ctrl+N: new"
+		return "Window · " + m.windowStatusLabel(row) + " · Enter: focus · N: new · R: rename"
 	default:
-		return "Sidebar · ↑/↓: select · Tab: Actions · Esc: terminal"
+		return "Sidebar · ↑/↓ or J/K: select · A/Tab: Actions · Esc: terminal"
 	}
 }
 
@@ -1424,14 +1439,14 @@ func helpModalContent() []string {
 		"  Wheel: move lists or scroll terminal history",
 		"  Copy: iTerm2 ⌥-drag · others Shift-drag · ⌘C",
 		"  Paste: ⌘V · focuses the attached terminal",
-		"Keyboard · MacBook",
-		"  ⌘B or Ctrl+G: focus the sidebar",
-		"  ↑/↓: one row · ⌥↑/⌥↓: previous/next terminal",
-		"  ⌘↑/⌘↓: first/last · Enter: open/focus/create",
-		"  Tab: Actions · ⌘N/Ctrl+N: create · ?: Help",
-		"  ⌘R: rename · ⌘⌫: delete · Esc: terminal",
-		"  ⌘1–9 or ⌥1–9: open the numbered terminal",
-		"  No terminal or sidebar: Ctrl+C quits",
+		"Keyboard · portable sidebar shortcuts",
+		"  Ctrl+G: sidebar shortcuts · Esc: terminal",
+		"  ↑/↓ or J/K: one row · Ctrl+A/E: first/last",
+		"  Enter: open/focus/create · 1–9: terminal",
+		"  A/Tab: Actions · N/Ctrl+N: create · H/?: Help",
+		"  R/Ctrl+R: rename · D/Ctrl+D: delete",
+		"  ⌘/⌥ shortcuts remain available when supported",
+		"  Sidebar or no terminal: Ctrl+C quits",
 		"Row: ● recent output · ○ quiet live terminal",
 		"     ◇ none · × stopped · ? offline · ! unavailable",
 		"Need terminal Ctrl+G? Use Actions → Send Ctrl+G.",
@@ -2527,6 +2542,24 @@ func windowSlotKey(key tea.KeyPressMsg) int {
 	return 0
 }
 
+func sidebarWindowSlotKey(key tea.KeyPressMsg) int {
+	if key.Mod&(tea.ModCtrl|tea.ModAlt|tea.ModShift|tea.ModMeta|tea.ModHyper|tea.ModSuper) != 0 {
+		return 0
+	}
+	code := key.Code
+	if code == 0 {
+		runes := []rune(key.Text)
+		if len(runes) != 1 {
+			return 0
+		}
+		code = runes[0]
+	}
+	if code >= '1' && code <= '9' {
+		return int(code - '0')
+	}
+	return 0
+}
+
 func isSidebarFocusKey(key tea.KeyPressMsg) bool {
 	return key.Keystroke() == "ctrl+g" || isCommandRune(key, 'b')
 }
@@ -2539,19 +2572,34 @@ func isGlobalHelpKey(key tea.KeyPressMsg) bool {
 }
 
 func isSidebarHelpKey(key tea.KeyPressMsg) bool {
-	return key.Mod&(tea.ModCtrl|tea.ModAlt|tea.ModMeta|tea.ModHyper|tea.ModSuper) == 0 && (key.Code == '?' || key.Text == "?")
+	return isPlainSidebarKey(key, 'h') || key.Mod&(tea.ModCtrl|tea.ModAlt|tea.ModMeta|tea.ModHyper|tea.ModSuper) == 0 && (key.Code == '?' || key.Text == "?")
 }
 
 func isCreateKey(key tea.KeyPressMsg) bool {
-	return key.Keystroke() == "ctrl+n" || isCommandRune(key, 'n')
+	return isPlainSidebarKey(key, 'n') || key.Keystroke() == "ctrl+n" || isCommandRune(key, 'n')
 }
 
 func isRenameKey(key tea.KeyPressMsg) bool {
-	return key.Keystroke() == "f2" || isCommandRune(key, 'r')
+	return isPlainSidebarKey(key, 'r') || key.Keystroke() == "ctrl+r" || key.Keystroke() == "f2" || isCommandRune(key, 'r')
 }
 
 func isDeleteKey(key tea.KeyPressMsg) bool {
-	return hasCommandModifier(key) && (key.Code == tea.KeyBackspace || key.Code == tea.KeyDelete)
+	return isPlainSidebarKey(key, 'd') || key.Keystroke() == "ctrl+d" || hasCommandModifier(key) && (key.Code == tea.KeyBackspace || key.Code == tea.KeyDelete)
+}
+
+func isPlainSidebarKey(key tea.KeyPressMsg, want rune) bool {
+	if key.Mod&(tea.ModCtrl|tea.ModAlt|tea.ModMeta|tea.ModHyper|tea.ModSuper) != 0 {
+		return false
+	}
+	code := key.Code
+	if code == 0 {
+		runes := []rune(key.Text)
+		if len(runes) != 1 {
+			return false
+		}
+		code = runes[0]
+	}
+	return unicode.ToLower(code) == unicode.ToLower(want)
 }
 
 func isCancelKey(key tea.KeyPressMsg) bool {
