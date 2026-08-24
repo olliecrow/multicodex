@@ -1250,6 +1250,9 @@ func (m tuiModel) sidebarFooter() string {
 	}
 	switch row.kind {
 	case "project":
+		if row.window.ID != "" {
+			return "Project · live terminal · Enter/click: focus · Ctrl+N: new workspace"
+		}
 		return "Project · Enter/click: open project terminal · Ctrl+N: new workspace"
 	case "workspace":
 		return "Workspace · Choose an option on the right · ⌘R: rename"
