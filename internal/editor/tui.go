@@ -1145,7 +1145,7 @@ func (m tuiModel) renderMain() string {
 				if row.window.ID != "" && !row.window.Alive {
 					text = "Project terminal stopped\n\nThis tmux session no longer exists.\nUse Actions → Delete selected.\nThen press Enter to create a replacement."
 				} else {
-					text = "Project selected\n\nPress Enter or click the project to open its terminal in the original project directory.\nPress Ctrl+N to create a named workspace."
+					text = "Project selected\n\nPress Enter or click the project to open its terminal in the original project directory.\nPress N to create a named workspace."
 				}
 			case "workspace":
 				if row.workspace.Unavailable {
@@ -1159,7 +1159,7 @@ func (m tuiModel) renderMain() string {
 				} else if row.workspace.Unavailable {
 					text = "Workspace directory is unavailable\n\nOpen this terminal to recover its live session. Commands that use the missing directory can fail.\nUse Actions → Delete selected when finished."
 				} else {
-					text = "No terminal is open\n\nPress Enter or click the selected window to open it.\nPress Ctrl+N for another terminal."
+					text = "No terminal is open\n\nPress Enter or click the selected window to open it.\nPress N for another terminal."
 				}
 			}
 		}
@@ -1183,7 +1183,7 @@ func (m tuiModel) selectedContextActions() (sidebarRow, []choice, bool) {
 func renderContextPanel(row sidebarRow, choices []choice, width, height int) string {
 	title := "Project selected"
 	detail := row.project.Name + " · " + row.host.Name
-	hint := "Enter: open project terminal · Ctrl+N: new workspace · Tab: all actions"
+	hint := "Enter: open · N: new workspace · A/Tab: Actions"
 	manualRecovery := false
 	if row.kind == "project" && row.window.ID != "" && !row.window.Alive && !row.offline {
 		title = "Project terminal stopped"

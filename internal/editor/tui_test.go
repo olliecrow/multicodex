@@ -899,7 +899,7 @@ func TestProjectAndWorkspaceSelectionShowClickableOptions(t *testing.T) {
 	model.attachment = &Attachment{inputQueue: inputQueue}
 
 	projectView := ansi.Strip(model.View().Content)
-	for _, want := range []string{"Project options", "Project selected", "[ Open project terminal ]", "[ New workspace… ]", "[ Adopt tmux session… ]"} {
+	for _, want := range []string{"Project options", "Project selected", "[ Open project terminal ]", "[ New workspace… ]", "[ Adopt tmux session… ]", "N: new workspace", "A/Tab: Actions"} {
 		if !strings.Contains(projectView, want) {
 			t.Fatalf("project context omitted %q:\n%s", want, projectView)
 		}
@@ -934,6 +934,24 @@ func TestProjectAndWorkspaceSelectionShowClickableOptions(t *testing.T) {
 	got = updated.(tuiModel)
 	if cmd != nil || got.modal == nil || got.modal.action != "rename_workspace" || got.modal.fields[0].value != workspace.Name {
 		t.Fatalf("workspace context click did not open rename form: %+v", got.modal)
+	}
+}
+
+func TestSelectedRowsAdvertiseThePortableCreateKey(t *testing.T) {
+	project := Project{ID: "111111111111111111111111", Name: "Project"}
+	tests := []struct {
+		row  sidebarRow
+		want string
+	}{
+		{row: sidebarRow{kind: "project", project: project}, want: "Press N to create a named workspace."},
+		{row: sidebarRow{kind: "window", project: project, workspace: Workspace{Name: "Work"}, window: Window{ID: "222222222222222222222222", Name: "Terminal", Alive: true}}, want: "Press N for another terminal."},
+	}
+	for _, test := range tests {
+		model := tuiModel{width: minimumWidth, height: minimumHeight, rows: []sidebarRow{test.row}}
+		rendered := ansi.Strip(model.renderMain())
+		if !strings.Contains(rendered, test.want) || strings.Contains(rendered, "Press Ctrl+N") {
+			t.Fatalf("portable create hint is missing from %q:\n%s", test.row.kind, rendered)
+		}
 	}
 }
 
