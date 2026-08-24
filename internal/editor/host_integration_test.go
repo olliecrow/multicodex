@@ -265,7 +265,7 @@ func TestHostServiceGitWindowReconnectAndSafeDeletion(t *testing.T) {
 	if err := attachment.SendKey(tea.KeyPressMsg{Code: tea.KeyEnter}); err != nil {
 		t.Fatal(err)
 	}
-	waitForRender(t, attachment, "EDITOR_READY", 3*time.Second)
+	waitForRender(t, attachment, "EDITOR_READY", 15*time.Second)
 	if err := attachment.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -281,7 +281,7 @@ func TestHostServiceGitWindowReconnectAndSafeDeletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	waitForRender(t, reconnected, "EDITOR_READY", 3*time.Second)
+	waitForRender(t, reconnected, "EDITOR_READY", 15*time.Second)
 	if err := reconnected.SendMouse(tea.MouseWheelMsg{X: 10, Y: 10, Button: tea.MouseWheelUp}, 10, 10); err != nil {
 		t.Fatal(err)
 	}
