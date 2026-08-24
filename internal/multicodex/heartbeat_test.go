@@ -380,7 +380,7 @@ exit 1
 	}
 }
 
-func TestRunCodexHeartbeatDoesNotRetryPermanentAuthenticationFailure(t *testing.T) {
+func TestRunCodexHeartbeatDoesNotRetryRecognizedAuthenticationFailure(t *testing.T) {
 	root := t.TempDir()
 	fakeBin := filepath.Join(root, "bin")
 	if err := os.MkdirAll(fakeBin, 0o755); err != nil {
@@ -408,6 +408,26 @@ func TestRunCodexHeartbeatDoesNotRetryPermanentAuthenticationFailure(t *testing.
 	}
 	if got := strings.Count(string(data), "attempt"); got != 1 {
 		t.Fatalf("expected one attempt, got %d", got)
+	}
+}
+
+func TestHeartbeatAuthenticationFailureDoesNotClassifyUsageLimits(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "revoked", raw: `{"code":"token_revoked"}`, want: "the refresh token was rejected"},
+		{name: "expired startup token", raw: `{"code":"token_expired"}`, want: "a startup service rejected the access token as expired"},
+		{name: "weekly usage exhausted", raw: "weekly usage limit reached; retry after reset", want: ""},
+		{name: "maximum usage", raw: "you have reached your maximum usage", want: ""},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := heartbeatAuthenticationFailure(test.raw); got != test.want {
+				t.Fatalf("classification = %q, want %q", got, test.want)
+			}
+		})
 	}
 }
 

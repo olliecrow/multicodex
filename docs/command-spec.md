@@ -132,7 +132,7 @@ Multicodex intentionally has no command for changing the shared default Codex ac
 - Re-checks file-backed auth isolation before per-profile execution.
 - Uses a non-blocking lock under `MULTICODEX_HOME`.
 - Retries failed logged-in profile heartbeats with linear backoff by default.
-- Does not retry sanitized permanent authentication failures.
+- Does not retry sanitized recognized authentication failures.
 - Returns a failure when Codex reports a startup authentication error even if the core request completes successfully.
 - Prints per-profile result rows and a final summary.
 - Returns non-zero when no logged-in profiles are found or any logged-in profile heartbeat fails.
