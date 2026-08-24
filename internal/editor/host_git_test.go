@@ -214,7 +214,7 @@ func TestSnapshotKeepsOtherHostStateWhenWindowDisappearsDuringCapture(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(snapshot.Windows) != 1 || snapshot.Windows[0].Alive || snapshot.Windows[0].Exited || snapshot.Windows[0].PaneHash != "" {
+	if len(snapshot.Windows) != 1 || snapshot.Windows[0].Alive || snapshot.Windows[0].Exited {
 		t.Fatalf("disappeared window snapshot = %+v", snapshot.Windows)
 	}
 }

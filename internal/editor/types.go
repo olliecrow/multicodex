@@ -17,7 +17,6 @@ const (
 	stateVersion      = 1
 	hostProtocol      = 4
 	historyLimit      = 60000
-	activityRows      = 100
 	cleanupAfter      = 7 * 24 * time.Hour
 	maxAttachment     = 16 << 20
 	maxClientState    = 8 << 20
@@ -33,7 +32,6 @@ const (
 
 var (
 	idPattern       = regexp.MustCompile(`^[a-f0-9]{24}$`)
-	paneHashPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
 	gitOIDPattern   = regexp.MustCompile(`^[a-f0-9]{40,64}$`)
 	tmuxIDPattern   = regexp.MustCompile(`^\$[0-9]+$`)
 	tmuxNamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,80}$`)
@@ -41,11 +39,10 @@ var (
 )
 
 type ClientState struct {
-	Version          int        `json:"version"`
-	InstanceID       string     `json:"instance_id"`
-	Hosts            []Host     `json:"hosts"`
-	SelectedWindowID string     `json:"selected_window_id,omitempty"`
-	Activities       []Activity `json:"activities,omitempty"`
+	Version          int    `json:"version"`
+	InstanceID       string `json:"instance_id"`
+	Hosts            []Host `json:"hosts"`
+	SelectedWindowID string `json:"selected_window_id,omitempty"`
 }
 
 type Host struct {
@@ -59,14 +56,6 @@ type Project struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 	Path string `json:"path"`
-}
-
-type Activity struct {
-	HostID    string    `json:"host_id"`
-	WindowID  string    `json:"window_id"`
-	PaneHash  string    `json:"pane_hash,omitempty"`
-	ChangedAt time.Time `json:"changed_at"`
-	Updating  bool      `json:"-"`
 }
 
 type HostSnapshot struct {
@@ -105,7 +94,6 @@ type Window struct {
 	Adopted       bool      `json:"adopted,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
 	LastUsedAt    time.Time `json:"last_used_at"`
-	PaneHash      string    `json:"pane_hash,omitempty"`
 	Alive         bool      `json:"alive"`
 	Exited        bool      `json:"exited,omitempty"`
 	CreatePending bool      `json:"create_pending,omitempty"`

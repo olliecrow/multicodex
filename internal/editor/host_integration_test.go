@@ -22,74 +22,6 @@ import (
 
 const testInstanceID = "0123456789abcdef01234567"
 
-func TestPaneActivityHashUsesOnlyRenderedTerminalContent(t *testing.T) {
-	capture := []byte("the same repeated terminal rows")
-	first := paneActivityHash(capture)
-	if first != paneActivityHash(capture) {
-		t.Fatal("stable pane state changed its activity hash")
-	}
-	if first == paneActivityHash([]byte("different terminal rows")) {
-		t.Fatal("different rendered terminal content kept the old hash")
-	}
-}
-
-func TestSnapshotIgnoresRepeatedOutputThatLeavesTheDisplayUnchanged(t *testing.T) {
-	requireCommands(t, "tmux")
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	service, err := NewHostService(privateTestHome(t), mustID(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer killTestServer(service)
-	opened, err := service.OpenProjectWindow(ctx, OpenProjectWindowRequest{ProjectID: mustID(t), ProjectPath: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	command := "i=0; while [ $i -lt 200 ]; do printf 'same output\\n'; i=$((i+1)); done; while :; do printf 'same output\\n'; sleep 1; done"
-	if _, err := service.tmux(ctx, "respawn-pane", "-k", "-t", service.tmuxTarget(opened.Window), command); err != nil {
-		t.Fatal(err)
-	}
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		history, err := service.tmux(ctx, "display-message", "-p", "-t", service.tmuxTarget(opened.Window), "#{history_size}")
-		if err != nil {
-			t.Fatal(err)
-		}
-		size, err := strconv.Atoi(strings.TrimSpace(string(history)))
-		if err == nil && size >= 150 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("repeated terminal output did not fill the sampled history")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	first, err := service.Snapshot(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	firstCapture, err := service.tmux(ctx, "capture-pane", "-p", "-J", "-S", "-"+strconv.Itoa(activityRows), "-t", service.tmuxTarget(opened.Window))
-	if err != nil {
-		t.Fatal(err)
-	}
-	time.Sleep(2100 * time.Millisecond)
-	second, err := service.Snapshot(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	secondCapture, err := service.tmux(ctx, "capture-pane", "-p", "-J", "-S", "-"+strconv.Itoa(activityRows), "-t", service.tmuxTarget(opened.Window))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(firstCapture, secondCapture) {
-		t.Fatal("repeated-output fixture did not keep the sampled terminal rows identical")
-	}
-	if len(first.Windows) != 1 || len(second.Windows) != 1 || first.Windows[0].PaneHash != second.Windows[0].PaneHash {
-		t.Fatalf("unchanged rendered output changed the pane hash: first=%+v second=%+v", first.Windows, second.Windows)
-	}
-}
-
 func TestProjectTerminalUsesOriginalDirectoryAndIsIdempotent(t *testing.T) {
 	requireCommands(t, "git", "tmux")
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -275,7 +207,7 @@ func TestHostServiceGitWindowReconnectAndSafeDeletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(snapshot.Windows) != 1 || !snapshot.Windows[0].Alive || snapshot.Windows[0].PaneHash == "" {
+	if len(snapshot.Windows) != 1 || !snapshot.Windows[0].Alive {
 		t.Fatalf("unexpected snapshot after detach: %+v", snapshot)
 	}
 	reconnected, err := attachWindowPTY(ctx, Host{ID: localHostID, Name: localHostName}, "", service.store.instanceID, window, 80, 20)
@@ -782,7 +714,7 @@ func TestSnapshotKeepsAWindowVisibleWhenItsWorkspaceDirectoryIsMissing(t *testin
 	if len(snapshot.Workspaces) != 1 || !snapshot.Workspaces[0].Unavailable {
 		t.Fatalf("missing workspace was not reported as unavailable: %+v", snapshot.Workspaces)
 	}
-	if len(snapshot.Windows) != 1 || snapshot.Windows[0].ID != window.ID || !snapshot.Windows[0].Alive || snapshot.Windows[0].PaneHash == "" {
+	if len(snapshot.Windows) != 1 || snapshot.Windows[0].ID != window.ID || !snapshot.Windows[0].Alive {
 		t.Fatalf("live terminal was not retained for recovery: %+v", snapshot.Windows)
 	}
 	if result, err := service.DeleteWorkspace(ctx, DeleteRequest{ID: workspace.ID, Force: true}); err != nil || !result.Deleted {
