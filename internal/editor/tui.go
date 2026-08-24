@@ -53,10 +53,11 @@ const (
 )
 
 var (
-	infoStyle    = lipgloss.NewStyle().Foreground(lipgloss.Cyan)
-	accentStyle  = infoStyle.Bold(true)
-	borderStyle  = lipgloss.NewStyle().Foreground(lipgloss.BrightBlack)
-	warningStyle = lipgloss.NewStyle().Foreground(lipgloss.Yellow)
+	infoStyle     = lipgloss.NewStyle().Foreground(lipgloss.Cyan)
+	accentStyle   = infoStyle.Bold(true)
+	borderStyle   = lipgloss.NewStyle().Foreground(lipgloss.BrightBlack)
+	warningStyle  = lipgloss.NewStyle().Foreground(lipgloss.Yellow)
+	selectedStyle = lipgloss.NewStyle().Foreground(lipgloss.BrightWhite).Background(lipgloss.Blue).Bold(true)
 )
 
 type attachResultMsg struct {
@@ -1043,11 +1044,11 @@ func (m tuiModel) renderSidebar() string {
 			label = "    " + slot + marker + " " + row.window.Name
 		}
 		prefix := " "
-		if index == m.selectedRow && !m.controlMode {
+		if index == m.selectedRow {
 			prefix = "›"
 		}
 		label = fitPlain(prefix+label, width)
-		style := sidebarRowStyle(row, index == m.selectedRow, m.controlMode, width)
+		style := sidebarRowStyle(row, index == m.selectedRow, width)
 		lines = append(lines, style.Render(label))
 	}
 	if len(lines) == 0 {
@@ -1066,13 +1067,10 @@ func (m tuiModel) renderSidebar() string {
 	return strings.Join(lines, "\n")
 }
 
-func sidebarRowStyle(row sidebarRow, selected, controlMode bool, width int) lipgloss.Style {
+func sidebarRowStyle(row sidebarRow, selected bool, width int) lipgloss.Style {
 	style := lipgloss.NewStyle().Width(width)
-	if selected && controlMode {
-		return style.Reverse(true).Bold(true)
-	}
 	if selected {
-		return style.Foreground(lipgloss.Cyan).Bold(true)
+		return selectedStyle.Width(width)
 	}
 	switch row.signal {
 	case sidebarActive:
@@ -1939,7 +1937,7 @@ func (m tuiModel) activateEditorChoice(selected choice) (tea.Model, tea.Cmd) {
 	case "new_workspace":
 		m.openProjectChoice()
 	case "add_project":
-		m.openHostChoice("add_project", "Choose a host for the new project")
+		m.openAddProject()
 	case "add_host":
 		m.modal = &modal{kind: "form", action: "add_host", title: "Add SSH host", fields: []formField{{label: "Display name", limit: 80}, {label: "SSH alias from ~/.ssh/config", limit: 128}}}
 	case "list_tmux_sessions":
@@ -1996,13 +1994,22 @@ func (m tuiModel) activateEditorChoice(selected choice) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *tuiModel) openHostChoice(action, title string) {
-	state := m.manager.State()
-	choices := make([]choice, 0, len(state.Hosts))
-	for _, host := range state.Hosts {
+func (m *tuiModel) openAddProject() {
+	hosts := m.manager.State().Hosts
+	if len(hosts) == 1 {
+		m.openAddProjectForm(hosts[0])
+		return
+	}
+	choices := make([]choice, 0, len(hosts))
+	for _, host := range hosts {
 		choices = append(choices, choice{label: host.Name, host: host})
 	}
-	m.modal = &modal{kind: "choice", action: action, title: title, choices: choices}
+	m.modal = &modal{kind: "choice", action: "add_project", title: "Choose a host for the new project", choices: choices}
+}
+
+func (m *tuiModel) openAddProjectForm(host Host) {
+	m.modal = &modal{kind: "form", action: "add_project", title: "Add project — " + host.Name, host: host,
+		fields: []formField{{label: "Project name", limit: 80}, {label: "Absolute host directory path", limit: 4096}}}
 }
 
 func (m *tuiModel) openProjectChoice() {
@@ -2111,8 +2118,7 @@ func (m tuiModel) acceptChoice() (tea.Model, tea.Cmd) {
 	action := m.modal.action
 	switch action {
 	case "add_project":
-		m.modal = &modal{kind: "form", action: action, title: "Add project — " + selected.host.Name, host: selected.host,
-			fields: []formField{{label: "Project name", limit: 80}, {label: "Absolute host directory path", limit: 4096}}}
+		m.openAddProjectForm(selected.host)
 	case "create_workspace":
 		m.openWorkspaceName(selected.host, selected.project)
 	case "create_window":
