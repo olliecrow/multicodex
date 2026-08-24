@@ -1083,11 +1083,15 @@ func sidebarRowStyle(row sidebarRow, selected bool, width int) lipgloss.Style {
 	case sidebarRecent:
 		style = style.Foreground(lipgloss.Cyan)
 	case sidebarQuiet:
-		style = style.Foreground(lipgloss.BrightBlack)
+		style = style.Foreground(lipgloss.BrightGreen)
 	case sidebarEmpty:
 		style = style.Faint(true)
-	case sidebarStopped, sidebarOffline, sidebarUnavailable:
+	case sidebarStopped:
+		style = style.Foreground(lipgloss.BrightRed)
+	case sidebarOffline:
 		style = style.Foreground(lipgloss.Yellow)
+	case sidebarUnavailable:
+		style = style.Foreground(lipgloss.BrightMagenta)
 	}
 	if row.kind == "project" && row.signal != sidebarEmpty {
 		style = style.Bold(true)
@@ -1428,7 +1432,7 @@ func helpModalContent() []string {
 		"  ⌘R: rename · ⌘⌫: delete · Esc: terminal",
 		"  ⌘1–9 or ⌥1–9: open the numbered terminal",
 		"  No terminal or sidebar: Ctrl+C quits",
-		"Row: ● recent output · ○ quiet for 30s",
+		"Row: ● recent output · ○ quiet live terminal",
 		"     ◇ none · × stopped · ? offline · ! unavailable",
 		"Need terminal Ctrl+G? Use Actions → Send Ctrl+G.",
 		closeButtonLabel + " · Enter, ?, or Esc: close",
