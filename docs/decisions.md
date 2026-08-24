@@ -40,8 +40,8 @@ References: `internal/multicodex/app.go`, `internal/multicodex/reconcile.go`, `d
 
 Decision: Keep heartbeat profile-scoped, minimal, ephemeral, and cron-safe.
 Context: A keepalive must verify logged-in profiles without persisting a session, touching a workspace, overlapping another run, or exposing subprocess output.
-Rationale: A fixed read-only `hello`, bounded retry, and local non-blocking lock provide useful liveness with a narrow side-effect and reporting surface.
-Trade-offs: Each logged-in profile sends a real request, and redacted failures provide less provider detail.
+Rationale: A fixed read-only `hello`, bounded retry, local non-blocking lock, and sanitized startup-authentication detection provide useful liveness with a narrow side-effect and reporting surface. A successful core response is not healthy when Codex also reports that a startup service rejected its credential. Permanent authentication failures stop without retry so the probe does not repeat a harmful refresh path.
+Trade-offs: Each logged-in profile sends a real request, and redacted failures provide less provider detail. A provider defect limited to an optional startup service can fail heartbeat even while core requests remain usable.
 References: `internal/multicodex/heartbeat.go`, `docs/command-spec.md`
 
 Decision: Integrate subscription monitoring under `multicodex monitor`.
