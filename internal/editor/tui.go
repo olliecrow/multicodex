@@ -49,7 +49,6 @@ const (
 	contextInsetX       = 1
 	contextInsetY       = 1
 	contextActionRow    = 4
-	recentOutputWindow  = 15 * time.Second
 )
 
 var (
@@ -127,7 +126,7 @@ type sidebarSignal uint8
 const (
 	sidebarEmpty sidebarSignal = iota
 	sidebarQuiet
-	sidebarActive
+	sidebarUpdating
 	sidebarStopped
 	sidebarOffline
 	sidebarUnavailable
@@ -1073,7 +1072,7 @@ func sidebarRowStyle(row sidebarRow, selected bool, width int) lipgloss.Style {
 		return selectedStyle.Width(width)
 	}
 	switch row.signal {
-	case sidebarActive:
+	case sidebarUpdating:
 		style = style.Foreground(lipgloss.Cyan)
 	case sidebarQuiet:
 		style = style.Foreground(lipgloss.Green)
@@ -1318,7 +1317,7 @@ func sidebarSignalMarker(signal sidebarSignal) string {
 	switch signal {
 	case sidebarQuiet:
 		return "○"
-	case sidebarActive:
+	case sidebarUpdating:
 		return "●"
 	case sidebarStopped:
 		return "×"
@@ -1333,10 +1332,10 @@ func sidebarSignalMarker(signal sidebarSignal) string {
 
 func (m tuiModel) windowStatusLabel(row sidebarRow) string {
 	switch row.signal {
-	case sidebarActive:
-		return "output changing"
+	case sidebarUpdating:
+		return "display updating"
 	case sidebarQuiet:
-		return "live, quiet"
+		return "live, unchanged"
 	case sidebarStopped:
 		return "stopped"
 	case sidebarOffline:
@@ -1418,7 +1417,7 @@ func helpModalContent() []string {
 		"  ⌘R: rename · ⌘⌫: delete · Esc: terminal",
 		"  ⌘1–9 or ⌥1–9: open the numbered terminal",
 		"  No terminal or sidebar: Ctrl+C quits",
-		"Row: ● changing · ○ quiet · ◇ no terminal",
+		"Row: ● updating · ○ unchanged · ◇ no terminal",
 		"     × stopped · ? offline · ! unavailable",
 		"Need terminal Ctrl+G? Use Actions → Send Ctrl+G.",
 		closeButtonLabel + " · Enter, ?, or Esc: close",
@@ -1465,11 +1464,10 @@ func modalChoiceButtonLine() string {
 
 func (m *tuiModel) rebuildRows() {
 	state := m.manager.State()
-	now := time.Now()
-	locations := sortedProjectsByActivity(state, m.statuses, now)
-	activities := make(map[string]time.Time, len(state.Activities))
+	locations := sortedProjectsByActivity(state, m.statuses)
+	activities := make(map[string]Activity, len(state.Activities))
 	for _, activity := range state.Activities {
-		activities[activity.HostID+"/"+activity.WindowID] = activity.ChangedAt
+		activities[activity.HostID+"/"+activity.WindowID] = activity
 	}
 	selectedID := ""
 	if m.selectedRow >= 0 && m.selectedRow < len(m.rows) {
@@ -1483,7 +1481,7 @@ func (m *tuiModel) rebuildRows() {
 			projectWindows = append(projectWindows, location.ProjectWindow)
 		}
 		projectRow := sidebarRow{kind: "project", host: location.Host, project: location.Project, window: location.ProjectWindow, offline: location.HostError != "", hostError: location.HostError}
-		projectRow.signal = summarizeSidebarWindows(projectRow.offline, false, location.Host.ID, projectWindows, activities, now)
+		projectRow.signal = summarizeSidebarWindows(projectRow.offline, false, location.Host.ID, projectWindows, activities)
 		if projectRow.window.ID != "" {
 			slot++
 			projectRow.slot = slot
@@ -1497,12 +1495,12 @@ func (m *tuiModel) rebuildRows() {
 				}
 			}
 			workspaceRow := sidebarRow{kind: "workspace", host: location.Host, project: location.Project, workspace: workspace, offline: location.HostError != "", hostError: location.HostError}
-			workspaceRow.signal = summarizeSidebarWindows(workspaceRow.offline, workspace.Unavailable, location.Host.ID, workspaceWindows, activities, now)
+			workspaceRow.signal = summarizeSidebarWindows(workspaceRow.offline, workspace.Unavailable, location.Host.ID, workspaceWindows, activities)
 			rows = append(rows, workspaceRow)
 			for _, window := range workspaceWindows {
 				slot++
 				windowRow := sidebarRow{kind: "window", host: location.Host, project: location.Project, workspace: workspace, window: window, slot: slot, offline: location.HostError != "", hostError: location.HostError}
-				windowRow.signal = summarizeSidebarWindows(windowRow.offline, false, location.Host.ID, []Window{window}, activities, now)
+				windowRow.signal = summarizeSidebarWindows(windowRow.offline, false, location.Host.ID, []Window{window}, activities)
 				rows = append(rows, windowRow)
 			}
 		}
@@ -1532,7 +1530,7 @@ func (m *tuiModel) rebuildRows() {
 	m.ensureSelectionVisible()
 }
 
-func summarizeSidebarWindows(offline, unavailable bool, hostID string, windows []Window, activities map[string]time.Time, now time.Time) sidebarSignal {
+func summarizeSidebarWindows(offline, unavailable bool, hostID string, windows []Window, activities map[string]Activity) sidebarSignal {
 	if offline {
 		return sidebarOffline
 	}
@@ -1548,9 +1546,8 @@ func summarizeSidebarWindows(offline, unavailable bool, hostID string, windows [
 			continue
 		}
 		quiet = true
-		changed := activities[hostID+"/"+window.ID]
-		if isRecentActivity(changed, now) {
-			return sidebarActive
+		if activities[hostID+"/"+window.ID].Updating {
+			return sidebarUpdating
 		}
 	}
 	if quiet {

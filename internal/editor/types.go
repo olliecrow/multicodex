@@ -15,7 +15,7 @@ import (
 
 const (
 	stateVersion      = 1
-	hostProtocol      = 3
+	hostProtocol      = 4
 	historyLimit      = 60000
 	activityRows      = 100
 	cleanupAfter      = 7 * 24 * time.Hour
@@ -66,6 +66,7 @@ type Activity struct {
 	WindowID  string    `json:"window_id"`
 	PaneHash  string    `json:"pane_hash,omitempty"`
 	ChangedAt time.Time `json:"changed_at"`
+	Updating  bool      `json:"-"`
 }
 
 type HostSnapshot struct {

@@ -41,7 +41,7 @@ func TestActivityOrderingKeepsPopulatedProjectsFirst(t *testing.T) {
 		{HostID: hostID, WindowID: newWindowID, ChangedAt: newActivity},
 	}}
 
-	locations := sortedProjectsByActivity(state, []HostStatus{status}, time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC))
+	locations := sortedProjectsByActivity(state, []HostStatus{status})
 	got := []string{locations[0].Project.Name, locations[1].Project.Name, locations[2].Project.Name}
 	want := []string{"Z newer", "B older", "A empty"}
 	if !reflect.DeepEqual(got, want) {
@@ -65,23 +65,22 @@ func TestActivityOrderingKeepsChangingProjectsStable(t *testing.T) {
 		{ID: bravoWindowID, ProjectID: bravoProjectID, Name: projectWindowName},
 	}}}
 	state := ClientState{Activities: []Activity{
-		{HostID: hostID, WindowID: alphaWindowID, ChangedAt: now.Add(-10 * time.Second)},
-		{HostID: hostID, WindowID: bravoWindowID, ChangedAt: now.Add(-time.Second)},
+		{HostID: hostID, WindowID: alphaWindowID, ChangedAt: now.Add(-10 * time.Second), Updating: true},
+		{HostID: hostID, WindowID: bravoWindowID, ChangedAt: now.Add(-time.Second), Updating: true},
 	}}
 
-	locations := sortedProjectsByActivity(state, []HostStatus{status}, now)
+	locations := sortedProjectsByActivity(state, []HostStatus{status})
 	if got := []string{locations[0].Project.Name, locations[1].Project.Name}; !reflect.DeepEqual(got, []string{"Alpha", "Bravo"}) {
 		t.Fatalf("changing project order = %v, want stable name order", got)
 	}
 	state.Activities[0].ChangedAt = now.Add(-time.Second)
 	state.Activities[1].ChangedAt = now.Add(-10 * time.Second)
-	locations = sortedProjectsByActivity(state, []HostStatus{status}, now)
+	locations = sortedProjectsByActivity(state, []HostStatus{status})
 	if got := []string{locations[0].Project.Name, locations[1].Project.Name}; !reflect.DeepEqual(got, []string{"Alpha", "Bravo"}) {
 		t.Fatalf("changed output timestamps reordered changing projects: %v", got)
 	}
-	state.Activities[0].ChangedAt = now.Add(-16 * time.Second)
-	state.Activities[1].ChangedAt = now.Add(-time.Second)
-	locations = sortedProjectsByActivity(state, []HostStatus{status}, now)
+	state.Activities[0].Updating = false
+	locations = sortedProjectsByActivity(state, []HostStatus{status})
 	if got := []string{locations[0].Project.Name, locations[1].Project.Name}; !reflect.DeepEqual(got, []string{"Bravo", "Alpha"}) {
 		t.Fatalf("changing and quiet project order = %v, want changing first", got)
 	}
@@ -111,12 +110,12 @@ func TestActivityOrderingKeepsChangingWorkspacesAndWindowsStable(t *testing.T) {
 		},
 	}
 	state := ClientState{Activities: []Activity{
-		{HostID: hostID, WindowID: alphaWindowID, ChangedAt: now.Add(-2 * time.Second)},
-		{HostID: hostID, WindowID: charlieWindowID, ChangedAt: now.Add(-time.Second)},
-		{HostID: hostID, WindowID: bravoWindowID, ChangedAt: now.Add(-time.Second)},
+		{HostID: hostID, WindowID: alphaWindowID, ChangedAt: now.Add(-2 * time.Second), Updating: true},
+		{HostID: hostID, WindowID: charlieWindowID, ChangedAt: now.Add(-time.Second), Updating: true},
+		{HostID: hostID, WindowID: bravoWindowID, ChangedAt: now.Add(-time.Second), Updating: true},
 	}}
 
-	locations := sortedProjectsByActivity(state, []HostStatus{status}, now)
+	locations := sortedProjectsByActivity(state, []HostStatus{status})
 	if got := []string{locations[0].Workspaces[0].Name, locations[0].Workspaces[1].Name}; !reflect.DeepEqual(got, []string{"Alpha", "Bravo"}) {
 		t.Fatalf("changing workspace order = %v, want stable name order", got)
 	}
@@ -136,7 +135,7 @@ func TestActivityOrderingIncludesProjectTerminal(t *testing.T) {
 		{ID: projectID, Name: "Z active", Path: "/srv/active"},
 	}}
 	window := Window{ID: windowID, ProjectID: projectID, ProjectPath: "/srv/active", Name: projectWindowName, LastUsedAt: changed}
-	locations := sortedProjectsByActivity(ClientState{}, []HostStatus{{Host: host, Snapshot: HostSnapshot{Windows: []Window{window}}}}, time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC))
+	locations := sortedProjectsByActivity(ClientState{}, []HostStatus{{Host: host, Snapshot: HostSnapshot{Windows: []Window{window}}}})
 	if len(locations) != 2 || locations[0].Project.ID != projectID || locations[0].ProjectWindow.ID != windowID || !locations[0].LastActivity.Equal(changed) {
 		t.Fatalf("project terminal ordering = %+v", locations)
 	}
@@ -175,7 +174,7 @@ func TestActivityOrderingSortsWorkspacesAndWindowsWithoutMutatingSnapshot(t *tes
 		{HostID: hostID, WindowID: newestWindowID, ChangedAt: base.Add(2 * time.Hour)},
 	}}
 
-	locations := sortedProjectsByActivity(state, []HostStatus{status}, time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC))
+	locations := sortedProjectsByActivity(state, []HostStatus{status})
 	if len(locations) != 1 {
 		t.Fatalf("locations = %+v", locations)
 	}
@@ -211,7 +210,7 @@ func TestActivityOrderingPlacesProjectsWithTerminalsBeforeWorkspaceOnlyProjects(
 		Windows:    []Window{{ID: windowID, ProjectID: terminalProjectID, Name: projectWindowName, LastUsedAt: old}},
 	}}
 
-	locations := sortedProjectsByActivity(ClientState{}, []HostStatus{status}, time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC))
+	locations := sortedProjectsByActivity(ClientState{}, []HostStatus{status})
 	if len(locations) != 2 || locations[0].Project.ID != terminalProjectID || locations[1].Project.ID != workspaceProjectID {
 		t.Fatalf("project tiers = %+v", locations)
 	}
@@ -249,11 +248,24 @@ func TestActivityMonitoringUpdatesEveryWindowWithoutOpeningIt(t *testing.T) {
 	if !activities[changingID].ChangedAt.After(old) || activities[changingID].PaneHash != strings.Repeat("c", 64) {
 		t.Fatalf("changing window was not updated: %+v", activities[changingID])
 	}
-	if !activities[quietID].ChangedAt.Equal(old) {
+	if !activities[changingID].Updating {
+		t.Fatalf("latest display change was not reported: %+v", activities[changingID])
+	}
+	if !activities[quietID].ChangedAt.Equal(old) || activities[quietID].Updating {
 		t.Fatalf("quiet window was reported as changing: %+v", activities[quietID])
 	}
-	if activities[newID].ChangedAt.IsZero() || activities[newID].PaneHash != strings.Repeat("d", 64) {
+	if activities[newID].ChangedAt.IsZero() || activities[newID].PaneHash != strings.Repeat("d", 64) || activities[newID].Updating {
 		t.Fatalf("new unselected window was not monitored: %+v", activities[newID])
+	}
+	manager.updateActivities([]HostStatus{{Host: Host{ID: hostID}, Snapshot: HostSnapshot{Windows: []Window{
+		{ID: changingID, PaneHash: strings.Repeat("c", 64)},
+		{ID: quietID, PaneHash: strings.Repeat("b", 64)},
+		{ID: newID, PaneHash: strings.Repeat("d", 64)},
+	}}}})
+	for _, activity := range manager.state.Activities {
+		if activity.Updating {
+			t.Fatalf("unchanged second snapshot remained active: %+v", activity)
+		}
 	}
 }
 
