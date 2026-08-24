@@ -22,18 +22,18 @@ import (
 
 const testInstanceID = "0123456789abcdef01234567"
 
-func TestPaneActivityHashIncludesTmuxActivityTime(t *testing.T) {
+func TestPaneActivityHashUsesOnlyRenderedTerminalContent(t *testing.T) {
 	capture := []byte("the same repeated terminal rows")
-	first := paneActivityHash(capture, "100")
-	if first != paneActivityHash(capture, "100") {
+	first := paneActivityHash(capture)
+	if first != paneActivityHash(capture) {
 		t.Fatal("stable pane state changed its activity hash")
 	}
-	if first == paneActivityHash(capture, "101") {
-		t.Fatal("new tmux activity with identical captured rows kept the old hash")
+	if first == paneActivityHash([]byte("different terminal rows")) {
+		t.Fatal("different rendered terminal content kept the old hash")
 	}
 }
 
-func TestSnapshotDetectsRepeatedIdenticalOutputActivity(t *testing.T) {
+func TestSnapshotIgnoresRepeatedOutputThatLeavesTheDisplayUnchanged(t *testing.T) {
 	requireCommands(t, "tmux")
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -85,8 +85,8 @@ func TestSnapshotDetectsRepeatedIdenticalOutputActivity(t *testing.T) {
 	if !bytes.Equal(firstCapture, secondCapture) {
 		t.Fatal("repeated-output fixture did not keep the sampled terminal rows identical")
 	}
-	if len(first.Windows) != 1 || len(second.Windows) != 1 || first.Windows[0].PaneHash == second.Windows[0].PaneHash {
-		t.Fatalf("repeated identical output was not detected: first=%+v second=%+v", first.Windows, second.Windows)
+	if len(first.Windows) != 1 || len(second.Windows) != 1 || first.Windows[0].PaneHash != second.Windows[0].PaneHash {
+		t.Fatalf("unchanged rendered output changed the pane hash: first=%+v second=%+v", first.Windows, second.Windows)
 	}
 }
 

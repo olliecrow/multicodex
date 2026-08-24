@@ -199,7 +199,7 @@ func (s *HostService) Snapshot(ctx context.Context) (HostSnapshot, error) {
 		if window.CreatePending {
 			continue
 		}
-		state, alive, activity, err := s.inspectSessionActivity(ctx, window)
+		state, alive, err := s.inspectSession(ctx, window)
 		if err != nil {
 			return HostSnapshot{}, err
 		}
@@ -222,7 +222,7 @@ func (s *HostService) Snapshot(ctx context.Context) (HostSnapshot, error) {
 			windows = append(windows, window)
 			continue
 		}
-		window.PaneHash = paneActivityHash(capture, activity)
+		window.PaneHash = paneActivityHash(capture)
 		windows = append(windows, window)
 	}
 	snapshot.Windows = windows
@@ -2146,68 +2146,57 @@ const (
 )
 
 func (s *HostService) inspectSession(ctx context.Context, window Window) (tmuxSessionState, bool, error) {
-	state, alive, _, err := s.inspectSessionActivity(ctx, window)
-	return state, alive, err
-}
-
-func (s *HostService) inspectSessionActivity(ctx context.Context, window Window) (tmuxSessionState, bool, string, error) {
 	if window.Adopted {
 		if validateTmuxSessionName(window.Session) != nil || !tmuxIDPattern.MatchString(window.TmuxSessionID) {
-			return sessionAltered, false, "", nil
+			return sessionAltered, false, nil
 		}
 	} else if window.Session != s.sessionName(window.ID) {
-		return sessionAltered, false, "", nil
+		return sessionAltered, false, nil
 	}
-	format := "#{session_name}\t#{MCE_INSTANCE}\t#{MCE_WINDOW}\t#{MCE_WORKSPACE}\t#{MCE_PROJECT}\t#{pane_dead}\t#{session_windows}\t#{window_panes}\t#{window_activity}"
+	format := "#{session_name}\t#{MCE_INSTANCE}\t#{MCE_WINDOW}\t#{MCE_WORKSPACE}\t#{MCE_PROJECT}\t#{pane_dead}\t#{session_windows}\t#{window_panes}"
 	target := s.tmuxTarget(window)
 	out, err := s.tmuxForWindow(ctx, window, "display-message", "-p", "-t", target, format)
 	if err != nil {
 		if window.Adopted {
 			state, alive, classifyErr := s.classifyUnresponsiveAdoptedSession(ctx, window)
-			return state, alive, "", classifyErr
+			return state, alive, classifyErr
 		}
 		var failure commandFailure
 		if errors.As(err, &failure) && failure.exitCode == 1 && !failure.notFound {
-			return sessionAbsent, false, "", nil
+			return sessionAbsent, false, nil
 		}
-		return sessionAbsent, false, "", errors.New("inspect tmux session ownership")
+		return sessionAbsent, false, errors.New("inspect tmux session ownership")
 	}
 	fields := strings.Split(strings.TrimSpace(string(out)), "\t")
-	if len(fields) != 9 {
+	if len(fields) != 8 {
 		if window.Adopted {
 			state, alive, classifyErr := s.classifyUnresponsiveAdoptedSession(ctx, window)
-			return state, alive, "", classifyErr
+			return state, alive, classifyErr
 		}
 		present, presentErr := s.managedTmuxSessionPresent(ctx, window.Session)
 		if presentErr != nil {
-			return sessionAbsent, false, "", errors.New("inspect tmux session ownership")
+			return sessionAbsent, false, errors.New("inspect tmux session ownership")
 		}
 		if !present {
-			return sessionAbsent, false, "", nil
+			return sessionAbsent, false, nil
 		}
-		return sessionAbsent, false, "", errors.New("inspect tmux session ownership")
+		return sessionAbsent, false, errors.New("inspect tmux session ownership")
 	}
 	if fields[0] != window.Session || fields[1] != s.store.instanceID || fields[2] != window.ID || fields[3] != window.WorkspaceID || fields[4] != window.ProjectID {
-		return sessionAltered, false, "", nil
+		return sessionAltered, false, nil
 	}
 	if fields[5] != "0" && fields[5] != "1" {
-		return sessionAbsent, false, "", errors.New("inspect tmux process state")
+		return sessionAbsent, false, errors.New("inspect tmux process state")
 	}
 	if fields[6] != "1" || fields[7] != "1" {
-		return sessionAltered, false, "", nil
+		return sessionAltered, false, nil
 	}
-	if _, err := strconv.ParseInt(fields[8], 10, 64); err != nil {
-		return sessionAbsent, false, "", errors.New("inspect tmux activity time")
-	}
-	return sessionOwned, fields[5] == "0", fields[8], nil
+	return sessionOwned, fields[5] == "0", nil
 }
 
-func paneActivityHash(capture []byte, activity string) string {
-	digest := sha256.New()
-	_, _ = digest.Write(capture)
-	_, _ = digest.Write([]byte{0})
-	_, _ = digest.Write([]byte(activity))
-	return hex.EncodeToString(digest.Sum(nil))
+func paneActivityHash(capture []byte) string {
+	digest := sha256.Sum256(capture)
+	return hex.EncodeToString(digest[:])
 }
 
 func (s *HostService) managedTmuxSessionPresent(ctx context.Context, session string) (bool, error) {
