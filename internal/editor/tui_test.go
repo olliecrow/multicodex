@@ -437,7 +437,7 @@ func TestEditorControlsUseNavigationAndAVisibleActionMenu(t *testing.T) {
 		}
 	}
 	help := ansi.Strip(renderModal(modal{kind: "help", title: "Controls"}, helpWidth, (tuiModel{width: minimumWidth, height: minimumHeight}).bodyHeight()))
-	for _, want := range []string{"Click project/window: open", "⌘B or Ctrl+G: focus the sidebar", "⌥↑/⌥↓: previous/next terminal", "numbered terminal", "⌘⌫: delete", "scroll terminal history", "No terminal or sidebar: Ctrl+C quits", "● recent output", "○ quiet for 30s", "◇ none", "× stopped", "Need terminal Ctrl+G?", "[ Close ]"} {
+	for _, want := range []string{"Click project/window: open", "⌘B or Ctrl+G: focus the sidebar", "⌥↑/⌥↓: previous/next terminal", "numbered terminal", "⌘⌫: delete", "scroll terminal history", "No terminal or sidebar: Ctrl+C quits", "● recent output", "○ quiet live terminal", "◇ none", "× stopped", "Need terminal Ctrl+G?", "[ Close ]"} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("minimum-width help truncated %q:\n%s", want, help)
 		}
@@ -1144,11 +1144,13 @@ func TestSidebarStylesCommunicateStateWithoutCompetingWithSelection(t *testing.T
 		bold       bool
 	}{
 		{name: "recent", row: sidebarRow{kind: "window", signal: sidebarRecent}, foreground: lipgloss.Cyan},
-		{name: "quiet", row: sidebarRow{kind: "window", signal: sidebarQuiet}, foreground: lipgloss.BrightBlack},
+		{name: "quiet", row: sidebarRow{kind: "window", signal: sidebarQuiet}, foreground: lipgloss.BrightGreen},
 		{name: "empty project", row: sidebarRow{kind: "project", signal: sidebarEmpty}, faint: true},
 		{name: "empty workspace", row: sidebarRow{kind: "workspace", signal: sidebarEmpty}, faint: true},
-		{name: "attention", row: sidebarRow{kind: "window", signal: sidebarOffline}, foreground: lipgloss.Yellow},
-		{name: "project hierarchy", row: sidebarRow{kind: "project", signal: sidebarQuiet}, foreground: lipgloss.BrightBlack, bold: true},
+		{name: "stopped", row: sidebarRow{kind: "window", signal: sidebarStopped}, foreground: lipgloss.BrightRed},
+		{name: "offline", row: sidebarRow{kind: "window", signal: sidebarOffline}, foreground: lipgloss.Yellow},
+		{name: "unavailable", row: sidebarRow{kind: "window", signal: sidebarUnavailable}, foreground: lipgloss.BrightMagenta},
+		{name: "project hierarchy", row: sidebarRow{kind: "project", signal: sidebarQuiet}, foreground: lipgloss.BrightGreen, bold: true},
 	}
 	for _, test := range tests {
 		style := sidebarRowStyle(test.row, false, 20)
