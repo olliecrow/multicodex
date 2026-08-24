@@ -22,6 +22,73 @@ import (
 
 const testInstanceID = "0123456789abcdef01234567"
 
+func TestPaneObservationBecomesQuietThirtySecondsAfterLastChange(t *testing.T) {
+	now := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
+	service := &HostService{now: func() time.Time { return now }, panes: map[string]paneObservation{}}
+	windowID := mustID(t)
+
+	if !service.observePane(windowID, []byte("first display")) {
+		t.Fatal("first display sample was not recent")
+	}
+	now = now.Add(activityQuietAfter - time.Nanosecond)
+	if !service.observePane(windowID, []byte("first display")) {
+		t.Fatal("unchanged display became quiet before 30 seconds")
+	}
+	now = now.Add(time.Nanosecond)
+	if service.observePane(windowID, []byte("first display")) {
+		t.Fatal("unchanged display remained recent at 30 seconds")
+	}
+	if !service.observePane(windowID, []byte("second display")) {
+		t.Fatal("changed display did not renew the signal")
+	}
+}
+
+func TestSnapshotTracksOnlyRecentRenderedOutput(t *testing.T) {
+	requireCommands(t, "git", "tmux")
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	project := syntheticGitProject(t)
+	service, err := NewHostService(privateTestHome(t), mustID(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer killTestServer(service)
+	now := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
+	service.now = func() time.Time { return now }
+	opened, err := service.OpenProjectWindow(ctx, OpenProjectWindowRequest{ProjectID: mustID(t), ProjectPath: project})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	first, err := service.Snapshot(ctx)
+	if err != nil || len(first.Windows) != 1 || !first.Windows[0].RecentOutput {
+		t.Fatalf("first snapshot = %+v, %v; want recent output", first.Windows, err)
+	}
+	now = now.Add(activityQuietAfter)
+	quiet, err := service.Snapshot(ctx)
+	if err != nil || len(quiet.Windows) != 1 || quiet.Windows[0].RecentOutput {
+		t.Fatalf("quiet snapshot = %+v, %v; want no recent output", quiet.Windows, err)
+	}
+
+	if _, err := service.tmux(ctx, "send-keys", "-t", service.tmuxTarget(opened.Window), "printf mce-output-change", "Enter"); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		changed, snapshotErr := service.Snapshot(ctx)
+		if snapshotErr != nil {
+			t.Fatal(snapshotErr)
+		}
+		if len(changed.Windows) == 1 && changed.Windows[0].RecentOutput {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("rendered output change was not detected: %+v", changed.Windows)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
 func TestProjectTerminalUsesOriginalDirectoryAndIsIdempotent(t *testing.T) {
 	requireCommands(t, "git", "tmux")
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
