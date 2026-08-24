@@ -538,7 +538,7 @@ func (m tuiModel) handleKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.modal = &modal{kind: "help", title: "Controls"}
 		return m, nil
 	}
-	if slot := windowSlotKey(key); slot > 0 {
+	if slot := commandWindowSlotKey(key); slot > 0 {
 		return m.selectWindowSlot(slot)
 	}
 	if key.Keystroke() == "ctrl+c" && m.attachment == nil {
@@ -2532,11 +2532,11 @@ func rowIdentity(row sidebarRow) string {
 	}
 }
 
-func windowSlotKey(key tea.KeyPressMsg) int {
+func commandWindowSlotKey(key tea.KeyPressMsg) int {
 	if key.Code < '1' || key.Code > '9' {
 		return 0
 	}
-	if key.Mod&(tea.ModAlt|tea.ModSuper|tea.ModMeta) != 0 {
+	if key.Mod&tea.ModShift == 0 && hasCommandModifier(key) {
 		return int(key.Code - '0')
 	}
 	return 0
