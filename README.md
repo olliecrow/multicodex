@@ -223,7 +223,7 @@ Heartbeat:
 - skips logged-out profiles
 - uses a non-blocking lock under `MULTICODEX_HOME`
 - retries failed profile heartbeats once by default
-- stops without retry when sanitized output reports a permanent authentication failure
+- stops without retry when sanitized output reports a recognized authentication failure
 - runs profile-scoped `codex exec --skip-git-repo-check --ephemeral --sandbox read-only --color never hello`
 - fails when Codex reports a startup authentication error even if the core request exits successfully
 - redacts raw failure output
