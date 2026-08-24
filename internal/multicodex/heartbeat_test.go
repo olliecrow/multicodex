@@ -343,6 +343,94 @@ exit 1
 	}
 }
 
+func TestRunCodexHeartbeatFailsOnStartupAuthErrorAfterSuccessfulCoreRequest(t *testing.T) {
+	root := t.TempDir()
+	profileHome := filepath.Join(root, "profile")
+	if err := os.MkdirAll(profileHome, 0o700); err != nil {
+		t.Fatalf("mkdir profile home: %v", err)
+	}
+	fakeBin := filepath.Join(root, "bin")
+	if err := os.MkdirAll(fakeBin, 0o755); err != nil {
+		t.Fatalf("mkdir fake bin: %v", err)
+	}
+	codexPath := filepath.Join(fakeBin, "codex")
+	script := `#!/usr/bin/env bash
+set -euo pipefail
+if [ "${1:-}" = "exec" ]; then
+  echo 'codex_apps failed: {"code":"token_revoked","secret":"SYNTHETIC_SECRET"}' >&2
+  echo "hello"
+  exit 0
+fi
+exit 1
+`
+	if err := os.WriteFile(codexPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake codex: %v", err)
+	}
+	t.Setenv("PATH", fakeBin+":"+os.Getenv("PATH"))
+
+	detail, err := runCodexHeartbeat(profileHome, heartbeatSettings{Timeout: time.Second})
+	if !errors.Is(err, errHeartbeatAuthentication) {
+		t.Fatalf("expected authentication failure, got %v", err)
+	}
+	if got, want := detail, "core request completed but the refresh token was rejected"; got != want {
+		t.Fatalf("unexpected safe detail: got=%q want=%q", got, want)
+	}
+	if strings.Contains(detail, "SYNTHETIC_SECRET") {
+		t.Fatalf("authentication detail exposed raw output: %q", detail)
+	}
+}
+
+func TestRunCodexHeartbeatDoesNotRetryRecognizedAuthenticationFailure(t *testing.T) {
+	root := t.TempDir()
+	fakeBin := filepath.Join(root, "bin")
+	if err := os.MkdirAll(fakeBin, 0o755); err != nil {
+		t.Fatalf("mkdir fake bin: %v", err)
+	}
+	attemptsPath := filepath.Join(root, "attempts")
+	codexPath := filepath.Join(fakeBin, "codex")
+	script := "#!/bin/sh\necho attempt >> " + shellQuote(attemptsPath) + "\necho token_revoked >&2\nexit 0\n"
+	if err := os.WriteFile(codexPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake codex: %v", err)
+	}
+	t.Setenv("PATH", fakeBin+":"+os.Getenv("PATH"))
+
+	_, err := runCodexHeartbeatWithRetries(root, heartbeatSettings{
+		Timeout: time.Second,
+		Retries: 3,
+		Backoff: time.Millisecond,
+	})
+	if !errors.Is(err, errHeartbeatAuthentication) {
+		t.Fatalf("expected authentication failure, got %v", err)
+	}
+	data, readErr := os.ReadFile(attemptsPath)
+	if readErr != nil {
+		t.Fatalf("read attempts: %v", readErr)
+	}
+	if got := strings.Count(string(data), "attempt"); got != 1 {
+		t.Fatalf("expected one attempt, got %d", got)
+	}
+}
+
+func TestHeartbeatAuthenticationFailureDoesNotClassifyUsageLimits(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "revoked", raw: `{"code":"token_revoked"}`, want: "the refresh token was rejected"},
+		{name: "expired startup token", raw: `{"code":"token_expired"}`, want: "a startup service rejected the access token as expired"},
+		{name: "weekly usage exhausted", raw: "weekly usage limit reached; retry after reset", want: ""},
+		{name: "maximum usage", raw: "you have reached your maximum usage", want: ""},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := heartbeatAuthenticationFailure(test.raw); got != test.want {
+				t.Fatalf("classification = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
 func TestRunCodexHeartbeatRetriesWithEphemeralReadOnlyExec(t *testing.T) {
 	root := t.TempDir()
 	fakeBin := filepath.Join(root, "bin")

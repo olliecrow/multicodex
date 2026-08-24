@@ -20,6 +20,8 @@ const heartbeatPrompt = "hello"
 const heartbeatRetryCount = 1
 const heartbeatBackoff = 20 * time.Second
 
+var errHeartbeatAuthentication = errors.New("Codex startup authentication failed")
+
 type heartbeatSettings struct {
 	Timeout  time.Duration
 	Retries  int
@@ -183,6 +185,9 @@ func runCodexHeartbeatWithRetries(codexHome string, settings heartbeatSettings) 
 		}
 		lastErr = err
 		lastDetail = detail
+		if errors.Is(err, errHeartbeatAuthentication) {
+			return lastDetail, lastErr
+		}
 
 		if attempt == maxAttempts {
 			return fmt.Sprintf("%s after %d attempts", lastDetail, attempt), lastErr
@@ -217,6 +222,12 @@ func runCodexHeartbeat(codexHome string, settings heartbeatSettings) (string, er
 	cmd.Stderr = &out
 
 	err := cmd.Run()
+	if detail := heartbeatAuthenticationFailure(out.String()); detail != "" {
+		if err == nil {
+			return "core request completed but " + detail, errHeartbeatAuthentication
+		}
+		return detail, errHeartbeatAuthentication
+	}
 	if err == nil {
 		return "heartbeat sent", nil
 	}
@@ -228,6 +239,29 @@ func runCodexHeartbeat(codexHome string, settings heartbeatSettings) (string, er
 		return fmt.Sprintf("codex exec failed with exit code %d", ee.ExitCode()), err
 	}
 	return "codex exec failed", err
+}
+
+func heartbeatAuthenticationFailure(raw string) string {
+	lower := strings.ToLower(raw)
+	switch {
+	case strings.Contains(lower, "refresh_token_reused"),
+		strings.Contains(lower, "refresh token was already used"),
+		strings.Contains(lower, "refresh token has already been used"):
+		return "the refresh token was already used"
+	case strings.Contains(lower, "token_revoked"),
+		strings.Contains(lower, "token_invalidated"),
+		strings.Contains(lower, "refresh token was revoked"),
+		strings.Contains(lower, "invalidated oauth token"):
+		return "the refresh token was rejected"
+	case strings.Contains(lower, "token_expired"),
+		strings.Contains(lower, "authentication token is expired"),
+		strings.Contains(lower, "provided authentication token is expired"):
+		return "a startup service rejected the access token as expired"
+	case strings.Contains(lower, "access token could not be refreshed"):
+		return "the access token could not be refreshed"
+	default:
+		return ""
+	}
 }
 
 func loadHeartbeatSettings(paths Paths) (heartbeatSettings, error) {
