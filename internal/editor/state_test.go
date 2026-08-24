@@ -25,8 +25,19 @@ func TestStateStoreRoundTripCreatesPrivateState(t *testing.T) {
 		t.Fatal(err)
 	}
 	state.Hosts[0].Projects = []Project{{ID: projectID, Name: "Demo", Path: "/tmp/demo"}}
+	state.Activities = []Activity{{
+		HostID: localHostID, WindowID: mustID(t), PaneHash: strings.Repeat("a", 64),
+		ChangedAt: time.Now().UTC(), Updating: true,
+	}}
 	if err := store.Save(state); err != nil {
 		t.Fatal(err)
+	}
+	stored, err := os.ReadFile(store.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(stored), "updating") {
+		t.Fatal("transient display state was persisted")
 	}
 	got, err := store.Load()
 	if err != nil {
@@ -34,6 +45,9 @@ func TestStateStoreRoundTripCreatesPrivateState(t *testing.T) {
 	}
 	if got.Hosts[0].Projects[0].Name != "Demo" {
 		t.Fatalf("round trip mismatch: %+v", got)
+	}
+	if got.Activities[0].Updating {
+		t.Fatal("transient display state survived a state reload")
 	}
 	if runtime.GOOS != "windows" {
 		for _, path := range []string{store.root, store.path} {

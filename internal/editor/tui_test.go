@@ -36,7 +36,7 @@ func TestSidebarShowsProjectsGroupsWorkspacesAndUsesDynamicSlots(t *testing.T) {
 		},
 		Activities: []Activity{
 			{HostID: hostID, WindowID: windowAID, ChangedAt: recent.Add(-time.Hour)},
-			{HostID: hostID, WindowID: windowBID, ChangedAt: recent},
+			{HostID: hostID, WindowID: windowBID, ChangedAt: recent, Updating: true},
 		},
 	}
 	host := state.Hosts[1]
@@ -69,7 +69,7 @@ func TestSidebarShowsProjectsGroupsWorkspacesAndUsesDynamicSlots(t *testing.T) {
 		index int
 		want  sidebarSignal
 	}{
-		{0, sidebarEmpty}, {1, sidebarActive}, {2, sidebarActive},
+		{0, sidebarEmpty}, {1, sidebarUpdating}, {2, sidebarUpdating},
 		{3, sidebarEmpty}, {4, sidebarQuiet}, {5, sidebarQuiet},
 		{6, sidebarEmpty},
 	} {
@@ -112,7 +112,7 @@ func TestSidebarStatusShowsLiveOutputRunningStoppedAndFailures(t *testing.T) {
 		signal sidebarSignal
 		want   string
 	}{
-		{sidebarActive, "●"},
+		{sidebarUpdating, "●"},
 		{sidebarQuiet, "○"},
 		{sidebarEmpty, "◇"},
 		{sidebarStopped, "×"},
@@ -128,8 +128,8 @@ func TestSidebarStatusShowsLiveOutputRunningStoppedAndFailures(t *testing.T) {
 		row  sidebarRow
 		want string
 	}{
-		{sidebarRow{signal: sidebarActive}, "output changing"},
-		{sidebarRow{signal: sidebarQuiet}, "live, quiet"},
+		{sidebarRow{signal: sidebarUpdating}, "display updating"},
+		{sidebarRow{signal: sidebarQuiet}, "live, unchanged"},
 		{sidebarRow{signal: sidebarStopped}, "stopped"},
 		{sidebarRow{signal: sidebarOffline}, "host offline"},
 		{sidebarRow{signal: sidebarUnavailable}, "directory unavailable"},
@@ -149,10 +149,10 @@ func TestSidebarSignalsSummarizeEveryManagedWindow(t *testing.T) {
 	stoppedID := "444444444444444444444444"
 	futureID := "555555555555555555555555"
 	now := time.Now()
-	activities := map[string]time.Time{
-		hostID + "/" + activeID: now.Add(-time.Second),
-		hostID + "/" + quietID:  now.Add(-time.Hour),
-		hostID + "/" + futureID: now.Add(time.Hour),
+	activities := map[string]Activity{
+		hostID + "/" + activeID: {ChangedAt: now.Add(-time.Second), Updating: true},
+		hostID + "/" + quietID:  {ChangedAt: now.Add(-time.Hour)},
+		hostID + "/" + futureID: {ChangedAt: now.Add(time.Hour)},
 	}
 	active := Window{ID: activeID, Alive: true}
 	quiet := Window{ID: quietID, Alive: true}
@@ -166,7 +166,7 @@ func TestSidebarSignalsSummarizeEveryManagedWindow(t *testing.T) {
 		want        sidebarSignal
 	}{
 		{name: "empty", want: sidebarEmpty},
-		{name: "active child", windows: []Window{quiet, active, stopped}, want: sidebarActive},
+		{name: "updating child", windows: []Window{quiet, active, stopped}, want: sidebarUpdating},
 		{name: "quiet live child", windows: []Window{stopped, quiet}, want: sidebarQuiet},
 		{name: "future timestamp is quiet", windows: []Window{{ID: futureID, Alive: true}}, want: sidebarQuiet},
 		{name: "all stopped", windows: []Window{stopped}, want: sidebarStopped},
@@ -174,7 +174,7 @@ func TestSidebarSignalsSummarizeEveryManagedWindow(t *testing.T) {
 		{name: "unavailable workspace overrides activity", unavailable: true, windows: []Window{active}, want: sidebarUnavailable},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if got := summarizeSidebarWindows(test.offline, test.unavailable, hostID, test.windows, activities, now); got != test.want {
+			if got := summarizeSidebarWindows(test.offline, test.unavailable, hostID, test.windows, activities); got != test.want {
 				t.Fatalf("summarized signal = %v, want %v", got, test.want)
 			}
 		})
@@ -450,7 +450,7 @@ func TestEditorControlsUseNavigationAndAVisibleActionMenu(t *testing.T) {
 		}
 	}
 	help := ansi.Strip(renderModal(modal{kind: "help", title: "Controls"}, helpWidth, (tuiModel{width: minimumWidth, height: minimumHeight}).bodyHeight()))
-	for _, want := range []string{"Click project/window: open", "⌘B or Ctrl+G: focus the sidebar", "⌥↑/⌥↓: previous/next terminal", "numbered terminal", "⌘⌫: delete", "scroll terminal history", "No terminal or sidebar: Ctrl+C quits", "● changing", "○ quiet", "◇ no terminal", "× stopped", "Need terminal Ctrl+G?", "[ Close ]"} {
+	for _, want := range []string{"Click project/window: open", "⌘B or Ctrl+G: focus the sidebar", "⌥↑/⌥↓: previous/next terminal", "numbered terminal", "⌘⌫: delete", "scroll terminal history", "No terminal or sidebar: Ctrl+C quits", "● updating", "○ unchanged", "◇ no terminal", "× stopped", "Need terminal Ctrl+G?", "[ Close ]"} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("minimum-width help truncated %q:\n%s", want, help)
 		}
@@ -1156,7 +1156,7 @@ func TestSidebarStylesCommunicateStateWithoutCompetingWithSelection(t *testing.T
 		faint      bool
 		bold       bool
 	}{
-		{name: "changing", row: sidebarRow{kind: "window", signal: sidebarActive}, foreground: lipgloss.Cyan},
+		{name: "updating", row: sidebarRow{kind: "window", signal: sidebarUpdating}, foreground: lipgloss.Cyan},
 		{name: "live and quiet", row: sidebarRow{kind: "window", signal: sidebarQuiet}, foreground: lipgloss.Green},
 		{name: "empty project", row: sidebarRow{kind: "project", signal: sidebarEmpty}, faint: true},
 		{name: "empty workspace", row: sidebarRow{kind: "workspace", signal: sidebarEmpty}, faint: true},
