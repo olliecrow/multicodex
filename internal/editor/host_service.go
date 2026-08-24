@@ -3,6 +3,7 @@ package editor
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"image"
@@ -139,6 +140,12 @@ type HostService struct {
 	runner       commandRunner
 	now          func() time.Time
 	systemSocket string
+	panes        map[string]paneObservation
+}
+
+type paneObservation struct {
+	hash      [sha256.Size]byte
+	changedAt time.Time
 }
 
 func NewHostService(multicodexHome, instanceID string) (*HostService, error) {
@@ -146,7 +153,7 @@ func NewHostService(multicodexHome, instanceID string) (*HostService, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &HostService{store: store, runner: execRunner{}, now: time.Now, systemSocket: "default"}, nil
+	return &HostService{store: store, runner: execRunner{}, now: time.Now, systemSocket: "default", panes: map[string]paneObservation{}}, nil
 }
 
 func withHostLifecycle[T any](ctx context.Context, store *hostStore, fn func() (T, error)) (T, error) {
@@ -193,6 +200,7 @@ func (s *HostService) Snapshot(ctx context.Context) (HostSnapshot, error) {
 		}
 	}
 	windows := make([]Window, 0, len(registry.Windows))
+	seenPanes := make(map[string]bool, len(registry.Windows))
 	for _, window := range registry.Windows {
 		if window.CreatePending {
 			continue
@@ -209,10 +217,41 @@ func (s *HostService) Snapshot(ctx context.Context) (HostSnapshot, error) {
 		}
 		window.Alive = alive
 		window.Exited = !alive
+		if alive {
+			capture, captureErr := s.tmuxForWindow(ctx, window, "capture-pane", "-p", "-J", "-S", "-"+strconv.Itoa(activityRows), "-t", s.tmuxTarget(window))
+			if captureErr != nil {
+				currentState, currentAlive, inspectErr := s.inspectSession(ctx, window)
+				if inspectErr != nil || currentState == sessionOwned && currentAlive {
+					return HostSnapshot{}, errors.New("capture owned terminal display")
+				}
+				window.Alive = false
+				window.Exited = currentState == sessionOwned && !currentAlive
+			} else {
+				window.RecentOutput = s.observePane(window.ID, capture)
+				seenPanes[window.ID] = true
+			}
+		}
 		windows = append(windows, window)
+	}
+	for windowID := range s.panes {
+		if !seenPanes[windowID] {
+			delete(s.panes, windowID)
+		}
 	}
 	snapshot.Windows = windows
 	return snapshot, nil
+}
+
+func (s *HostService) observePane(windowID string, capture []byte) bool {
+	now := s.now()
+	hash := sha256.Sum256(capture)
+	observation, ok := s.panes[windowID]
+	if !ok || observation.hash != hash {
+		observation = paneObservation{hash: hash, changedAt: now}
+		s.panes[windowID] = observation
+	}
+	age := now.Sub(observation.changedAt)
+	return age >= 0 && age < activityQuietAfter
 }
 
 func (s *HostService) CreateWorkspace(ctx context.Context, request CreateWorkspaceRequest) (Workspace, error) {

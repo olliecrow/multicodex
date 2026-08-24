@@ -306,6 +306,11 @@ func TestSnapshotValidationRejectsHostControlData(t *testing.T) {
 	}
 	snapshot.Windows[0].Alive = false
 	snapshot.Windows[0].Exited = false
+	snapshot.Windows[0].RecentOutput = true
+	if err := validateHostSnapshot(host, snapshot); err == nil {
+		t.Fatal("recent output was accepted for a stopped terminal")
+	}
+	snapshot.Windows[0].RecentOutput = false
 	snapshot.Workspaces[0].Path = "/tmp/project\nforged"
 	if err := validateHostSnapshot(host, snapshot); err == nil {
 		t.Fatal("expected remote control character to be rejected")
