@@ -47,10 +47,7 @@ func TestSnapshotDetectsRepeatedIdenticalOutputActivity(t *testing.T) {
 		t.Fatal(err)
 	}
 	command := "i=0; while [ $i -lt 200 ]; do printf 'same output\\n'; i=$((i+1)); done; while :; do printf 'same output\\n'; sleep 1; done"
-	if _, err := service.tmux(ctx, "send-keys", "-l", "-t", service.tmuxTarget(opened.Window), command); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := service.tmux(ctx, "send-keys", "-t", service.tmuxTarget(opened.Window), "Enter"); err != nil {
+	if _, err := service.tmux(ctx, "respawn-pane", "-k", "-t", service.tmuxTarget(opened.Window), command); err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(5 * time.Second)
@@ -682,7 +679,13 @@ func TestCleanupCannotRaceTmuxAdoption(t *testing.T) {
 		})
 		result <- adoptionResult{adopted: adopted, err: err}
 	}()
-	<-started
+	select {
+	case <-started:
+	case adoption := <-result:
+		t.Fatalf("adoption ended before its marker write: %v", adoption.err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("adoption did not reach its marker write")
+	}
 	cleanupContext, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
 	defer cancel()
 	if _, err := service.Cleanup(cleanupContext); !errors.Is(err, context.DeadlineExceeded) {
