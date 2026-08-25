@@ -483,7 +483,7 @@ func (m tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case actionResultMsg:
 		return m.handleActionResult(msg)
 	case tea.PasteMsg:
-		if !m.layout().fits() {
+		if !m.copyView && !m.layout().fits() {
 			return m, nil
 		}
 		if m.modal != nil {
@@ -1004,11 +1004,6 @@ func verticalWheelDelta(button tea.MouseButton, step int) (int, bool) {
 }
 
 func (m tuiModel) View() tea.View {
-	if !m.hasUsableSize() {
-		view := tea.NewView(fmt.Sprintf("multicodex editor needs at least %d×%d; current size is %d×%d", minimumWidth, minimumHeight, m.width, m.height))
-		view.AltScreen = true
-		return view
-	}
 	if m.copyView && m.attachment != nil {
 		view := tea.NewView(m.attachment.Render(m.width, m.height))
 		view.AltScreen = true
@@ -1016,6 +1011,11 @@ func (m tuiModel) View() tea.View {
 		view.MouseMode = tea.MouseModeCellMotion
 		x, y := m.attachment.CursorPosition()
 		view.Cursor = tea.NewCursor(x, y)
+		return view
+	}
+	if !m.hasUsableSize() {
+		view := tea.NewView(fmt.Sprintf("multicodex editor needs at least %d×%d; current size is %d×%d", minimumWidth, minimumHeight, m.width, m.height))
+		view.AltScreen = true
 		return view
 	}
 	layout := m.layout()
