@@ -1572,6 +1572,31 @@ func TestCopyViewContainsOnlyTheFullScreenTerminal(t *testing.T) {
 		t.Fatalf("Copy view terminal key = %+v", input)
 	}
 
+	smallWidth, smallHeight := minimumWidth-10, minimumHeight-5
+	updated, cmd = got.Update(tea.WindowSizeMsg{Width: smallWidth, Height: smallHeight})
+	got = updated.(tuiModel)
+	if cmd != nil || !got.copyView || terminal.Width() != smallWidth || terminal.Height() != smallHeight {
+		t.Fatalf("Copy view did not survive a small resize: %+v, terminal=%dx%d", got, terminal.Width(), terminal.Height())
+	}
+	view = ansi.Strip(got.View().Content)
+	if strings.Contains(view, "needs at least") || !strings.Contains(view, "FIRST PROMPT LINE") {
+		t.Fatalf("small Copy view was replaced by editor chrome:\n%s", view)
+	}
+	updated, cmd = got.Update(tea.PasteMsg{Content: "pasted text"})
+	got = updated.(tuiModel)
+	if cmd != nil || !got.copyView {
+		t.Fatalf("paste left Copy view: %+v", got)
+	}
+	input = <-attachment.inputQueue
+	if input.kind != "paste" || input.text != "pasted text" {
+		t.Fatalf("small Copy view paste = %+v", input)
+	}
+	updated, cmd = got.Update(tea.WindowSizeMsg{Width: minimumWidth, Height: minimumHeight})
+	got = updated.(tuiModel)
+	if cmd != nil {
+		t.Fatal("restoring Copy view size returned an asynchronous command")
+	}
+
 	updated, cmd = got.handleKey(tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
 	got = updated.(tuiModel)
 	if cmd != nil || got.copyView || !got.controlMode {
