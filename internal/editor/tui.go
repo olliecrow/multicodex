@@ -1494,7 +1494,7 @@ func helpModalContent() []string {
 		"Keyboard · portable sidebar shortcuts",
 		"  Ctrl+G: sidebar/leave copy view · Esc: terminal",
 		"  ↑/↓ or J/K: one row · Ctrl+A/E: first/last",
-		"  Enter: open/focus/create · 1–9: terminal",
+		"  Enter: open/focus/create · 1 to 9: terminal",
 		"  A/Tab: Actions · N/Ctrl+N: create · H/?: Help",
 		"  R/Ctrl+R: rename · D/Ctrl+D: delete",
 		"  ⌘/⌥ shortcuts remain available when supported",
@@ -2082,7 +2082,7 @@ func (m *tuiModel) openAddProject() {
 }
 
 func (m *tuiModel) openAddProjectForm(host Host) {
-	m.modal = &modal{kind: "form", action: "add_project", title: "Add project — " + host.Name, host: host,
+	m.modal = &modal{kind: "form", action: "add_project", title: "Add project on " + host.Name, host: host,
 		fields: []formField{{label: "Project name", limit: 80}, {label: "Absolute host directory path", limit: 4096}}}
 }
 
@@ -2133,7 +2133,7 @@ func (m tuiModel) selectedSidebarRow() (sidebarRow, bool) {
 }
 
 func (m *tuiModel) openWorkspaceName(host Host, project Project) {
-	m.modal = &modal{kind: "form", action: "create_workspace", title: "Create workspace — " + project.Name, host: host, project: project,
+	m.modal = &modal{kind: "form", action: "create_workspace", title: "Create workspace in " + project.Name, host: host, project: project,
 		fields: []formField{{label: "Workspace name", limit: 80}}}
 }
 
@@ -2245,10 +2245,10 @@ func (m *tuiModel) openDeleteConfirmation() {
 		current.reason = "Delete the project terminal and its tmux session? The project directory stays unchanged."
 		current.delete.ID = row.window.ID
 	case "window":
-		current.action, current.title, current.reason = "delete_window", "Delete window?", "Delete “"+row.window.Name+"” and its tmux session?"
+		current.action, current.title, current.reason = "delete_window", "Delete window?", "Delete \""+row.window.Name+"\" and its tmux session?"
 		if row.window.Adopted {
 			current.title = "Release session?"
-			current.reason = "Stop managing “" + row.window.Name + "” in multicodex editor?"
+			current.reason = "Stop managing \"" + row.window.Name + "\" in multicodex editor?"
 			current.confirm = "[ Release ]"
 			current.warning = "The tmux session and its process will keep running. You can adopt it again."
 		}
@@ -2257,13 +2257,13 @@ func (m *tuiModel) openDeleteConfirmation() {
 		current.action, current.title = "delete_workspace", "Delete workspace?"
 		if row.workspace.External {
 			current.title = "Remove preserved workspace?"
-			current.reason = "Stop managing workspace “" + row.workspace.Name + "” and its windows?"
+			current.reason = "Stop managing workspace \"" + row.workspace.Name + "\" and its windows?"
 			current.confirm = "[ Remove ]"
 			current.warning = "The project directory, Git branches, and adopted sessions will remain. Editor-created windows will stop."
 		} else if row.workspace.Git {
-			current.reason = "Delete workspace “" + row.workspace.Name + "”, all its terminal windows, and its owned Git worktree and branch?"
+			current.reason = "Delete workspace \"" + row.workspace.Name + "\", all its terminal windows, and its owned Git worktree and branch?"
 		} else {
-			current.reason = "Delete workspace “" + row.workspace.Name + "” and all its terminal windows? Its project directory will remain."
+			current.reason = "Delete workspace \"" + row.workspace.Name + "\" and all its terminal windows? Its project directory will remain."
 		}
 		current.delete.ID = row.workspace.ID
 		for _, candidate := range m.rows {

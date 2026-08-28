@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// Paths centralizes filesystem locations used by multicodex.
+// Paths contains the filesystem locations used by multicodex.
 type Paths struct {
 	MulticodexHome   string
 	ConfigPath       string

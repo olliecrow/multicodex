@@ -453,7 +453,7 @@ func TestEditorControlsUseNavigationAndAVisibleActionMenu(t *testing.T) {
 		}
 	}
 	help := ansi.Strip(renderModal(modal{kind: "help", title: "Controls"}, helpWidth, (tuiModel{width: minimumWidth, height: minimumHeight}).bodyHeight()))
-	for _, want := range []string{"Click project/window: open", "Ctrl+G: sidebar/leave copy view", "Copy: C clean view", "J/K: one row", "1–9: terminal", "D/Ctrl+D: delete", "scroll terminal history", "Sidebar or no terminal: Ctrl+C quits", "● recent output", "○ quiet live terminal", "◇ none", "× stopped", "Need terminal Ctrl+G?", "[ Close ]"} {
+	for _, want := range []string{"Click project/window: open", "Ctrl+G: sidebar/leave copy view", "Copy: C clean view", "J/K: one row", "1 to 9: terminal", "D/Ctrl+D: delete", "scroll terminal history", "Sidebar or no terminal: Ctrl+C quits", "● recent output", "○ quiet live terminal", "◇ none", "× stopped", "Need terminal Ctrl+G?", "[ Close ]"} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("minimum-width help truncated %q:\n%s", want, help)
 		}
@@ -1435,7 +1435,7 @@ func TestHelpShowsEveryCoreControlAtMinimumSize(t *testing.T) {
 		"N/Ctrl+N: create",
 		"R/Ctrl+R: rename",
 		"D/Ctrl+D: delete",
-		"1–9: terminal",
+		"1 to 9: terminal",
 		"⌘/⌥ shortcuts remain available",
 		"Copy: C clean view",
 		"⌥/Shift-drag · ⌘C",
@@ -1888,7 +1888,7 @@ func TestJoinKeepRightNeverExceedsWidth(t *testing.T) {
 }
 
 func TestConfirmationWrapsReasonAndKeepsMouseButtonAligned(t *testing.T) {
-	reason := "Delete workspace “feature-with-a-very-long-identifiable-name”, all its terminal windows, and its owned Git worktree and branch?"
+	reason := "Delete workspace \"feature-with-a-very-long-identifiable-name\", all its terminal windows, and its owned Git worktree and branch?"
 	model := tuiModel{manager: &Manager{}, width: minimumWidth, height: minimumHeight, modal: &modal{
 		kind: "confirm", action: "delete_workspace", title: "Delete workspace?", reason: reason, delete: DeleteRequest{ID: testInstanceID},
 	}}
