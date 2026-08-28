@@ -28,7 +28,7 @@ repos:
         always_run: true
         pass_filenames: true
       - id: check-sensitive-push-range
-        name: Block sensitive text in outbound push commits
+        name: Block sensitive text in commits before push
         entry: bash scripts/security/check-push-range.sh
         language: system
         stages: [pre-push]

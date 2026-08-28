@@ -22,7 +22,7 @@ var commandSummaries = []struct {
 	{Name: "login-all", Summary: "run login for every known profile"},
 	{Name: "cli [--account <name>] [--] [codex args...]", Summary: "run interactive Codex on the best available account"},
 	{Name: "exec [--search] [codex exec args]", Summary: "run codex exec on the best available account"},
-	{Name: "generate [flags] [prompt]", Summary: "generate text without the coding-agent harness"},
+	{Name: "generate [flags] [prompt]", Summary: "generate text without coding tools"},
 	{Name: "status", Summary: "show all profile auth states"},
 	{Name: "reconcile", Summary: "reconcile resources for all profiles"},
 	{Name: "heartbeat", Summary: "send a minimal keepalive hello for logged-in profiles"},

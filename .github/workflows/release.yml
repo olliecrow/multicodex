@@ -31,7 +31,7 @@ jobs:
           go-version: '1.26.6'
           cache: true
 
-      - name: Install tmux integration-test prerequisite (Linux)
+      - name: Install tmux for integration tests (Linux)
         if: runner.os == 'Linux'
         run: |
           if ! command -v tmux >/dev/null 2>&1; then
@@ -40,7 +40,7 @@ jobs:
           fi
           tmux -V
 
-      - name: Install tmux integration-test prerequisite (macOS)
+      - name: Install tmux for integration tests (macOS)
         if: runner.os == 'macOS'
         run: |
           brew list tmux >/dev/null 2>&1 || brew install tmux

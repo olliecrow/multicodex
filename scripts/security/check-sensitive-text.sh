@@ -94,7 +94,7 @@ done
 
 if [[ "$failed" -ne 0 ]]; then
   cat >&2 <<'EOF'
-Blocked by sensitive-text policy.
+Sensitive-text policy found blocked content.
 - Remove or redact secrets and credential-like values.
 - Replace local absolute paths with repo-relative paths or placeholders like /path/to/project.
 - Replace real email addresses with reserved examples such as user@example.com.

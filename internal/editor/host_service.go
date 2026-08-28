@@ -2271,10 +2271,9 @@ func (s *HostService) killOwnedSession(ctx context.Context, window Window) error
 	return nil
 }
 
-// cleanupUnusedTmuxSocket removes only this editor instance's exact socket,
-// and only after tmux confirms that no server remains behind it. tmux leaves
-// this socket behind after its last session exits on supported macOS and Linux
-// releases.
+// cleanupUnusedTmuxSocket removes only this editor instance's socket after tmux
+// confirms that no server uses it. Supported tmux releases on macOS and Linux
+// leave the socket after the last session exits.
 func (s *HostService) cleanupUnusedTmuxSocket(ctx context.Context) error {
 	_, err := s.tmux(ctx, "list-sessions")
 	if err == nil {

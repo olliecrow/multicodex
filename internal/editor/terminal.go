@@ -179,8 +179,8 @@ func attachWindowPTY(ctx context.Context, host Host, controlPath, instanceID str
 
 func newTerminalEmulator(width, height int) *vt.SafeEmulator {
 	terminal := vt.NewSafeEmulator(width, height)
-	// The editor does not render terminal hyperlinks. Discard OSC 8 metadata so
-	// a distinct large link cannot be retained by every visible screen cell.
+	// Discard OSC 8 metadata because the editor does not render links. Otherwise,
+	// each visible cell can retain a copy of a large URL.
 	terminal.RegisterOscHandler(8, func([]byte) bool { return true })
 	// Tmux is the only scrollback owner. Keep the renderer's private history at
 	// one line so sustained output does not duplicate the long tmux scrollback.

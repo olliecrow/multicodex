@@ -14,7 +14,7 @@
 - Never print raw credentials or raw subprocess failure output that could contain credentials. Tests and examples must use synthetic state and dummy paths.
 - Preserve resource reconciliation's no-clobber behavior: regular profile guidance, config, and skill entries are user overrides; only documented multicodex-owned symlinks may be changed. Runtime-managed `.system` skills remain profile-local.
 - Keep usage and routing weekly-only. Prefer declared 10,080-minute windows and retain only the existing narrow compatibility fallback for older provider responses.
-- Keep the CLI surface and error behavior aligned with `docs/command-spec.md`.
+- Keep commands, flags, output, routing, and error behavior aligned with `docs/command-spec.md`.
 - Preserve editor client state, host ownership registries, deterministic tmux identities, worktrees, and running pane processes across upgrades. Treat editor state versions and the host protocol as explicit compatibility contracts. Add a safe migration before changing persistent schemas, and fail closed without stopping tmux sessions when a client and host are incompatible.
 
 ## Development

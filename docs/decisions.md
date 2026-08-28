@@ -3,7 +3,7 @@
 This log keeps cross-cutting rationale that is not clearer in code, tests, the command contract, or the security contract.
 
 Decision: Use Go with a conventional `cmd/` and `internal/` layout.
-Context: Multicodex needs a portable local CLI with strong filesystem control and a small deployment surface.
+Context: Multicodex needs a portable single-binary CLI with direct control of filesystem paths and permissions.
 Rationale: Go provides a static binary, mature standard library, straightforward concurrency, and familiar public-project structure.
 Trade-offs: Go is more verbose than shell, and Windows remains unsupported.
 References: `go.mod`, `cmd/multicodex/`, `internal/`
@@ -40,13 +40,13 @@ References: `internal/multicodex/app.go`, `internal/multicodex/reconcile.go`, `d
 
 Decision: Keep heartbeat profile-scoped, minimal, ephemeral, and cron-safe.
 Context: A keepalive must verify logged-in profiles without persisting a session, touching a workspace, overlapping another run, or exposing subprocess output.
-Rationale: A fixed read-only `hello`, bounded retry, local non-blocking lock, and sanitized startup-authentication detection provide useful liveness with a narrow side-effect and reporting surface. A successful core response is not healthy when Codex also reports that a startup service rejected its credential. Recognized authentication failures stop without retry so the probe does not repeat a harmful refresh path; this classification does not prescribe reauthentication.
+Rationale: A fixed read-only `hello`, bounded retry, local non-blocking lock, and sanitized startup-authentication detection test liveness with limited side effects and output. A successful core response is not healthy when Codex also reports that a startup service rejected its credential. Recognized authentication failures stop without retry so the probe does not repeat a harmful refresh path; this classification does not prescribe reauthentication.
 Trade-offs: Each logged-in profile sends a real request, and redacted failures provide less provider detail. A provider defect limited to an optional startup service can fail heartbeat even while core requests remain usable.
 References: `internal/multicodex/heartbeat.go`, `docs/command-spec.md`
 
 Decision: Integrate subscription monitoring under `multicodex monitor`.
-Context: Account isolation and remaining subscription headroom are part of the same account-selection workflow.
-Rationale: One product avoids a split workflow. Validated profile homes may use profile-scoped app-server reads with OAuth fallback; unvalidated homes stay on direct OAuth so their credential-store behavior is not guessed.
+Context: Account isolation and remaining subscription usage belong to the same account-selection workflow.
+Rationale: `multicodex monitor` keeps account setup, usage display, and account selection in one CLI. Validated profile homes may use profile-scoped app-server reads with OAuth fallback. Unvalidated homes stay on direct OAuth because multicodex cannot infer their credential-store behavior.
 Trade-offs: Monitoring adds dependencies and may start read-only app-server processes for validated profiles. Transient full outages retain clearly marked stale official data rather than blanking useful context.
 References: `internal/monitor/`, `internal/multicodex/monitor.go`, `docs/command-spec.md`
 
@@ -74,21 +74,31 @@ Rationale: One optional `profile_resources` policy manages only documented symli
 Trade-offs: Explicit management may retarget or remove symlinks at owned positions, so every such change is reported.
 References: `internal/multicodex/resources.go`, `docs/command-spec.md`, `docs/security-and-privacy.md`
 
-Decision: Add one-shot harness-free generation through Codex App Server, with no tools by default and optional native live web search.
-Context: Subscription authentication is useful for general text generation, but `codex exec` always includes the client-side coding-agent harness. The official Codex SDK exposes the same agent behavior and is not a Go dependency.
-Rationale: A small App Server client reuses existing profile routing and managed ChatGPT authentication. An exact Codex version gate, the built-in OpenAI provider and endpoint, optional bounded instruction files, disabled context and MCP servers, a one-model catalog with agent-tool metadata removed, and fail-closed event handling keep coding tools out of the provider request. Explicit `--search` can expose the provider's native live web-search tool without adding the coding-agent harness. Model-catalog effort validation, App Server output schemas, and sanitized JSON metrics support controlled experiments without exposing raw events or account identity. Normal tolerant config loading preserves unrelated user-owned Codex settings that strict parsing can reject.
+Decision: Add one-shot text generation through Codex App Server, with no tools by default and optional native live web search.
+Context: Subscription authentication is useful for general text generation, but `codex exec` always adds client-side coding-agent instructions and tools. The official Codex SDK exposes the same agent behavior and is not a Go dependency.
+Rationale: A small App Server client reuses existing profile routing and managed ChatGPT authentication. An exact Codex version gate and the built-in OpenAI provider and endpoint constrain the request. Bounded instruction files, disabled context and MCP servers, a one-model catalog with agent-tool metadata removed, and fail-closed event handling keep coding tools out.
+
+Explicit `--search` exposes native live web search without enabling coding tools. Model-catalog effort validation, App Server output schemas, and sanitized JSON metrics let callers select effort, enforce an output schema, and receive metrics without exposing raw events or account identity. Tolerant config loading preserves unrelated user-owned Codex settings that strict parsing can reject.
 Trade-offs: The command is one-shot, requires a tested Codex version, and must be updated when the experimental protocol changes. Search is opt-in and limited to the native provider tool. JSON mode buffers a bounded response. Provider-side instructions remain outside client control.
 References: `internal/codexappserver/`, `internal/multicodex/generate.go`, `docs/command-spec.md`
 
 Decision: Build the editor as a local TUI over dedicated host-local tmux servers.
 Context: One client must reconnect quickly to many local and SSH project terminals without a daemon, terminal transcript database, or cross-host coordination.
-Rationale: A small Go TUI keeps one warm protocol connection per host, renders only the selected PTY, and checks every managed session plus a bounded tmux capture every two seconds. Each project can lazily own one terminal in its configured original directory without a workspace or worktree; named workspaces remain separate. Stable health text, a fixed-width pulse, and simple output, running, stopped, offline, and unavailable markers expose that state without layout movement, one client process per window, or a fixed window limit. Editor-created sessions retain an exited pane, so a reachable refresh can treat `exit` as a safe window removal while still preserving a missing session after host restart. Deterministic session names and exact environment ownership markers make reconnection and cleanup simple. The outer editor stays outside tmux, and managed servers disable prefix keys and bindings, which removes nested-session ambiguity. The explicit host protocol is the compatibility boundary, so clean builds can roll forward without stopping tmux sessions and incompatible protocol changes fail closed with a clear outer-editor restart instruction.
+Rationale: A small Go TUI keeps one warm protocol connection per host, renders only the selected PTY, and checks every managed session plus a bounded tmux capture every two seconds.
+
+Each project can own one terminal in its original directory without a workspace or worktree. Named workspaces remain separate. Stable health text, a fixed-width pulse, and explicit output, running, stopped, offline, and unavailable markers show state without moving the layout. The design does not start one client process per window or impose a fixed window limit.
+
+Editor-created sessions retain an exited pane. A reachable refresh can therefore remove a window after `exit` while preserving a missing session after a host restart. Deterministic session names and exact environment ownership markers define reconnection and cleanup targets. The outer editor stays outside tmux, and managed servers disable prefix keys and bindings to avoid nested-session ambiguity.
+
+The host protocol is the compatibility boundary. Clean builds can roll forward without stopping tmux sessions. Incompatible protocol changes fail closed and tell the user to restart the outer editor.
 Trade-offs: Only one terminal is visible at a time. Command-key shortcuts and the modifier for overriding mouse reporting depend on the terminal emulator. Cell mouse mode supports clicks and wheels, not pointer hover or drag gestures. Modified development builds cannot connect remotely. A protocol-changing rollout can show a host as offline until installation finishes and the outer editor reopens, but it does not stop or alter that host's sessions.
 References: `internal/editor/`, `docs/command-spec.md`, `docs/security-and-privacy.md`
 
 Decision: Give each editor instance a private host registry and two-phase resource lifecycle.
 Context: Git worktrees, branches, tmux sessions, and attachments can outlive a client process or be left half-created after sleep, SSH loss, or a failed state write.
-Rationale: The client stores minimal navigation state. Each host records exact ownership and workspace, window, or attachment intent before external mutation. One host-local operation lock serializes lifecycle changes across connections. Startup and hourly reconciliation can then resume known operations and refuse uncertain ones without scanning or changing unrelated projects. Automatic cleanup never removes Git worktrees because external writers cannot be excluded between a safety check and deletion. Force consent is invocation-local and is never replayed after interruption.
+Rationale: The client stores minimal navigation state. Each host records exact ownership and workspace, window, or attachment intent before external mutation. One host-local operation lock serializes lifecycle changes across connections.
+
+Startup and hourly reconciliation can resume known operations and refuse uncertain ones without scanning or changing unrelated projects. Automatic cleanup never removes Git worktrees because an external writer can act between a safety check and deletion. Force consent applies only to one invocation and is not replayed after interruption.
 Trade-offs: Loss of the client instance identifier prevents automatic adoption of its old resources. Stale Git workspaces require explicit deletion after review, while safe cleanup still removes exact dead windows, expired attachments, and stale non-Git records.
 References: `internal/editor/host_store.go`, `internal/editor/host_service.go`, `docs/security-and-privacy.md`
 

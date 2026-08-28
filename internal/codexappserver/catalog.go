@@ -82,7 +82,7 @@ func PrepareGenerationCatalog(ctx context.Context, options CatalogOptions) (Cata
 		return CatalogSelection{}, err
 	}
 	if err := removeAgentTools(model); err != nil {
-		return CatalogSelection{}, fmt.Errorf("selected model is not compatible with harness-free generation: %w", err)
+		return CatalogSelection{}, fmt.Errorf("selected model cannot run with coding tools disabled: %w", err)
 	}
 	if err := configureSearchMetadata(model, options.WebSearch); err != nil {
 		return CatalogSelection{}, fmt.Errorf("selected model is not compatible with requested search mode: %w", err)
