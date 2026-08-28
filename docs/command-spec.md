@@ -1,6 +1,6 @@
-# Command Specification
+# Command specification
 
-## Command Set
+## Command set
 
 - `multicodex init`
 - `multicodex add <name>`
@@ -25,7 +25,7 @@
 
 Multicodex intentionally has no command for changing the shared default Codex account.
 
-## Behavior Contract
+## Behavior contract
 
 `multicodex init`
 - Creates local multicodex metadata only.
@@ -106,7 +106,12 @@ Multicodex intentionally has no command for changing the shared default Codex ac
 - Fails closed if Codex config replaces the built-in OpenAI provider, overrides its endpoint, changes the selected web-search mode, loads a configuration lockfile, or defines any non-null nested `tools.web_search` settings while `--search` is selected, such as domain, search-context, or approximate-location filters.
 - Rejects server requests, command, file, image, unexpected tool events, and web-search events unless `--search` was selected.
 - By default, streams only assistant text to standard output. Resource notices and safe errors use standard error. A failure can occur after partial text was written.
-- With `--json`, buffers up to 16 MiB of assistant text and writes one object only after success. The object contains response text, model, effective effort, elapsed milliseconds, a count of distinct native web-search items deduplicated by nonblank lifecycle ID of at most 256 bytes, and numeric token usage. The search count is zero when no native search ran. Generation fails if search activity has no lifecycle item, an item has an invalid ID, or a turn exceeds 1,024 distinct search IDs. The count adds no search query, URL, result, account, profile, path, reasoning, or raw-event data. Assistant text can contain model-written citations or search-derived content. Usage is `null` when App Server emits no usage event. A generation failure or response-limit failure writes no JSON object.
+- With `--json`, buffers up to 16 MiB of assistant text and writes one object only after success.
+  - The object contains response text, model, effective effort, elapsed milliseconds, a native web-search item count, and numeric token usage.
+  - Search items are deduplicated by nonblank lifecycle ID of at most 256 bytes. The count is zero when no native search ran.
+  - Generation fails if search activity has no lifecycle item, an item has an invalid ID, or a turn exceeds 1,024 distinct search IDs.
+  - The count contains no search query, URL, result, account, profile, path, reasoning, or raw-event data. Assistant text can contain model-written citations or search-derived content.
+  - Usage is `null` when App Server emits no usage event. A generation failure or response-limit failure writes no JSON object.
 - Writes selected-profile metadata under `MULTICODEX_HOME/run` when `MULTICODEX_SELECTED_PROFILE_PATH` is set. The selection source is `explicit_account`, `usage_selector`, or `usage_selector_default_reserve`.
 - Deletes the temporary workspace and model catalog when the command ends.
 - Does not expose sessions, custom tools, images, raw events, or a persistent App Server.
@@ -153,7 +158,7 @@ Multicodex intentionally has no command for changing the shared default Codex ac
 - Remains read-only with respect to Codex account state.
 - Renders one full-width weekly card per account.
 - Shows default and Spark weekly usage on separate lines when Spark data is present.
-- Shows a restrained progress bar where it fits, the reset countdown, and the exact local reset time where useful.
+- Shows the reset countdown, plus a progress bar and exact local reset time when space and source data permit.
 - Shows configured labels before raw identity fields.
 - Orders account rows by weekly reset time.
 - Keeps timestamps in UTC internally and renders user-facing timestamps in local time.
@@ -184,22 +189,65 @@ Multicodex intentionally has no command for changing the shared default Codex ac
 - Keeps one private client state with the instance identifier, local and SSH hosts, configured project names and absolute paths, and selected window. It does not sync client state or read or persist terminal output.
 - Accepts only system SSH alias names. SSH uses normal host-key policy, batch mode, bounded connection and keepalive timeouts, disables forwarding, opens no listener, and keeps one short control socket in a user-owned system temporary directory plus one host protocol connection per reachable host.
 - Stores project-terminal, workspace, window, and attachment ownership in a private registry on each host. Persistent random identifiers determine the dedicated tmux server and session names. Reconnection uses those names and verifies exact instance, window, and project or workspace ownership markers. Adopted sessions also record their stable tmux session identifier.
-- Creates one single-pane tmux session for each window. The dedicated tmux server disables status, renaming, prefix keys, prefix bindings, and child clipboard escapes; enables mouse input, focus events, extended modifier keys, and copy mode; and keeps at least 60,000 retained history lines. An upgrade never restarts a pane, so an existing pane keeps the history cap it was created with. The outer editor forwards terminal-region clicks and wheel events to tmux. Terminal text selection uses the terminal application's mouse-reporting override. The outer editor shows one attached terminal at a time. Through one warm protocol connection per host, it checks every managed session every two seconds. It has no fixed managed-window limit.
+- Creates one single-pane tmux session for each window.
+  - The dedicated tmux server disables status, renaming, prefix keys, prefix bindings, and child clipboard escapes. It enables mouse input, focus events, extended modifier keys, and copy mode. It keeps at least 60,000 retained history lines.
+  - An upgrade never restarts a pane, so an existing pane keeps its original history cap.
+  - The outer editor forwards terminal-region clicks and wheel events to tmux. Native text selection uses the terminal application's mouse-reporting override.
+  - The outer editor shows one attached terminal at a time. One warm protocol connection per host checks every managed session every two seconds. There is no fixed managed-window limit.
 - Workspace creation requires a user-facing name, then creates and opens its first window automatically. Window creation asks for no name or launch type. Every window opens the host's normal shell and receives the next available `Terminal`, `Terminal 2`, and later display label. Run `multicodex cli` inside a window to use that host's profiles, auth, and routing rules.
-- Creates every Git workspace as a private editor-owned worktree with an initial `multicodex/<slug>-<id>` branch and an exact `multicodex-editor:<instance>:<workspace>` Git worktree lock. It fetches the detected remote default branch before creation when available and otherwise uses an existing cached remote-tracking branch. It fails if the selected branch is neither fetched nor cached, does not update or switch the source checkout's local base branch, and rejects nested, bare, unavailable, or uncertain Git roots. Normal Git branch switching and creation are supported inside the worktree. Workspace deletion removes only the initial editor branch and preserves all other branches. A detached checkout requires force confirmation. An initial editor branch checked out in another worktree blocks deletion.
-- Can adopt an existing detached session from the standard default tmux server through the selected project's Actions menu. Eligibility requires a letter, number, underscore, or hyphen session name, the exact project root, one live pane, one window, no session group, no attached client, and no existing editor markers. Adoption records the stable tmux session identifier and adds exact ownership markers without renaming, moving, restarting, or reconfiguring the session. Further sessions can share one preserved checkout workspace. Releasing an adopted window clears only exact markers and its registry record; the session and process continue. Removing a preserved workspace leaves its project directory, Git branches, and adopted sessions intact. Automatic cleanup never releases adopted sessions or preserved workspaces.
+- Creates each Git workspace as a private editor-owned worktree with an initial `multicodex/<slug>-<id>` branch and an exact `multicodex-editor:<instance>:<workspace>` lock.
+  - Creation fetches the remote default branch when available. Otherwise, it uses an existing cached remote-tracking branch. It fails if the selected branch is neither fetched nor cached.
+  - Creation does not update or switch the source checkout's local base branch. It rejects nested, bare, unavailable, or uncertain Git roots.
+  - Users can switch and create branches inside the worktree. Workspace deletion removes only the initial editor branch and preserves all other branches.
+  - A detached checkout requires force confirmation. Deletion stops if another worktree uses the initial editor branch.
+- Adopts an eligible detached session from the standard default tmux server through the selected project's Actions menu.
+  - The session name can contain letters, numbers, underscores, and hyphens. The session must run at the exact project root and have one live pane, one window, no session group, no attached client, and no editor markers.
+  - Adoption records the stable tmux session identifier and adds exact ownership markers. It does not rename, move, restart, or reconfigure the session.
+  - Further sessions can share one preserved checkout workspace.
+  - Releasing an adopted window clears only its exact markers and registry record. The session and process continue.
+  - Removing a preserved workspace leaves its project directory, Git branches, and adopted sessions intact. Automatic cleanup never releases adopted sessions or preserved workspaces.
 - Uses a non-Git project in place and permits only one workspace for it. It never removes the project directory.
-- Shows every configured project and keeps a workspace visible with no window. Each project can have one lazily created managed project terminal in its configured original directory; it never creates a worktree. Projects with terminal windows precede workspace-only projects, which precede empty configured projects. Workspaces with windows precede empty workspaces. Projects, workspaces, and windows remain name-ordered inside each tier. Background refresh never reorders live entries. Every two seconds the host hashes the bottom 200 rendered tmux rows. The first sample establishes a quiet baseline and never guesses recent activity. After that baseline, `●` means output changed within 30 seconds, `○` means a live terminal has no observed recent output change, `◇` means no terminal exists, `×` means all applicable terminals stopped, `?` means the host is offline, and `!` means a workspace directory is unavailable. The signal does not infer turn completion or inspect process names. A project marker describes only its direct project terminal; visible workspace and window rows report their own state. The selected-terminal footer states the same signal in words. The sidebar title keeps stable live or offline health text while refreshes run; only its fixed-width dot pulses. Selecting an offline project or workspace explains automatic reconnection and hides host actions until the host is reachable. An unavailable directory does not hide or stop a live terminal. While the sidebar is focused, plain `1` through `9` select terminals dynamically from current display order. `Command+1` through `Command+9` remain optional equivalents when the terminal application sends them. These shortcuts do not limit the number of terminals, and Option-number input remains available to the attached terminal.
-- Keeps a labeled Codex weekly-usage box visible at the bottom of the sidebar. It shows one labeled row for every distinct configured local Codex account without a hidden remainder; profiles that resolve to the same account identity share one row. Rows include percent used, compact time until reset, loading, unavailable, and stale states. Long labels retain both ends. A failed refresh preserves the last successful values as stale. Usage consumes sidebar-list rows but never reduces or resizes the active terminal. If every account and a usable workspace list cannot fit, the editor reports the required terminal height instead of hiding accounts.
-- Draws labeled boundaries around usage, workspaces, and the terminal. Sidebar color supports terminal state: cyan means recent output, green means a quiet live terminal, dim gray means no terminal, red means stopped, yellow means offline, and magenta means unavailable. Selection overrides state styling, and color never carries meaning alone. The header identifies the active input region. Padded empty states, forms, dialogs, and the persistent footer give direct mouse and keyboard instructions for the current task. In iTerm2, the terminal footer shows `Option`-drag for native selection plus normal copy and paste shortcuts. A visible **Copy view** button and sidebar `C` shortcut expand the attached terminal to the full screen and remove all editor chrome for clean native multiline selection. `Ctrl+G` leaves Copy view for the sidebar. Copy view remains ephemeral, preserves terminal input, and does not read or write the client clipboard.
-- Uses portable terminal keyboard controls without requiring custom key mappings. Selecting a project creates or opens its one project terminal; selecting a workspace shows its relevant clickable options; selecting a workspace window opens it. A click also activates visible header buttons, context options, menu items, form fields, and dialog buttons. The Actions menu starts with commands for the selected row and shows only actions whose required project, workspace, window, or terminal exists; a new editor therefore starts with `Add project`. The wheel moves sidebar and menu selection and scrolls tmux terminal history. Clicking the terminal returns input focus to it. `Ctrl+G` focuses the sidebar. Plain shortcut keys act only while the sidebar is focused, so terminal input is unchanged at all other times. Arrows or `J` and `K` move one row and open an existing terminal when selection reaches it while preserving sidebar focus. `Ctrl+A` and `Ctrl+E` move to the first or last row. `Enter` creates or opens a project terminal, creates a window for a workspace, or moves input focus into a selected terminal. `A` or `Tab` opens Actions, `C` opens Copy view, `N` or `Ctrl+N` creates a workspace under a project or a window under a workspace, `R` or `Ctrl+R` renames a workspace or workspace window, `D` or `Ctrl+D` opens the cancel-first deletion dialog, and `H` or `?` opens Help. Plain `1` through `9` select the corresponding numbered terminal. `Esc` returns to terminal input. `Command+B`, `Command+N`, `Command+R`, `Command+Backspace`, `Command+?`, `Command+Period`, `Command+1` through `Command+9`, `Option+Up` or `Option+Down`, and `Command+Up` or `Command+Down` remain optional equivalents when the terminal application sends them. Renaming changes only the display name and never changes the owned worktree, branch, or tmux session identity. In the sidebar, `Ctrl+C` quits; in terminal input, it is sent to the attached terminal. Actions and destructive confirmations use arrow or Tab selection followed by `Enter`. The Actions menu provides Quit and can send a literal `Ctrl+G` to the attached terminal. Tmux history uses Emacs-style navigation and binds `Option+Up` and `Option+Down` to full-screen paging.
+- Shows every configured project and keeps workspaces visible when they have no window.
+  - Each project can have one lazily created terminal in its original directory. This terminal does not create a worktree.
+  - Projects with terminals precede workspace-only projects, followed by empty projects. Workspaces with windows precede empty workspaces. Names stay sorted within each group, so refreshes never reorder live entries.
+  - Every two seconds, the host hashes the bottom 200 rendered tmux rows. The first sample sets a quiet baseline. Later samples show `●` for output changed within 30 seconds, `○` for a live terminal with no recent observed change, `◇` for no terminal, `×` for stopped terminals, `?` for an offline host, and `!` for an unavailable workspace directory.
+  - The signal does not infer turn completion or inspect process names. A project marker covers only its direct terminal. Workspace and window rows report their own state. The selected-terminal footer gives the same state in words.
+  - The sidebar title keeps stable live or offline health text during refresh. Only its fixed-width dot pulses.
+  - An offline selection explains automatic reconnection and hides host actions until the host is reachable. An unavailable directory does not hide or stop a live terminal.
+  - While the sidebar has focus, plain `1` through `9` select terminals by current display order. `Command+1` through `Command+9` are optional equivalents when the terminal application sends them. These shortcuts do not limit the terminal count. Option-number input remains available to the attached terminal.
+- Keeps a labeled Codex weekly-usage box at the bottom of the sidebar.
+  - It shows one row for every distinct configured local Codex account. Profiles for the same account share one row. No account is hidden behind a remainder count.
+  - Rows show percent used and time until reset, or loading, unavailable, and stale states. Long labels retain both ends. A failed refresh preserves the last successful values as stale.
+  - Usage consumes sidebar-list rows but never resizes the active terminal. If every account and a usable workspace list cannot fit, the editor reports the required terminal height instead of hiding accounts.
+- Draws labeled boundaries around usage, workspaces, and the terminal.
+  - Cyan means recent output, green means a quiet live terminal, dim gray means no terminal, red means stopped, yellow means offline, and magenta means unavailable. Selection overrides state styling. Color never carries meaning alone.
+  - The header identifies the active input region. Empty states, forms, dialogs, and the footer give mouse and keyboard instructions for the current task.
+  - In iTerm2, the terminal footer shows `Option`-drag for native selection and the normal copy and paste shortcuts.
+  - The visible **Copy view** button and sidebar `C` shortcut fill the screen with the attached terminal and remove all editor chrome. `Ctrl+G` returns to the sidebar. Copy view is temporary, preserves terminal input, and does not read or write the client clipboard.
+- Uses terminal keyboard controls that do not require custom key mappings.
+  - Selecting a project creates or opens its terminal. Selecting a workspace shows its actions. Selecting a workspace window opens it.
+  - Clicks activate header buttons, context options, menu items, form fields, and dialog buttons. Actions depend on the selected row and available resources, so a new editor starts with `Add project`.
+  - The wheel moves sidebar and menu selection and scrolls tmux history. Clicking the terminal returns input focus to it.
+  - `Ctrl+G` focuses the sidebar. Plain shortcut keys act only while the sidebar has focus.
+  - Arrows or `J` and `K` move one row and open an existing terminal without leaving the sidebar. `Ctrl+A` and `Ctrl+E` move to the first or last row.
+  - `Enter` creates or opens a project terminal, creates a workspace window, or sends input to the selected terminal.
+  - `A` or `Tab` opens Actions. `C` opens Copy view. `N` or `Ctrl+N` creates a workspace or window. `R` or `Ctrl+R` renames a workspace or window. `D` or `Ctrl+D` opens the cancel-first deletion dialog. `H` or `?` opens Help. Plain `1` through `9` select numbered terminals. `Esc` returns to terminal input.
+  - Command-key and Option-arrow shortcuts remain optional when the terminal application sends them. Renaming changes only the display name, not the worktree, branch, or tmux session identity.
+  - `Ctrl+C` quits from the sidebar and goes to the attached terminal from terminal input. Actions and destructive confirmations use arrow or Tab selection followed by `Enter`. The Actions menu provides Quit and can send a literal `Ctrl+G`.
+  - Tmux history uses Emacs-style navigation. `Option+Up` and `Option+Down` move by one screen.
 - When no terminal is open, `Ctrl+C` quits without requiring a sidebar-focus step.
-- Passes ordinary terminal paste to the attached terminal and returns input focus to it when the sidebar was focused. It rejects paste while another dialog is open and explains when no terminal is available. Native text selection uses the terminal application's mouse-reporting override: `Option`-drag in iTerm2 and usually `Shift`-drag elsewhere. Clipboard-image and file attachment actions read at most 16 MiB from the client clipboard or a regular client file, copy it to a private owned path on the selected host, and paste only that path into the terminal draft.
+- Passes ordinary terminal paste to the attached terminal and returns input focus to it when the sidebar was focused.
+  - Paste is rejected while another dialog is open or no terminal is available.
+  - Native text selection uses the terminal application's mouse-reporting override: `Option`-drag in iTerm2 and usually `Shift`-drag elsewhere.
+  - Clipboard-image and file attachment actions read at most 16 MiB from the client clipboard or a regular client file. They copy it to a private owned path on the selected host and paste only that path into the terminal draft.
 - Deletes a workspace and all its exact managed terminal windows as one action. It combines live-terminal and Git-work risks into one final confirmation and refuses uncertain, unowned, or altered resources. Preserved workspaces use explicit remove and release language.
 - Treats an exited editor-created terminal as a request to remove that window. The next reachable refresh deletes only a confirmed exact owned dead pane, without force, and keeps its project or workspace. A missing session after a host restart, an offline host, an altered session, or a process that became live again is not automatically removed.
 - Runs safe cleanup at startup and hourly. The seven-day cleanup removes only other exact owned dead windows, expired attachments, and stale non-Git workspace records. It reports stale Git workspaces for explicit review and never automatically removes their worktrees or branches. It never removes live, uncertain, unowned, altered, adopted, or preserved resources.
 - Records workspace and window create or delete intent before changing tmux or Git. Attachment changes are rollback-safe or idempotent. Cleanup resumes or safely reconciles interrupted operations. Manual force deletion requires a second confirmation and stays limited to exact owned resources.
-- Saves every changed window selection immediately. Preserves client navigation state, host ownership registries, worktrees, tmux sessions, pane processes, and scrollback when binaries are replaced. Compatible clean builds reconnect during a rolling update. A protocol change leaves the host offline, tells the user to finish updating every machine, and requires restarting only the outer editor; managed sessions stay unchanged. Reopening after a client-machine restart reconnects remote-host sessions. A restart of a machine that runs a tmux session cannot preserve that process; the editor keeps its record and workspace and reports the window as stopped.
+- Saves every changed window selection immediately.
+  - Replacing binaries preserves client navigation state, host ownership registries, worktrees, tmux sessions, pane processes, and scrollback. Compatible clean builds reconnect during a rolling update.
+  - A protocol change leaves the host offline and tells the user to update every machine, then restart only the outer editor. Managed sessions stay unchanged.
+  - Reopening after a client-machine restart reconnects remote-host sessions. Restarting a machine that runs a tmux session cannot preserve its process. The editor keeps its record and workspace and reports the window as stopped.
 - Refuses a second editor process that uses the same client state.
 
 `multicodex doctor`
@@ -214,7 +262,7 @@ Multicodex intentionally has no command for changing the shared default Codex ac
 - Supports an operation-specific preview for `login <name>`.
 - Resolves configured profile resource paths and shows the effective policy and planned reconciliation.
 
-## Profile Resource Reconciliation
+## Profile resource reconciliation
 
 - `profile_resources` is an optional version-1 config block. Its omission preserves the established guidance no-op and strict default-skill reconciliation exactly.
 - Present `guidance` and `skills` objects require a boolean `inherit`. Unknown keys inside the resource block are errors; unrelated top-level config keys remain permissive.
@@ -237,15 +285,15 @@ Multicodex intentionally has no command for changing the shared default Codex ac
 `multicodex version`
 - Prints the build version on one line. Tagged release binaries report their tag; untagged source builds report a development version.
 
-## Error Handling
+## Error handling
 
-- Fail fast with actionable messages.
+- Fail fast and tell the user how to correct the error.
 - Reject undocumented positional arguments with exit code `2` instead of silently ignoring them.
 - Never dump secret content in errors.
 - External failures report safe status or exit codes and allowlisted recovery guidance, not raw provider bodies, app-server messages, or subprocess failure output.
 - Use deterministic exit codes where practical.
 
-## Profile Naming
+## Profile naming
 
 - Profile names may include letters, numbers, `@`, `.`, `_`, and `-`.
 - Account-like names are allowed, but docs and tests should prefer non-personal labels such as `personal` and `work`.

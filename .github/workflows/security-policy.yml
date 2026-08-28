@@ -1,4 +1,4 @@
-name: Security Policy Checks
+name: Security policy checks
 
 on:
   pull_request:
@@ -30,7 +30,7 @@ jobs:
           go-version: '1.26.6'
           cache: true
 
-      - name: Install tmux integration-test prerequisite (Linux)
+      - name: Install tmux for integration tests (Linux)
         if: runner.os == 'Linux'
         run: |
           if ! command -v tmux >/dev/null 2>&1; then
@@ -39,7 +39,7 @@ jobs:
           fi
           tmux -V
 
-      - name: Install tmux integration-test prerequisite (macOS)
+      - name: Install tmux for integration tests (macOS)
         if: runner.os == 'macOS'
         run: |
           brew list tmux >/dev/null 2>&1 || brew install tmux
@@ -88,7 +88,7 @@ jobs:
           install -m 0755 gitleaks "$RUNNER_TEMP/gitleaks"
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
 
-      - name: Scan pushed/PR commit range with gitleaks
+      - name: Scan the commit range with gitleaks
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -124,15 +124,15 @@ jobs:
           } > "${tmp_bad_email}"
           bash scripts/security/check-sensitive-text.sh --context=policy-selftest "${tmp_ok}"
           if bash scripts/security/check-sensitive-text.sh --context=policy-selftest "${tmp_bad}"; then
-            echo "expected policy self-test failure did not occur" >&2
+            echo "policy self-test unexpectedly passed" >&2
             exit 1
           fi
           if bash scripts/security/check-sensitive-text.sh --context=policy-selftest "${tmp_bad_json}"; then
-            echo "expected JSON policy self-test failure did not occur" >&2
+            echo "JSON policy self-test unexpectedly passed" >&2
             exit 1
           fi
           if bash scripts/security/check-sensitive-text.sh --context=policy-selftest "${tmp_bad_email}"; then
-            echo "expected email policy self-test failure did not occur" >&2
+            echo "email policy self-test unexpectedly passed" >&2
             exit 1
           fi
 
@@ -151,15 +151,15 @@ jobs:
             printf '%s@%s\n' "user" "example.xn--p1ai"
           } > "${tmp_bad_email}"
           if PATH="/usr/bin:/bin" bash scripts/security/check-sensitive-text.sh --context=policy-fallback-selftest "${tmp_bad}"; then
-            echo "expected fallback policy self-test failure did not occur" >&2
+            echo "fallback policy self-test unexpectedly passed" >&2
             exit 1
           fi
           if PATH="/usr/bin:/bin" bash scripts/security/check-sensitive-text.sh --context=policy-fallback-selftest "${tmp_bad_json}"; then
-            echo "expected fallback JSON policy self-test failure did not occur" >&2
+            echo "fallback JSON policy self-test unexpectedly passed" >&2
             exit 1
           fi
           if PATH="/usr/bin:/bin" bash scripts/security/check-sensitive-text.sh --context=policy-fallback-selftest "${tmp_bad_email}"; then
-            echo "expected fallback email policy self-test failure did not occur" >&2
+            echo "fallback email policy self-test unexpectedly passed" >&2
             exit 1
           fi
 
@@ -182,7 +182,7 @@ jobs:
           git log --format='%H%n%s%n%b%n' "${range}" > "${temp_file}"
           bash scripts/security/check-sensitive-text.sh --context=commit-message "${temp_file}"
 
-      - name: Check pushed/PR patch for policy violations
+      - name: Check the patch for policy violations
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -201,7 +201,7 @@ jobs:
           git show --format= --patch --no-color "${range}" > "${temp_file}"
           bash scripts/security/check-sensitive-text.sh --context=patch "${temp_file}"
 
-      - name: Check pull request title/body for policy violations
+      - name: Check the pull request title and body for policy violations
         if: github.event_name == 'pull_request'
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}

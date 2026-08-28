@@ -14,7 +14,7 @@ import (
 	"github.com/olliecrow/multicodex/internal/codexstate"
 )
 
-// App wires command handlers with persistent config.
+// App runs multicodex commands with persistent state from Store.
 type App struct {
 	store *Store
 }

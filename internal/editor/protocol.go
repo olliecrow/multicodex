@@ -310,8 +310,8 @@ func startHostClient(ctx context.Context, executable, multicodexHome, instanceID
 			}
 			options = sshConnectionOptions("auto", "no", controlPath)
 		} else {
-			// Cleanup is intentionally independent from the long-lived protocol
-			// and terminal clients. Its timeout can never close their SSH master.
+			// Cleanup opens a separate SSH connection. Its timeout cannot close
+			// the shared protocol or terminal connection.
 			options = sshConnectionOptions("no", "no", "none")
 		}
 		args := append([]string{"-T"}, options...)
