@@ -1,17 +1,12 @@
 # multicodex
 
-`multicodex` helps you use multiple Codex subscription accounts on one machine without changing the normal default Codex account.
+`multicodex` runs multiple Codex subscription accounts on one machine. It provides account routing, text generation, heartbeat checks, usage monitoring, and local or SSH project terminals.
 
 It keeps non-default accounts in named local profiles. Each profile has its own `CODEX_HOME`, auth file, sessions, threads, and Codex state. The regular system Codex account remains managed by Codex itself, outside multicodex.
 
 By default, each profile reuses your global Codex `config.toml` through a symlink, so model defaults, reasoning settings, permission settings, and other normal Codex config changes apply everywhere. Profile homes also inherit missing top-level skill entries from the global Codex skills directory through symlinks.
 
 Profile login requires file-backed auth. If the effective Codex config does not set `cli_auth_credentials_store = "file"`, profile login and profile-scoped Codex execution fail with a setup error instead of sharing global auth state.
-
-## Status
-
-- Supports local multi-account Codex CLI, `codex exec`, text generation, heartbeat, and usage monitoring.
-- Multicodex does not change the global Codex account.
 
 ## Prerequisites
 
@@ -320,6 +315,8 @@ Every two seconds, the editor hashes the bottom 200 rendered tmux rows. The firs
 
 The markers report display changes. They do not claim that a Codex turn or another process finished. A project marker covers only its direct project terminal. Workspace and window rows report their own state. The selected-window footer gives the same state in words. The sidebar title keeps stable live or offline text during refresh; only its fixed-width dot pulses.
 
+Inside editor-created terminals, `multicodex cli` defaults to `tui.whimsy=false` to disable Codex's decorative composer stars. Progress-animation settings are unchanged. This lets an unchanged terminal return to green after 30 seconds. The setting applies to new CLI launches, leaves config files unchanged, and can be overridden with `multicodex cli -c tui.whimsy=true`. For an adopted terminal or a direct `codex` launch, pass `-c tui.whimsy=false` explicitly.
+
 Start it outside tmux:
 
 ```bash
@@ -349,7 +346,7 @@ These controls do not require custom key mappings in iTerm2 or other common term
 
 Actions can also quit, add hosts and projects, attach files or clipboard images, open history, delete owned resources, run cleanup, and send a literal `Ctrl+G`. Command-key and Option-arrow shortcuts remain optional when the terminal application sends them. Option-number input remains available to the attached terminal. Attachments paste the host-local path into the terminal draft and never submit it.
 
-When no terminal is open, `Ctrl+C` quits directly. After you add a project, press `Enter` or click it to create its persistent terminal in the original directory. Reopening the project reuses that tmux session.
+When no terminal is open, `Ctrl+C` quits directly. Reopening a project reuses its tmux session.
 
 Press `N` on a project to create a named workspace and its first terminal. The editor names additional workspace windows `Terminal`, `Terminal 2`, and later labels as needed. Rename a workspace or window with `R` or Actions. Each terminal starts the host's normal shell. Run `multicodex cli` inside it to use that host's profiles and sign-ins.
 
@@ -363,7 +360,7 @@ Type `exit` in an editor-created terminal to remove that window without a menu. 
 
 Detaching, sleep, SSH loss, or an editor restart leaves owned sessions running and reconnects the selected window. The editor saves each changed window selection immediately. Reopening after a client-machine restart reconnects remote-host sessions. A restart of the machine that runs a tmux session cannot preserve its process. The editor keeps its record and workspace and reports the window as stopped.
 
-The same warm host connection checks each window's running state and bottom 200 rows every two seconds. There is no fixed window limit, and the sidebar scrolls when needed. Only the first nine displayed windows have direct number shortcuts. A missing workspace directory does not hide or stop its terminal.
+One persistent connection per host checks its windows. There is no fixed window limit, and the sidebar scrolls when needed. Only the first nine displayed windows have direct number shortcuts. A missing workspace directory does not hide or stop its terminal.
 
 Mouse wheel events use tmux copy mode with at least 60,000 retained history lines. Actions can also open this mode. An upgrade never restarts a pane, so an existing pane keeps its original history cap. In history, arrows move by one line and `Option+Up` or `Option+Down` moves by one screen.
 
@@ -373,7 +370,7 @@ Inside the worktree, use normal Git commands to switch, create, and publish bran
 
 A non-Git project has one in-place workspace, and the editor never deletes its directory. Every configured project remains visible. A workspace remains visible without a window.
 
-Remote hosts must already work as system SSH aliases in non-interactive batch mode. They need tmux, Git, and a clean multicodex build with the same editor protocol in `PATH`. Compatible clean builds can reconnect during a rolling update. Modified development builds cannot connect remotely because their source identity cannot be verified.
+Remote hosts must already work as system SSH aliases in non-interactive batch mode. They need tmux, Git, and a clean multicodex build with the same editor protocol in `PATH`. Modified development builds cannot connect remotely because their source identity cannot be verified.
 
 Bounded SSH keepalives detect a dead path and trigger reconnection after sleep or network loss. Each host uses its own multicodex profiles and Codex sign-ins. The editor never copies auth state between hosts.
 
@@ -383,7 +380,7 @@ When an update changes the protocol, the editor shows **Editor update required**
 
 The client stores only hosts, projects, and selection under `MULTICODEX_HOME/editor`. Each host stores its private ownership registry, worktrees, and uploaded attachments under its own `MULTICODEX_HOME/editor`. The editor does not store terminal output in this state.
 
-A confirmed exited editor-created pane removes its window promptly. Startup and hourly cleanup remove other exact dead windows, expired attachments, and stale non-Git workspace records after seven days. Cleanup reports stale Git workspaces but does not delete their worktrees. Delete one explicitly from the editor after review. Cleanup also does not release adopted sessions or remove preserved checkout workspaces.
+Startup and hourly cleanup remove other exact dead windows, expired attachments, and stale non-Git workspace records after seven days. Cleanup reports stale Git workspaces but does not delete their worktrees. Delete one explicitly from the editor after review. Cleanup also does not release adopted sessions or remove preserved checkout workspaces.
 
 The editor preserves live terminals, missing or uncertain sessions, unrelated tmux sessions, and unrelated directories. Manual Git-worktree deletion checks tracked, untracked, ignored, detached, and unique-commit risks. It asks for confirmation before forced loss. A force confirmation applies only to that invocation and is not replayed after interruption.
 

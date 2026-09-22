@@ -61,7 +61,7 @@ Multicodex intentionally has no command for changing the shared default Codex ac
 - Treats `cli --help` and `cli -h` as multicodex help requests without selecting an account.
 - Includes the existing default Codex home only as the final automatic reserve and verifies its login with the official Codex CLI before launch.
 - Does not inject model, reasoning, sandbox, approval, or search defaults.
-- Uses the selected home's Codex config defaults unless the caller passes explicit Codex args.
+- Uses the selected home's Codex config defaults unless the caller passes explicit Codex args, except for the editor decoration setting described below.
 - Re-checks file-backed auth isolation before every configured-profile launch.
 - Replaces the multicodex process with `codex` when stdin, stdout, and stderr are real terminals.
 - Keeps auth, threads, sessions, and `/goal` state inside the selected `CODEX_HOME`.
@@ -195,6 +195,7 @@ Multicodex intentionally has no command for changing the shared default Codex ac
   - The outer editor forwards terminal-region clicks and wheel events to tmux. Native text selection uses the terminal application's mouse-reporting override.
   - The outer editor shows one attached terminal at a time. One warm protocol connection per host checks every managed session every two seconds. There is no fixed managed-window limit.
 - Workspace creation requires a user-facing name, then creates and opens its first window automatically. Window creation asks for no name or launch type. Every window opens the host's normal shell and receives the next available `Terminal`, `Terminal 2`, and later display label. Run `multicodex cli` inside a window to use that host's profiles, auth, and routing rules.
+  - In editor-created terminals, `multicodex cli` prepends `-c tui.whimsy=false` to disable decorative Codex composer stars that would keep the output signal active while idle. Progress-animation settings are unchanged. Explicit later CLI settings override this default. Existing Codex processes and config files are unchanged. Adopted terminals require the explicit flag because their running processes do not inherit editor markers.
 - Creates each Git workspace as a private editor-owned worktree with an initial `multicodex/<slug>-<id>` branch and an exact `multicodex-editor:<instance>:<workspace>` lock.
   - Creation fetches the remote default branch when available. Otherwise, it uses an existing cached remote-tracking branch. It fails if the selected branch is neither fetched nor cached.
   - Creation does not update or switch the source checkout's local base branch. It rejects nested, bare, unavailable, or uncertain Git roots.

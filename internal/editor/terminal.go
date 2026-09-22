@@ -254,7 +254,7 @@ func safeTerminalPaste(text string) string {
 		if value == '\t' || value == '\n' || value == '\r' {
 			return value
 		}
-		if value < ' ' || value == '\x7f' || value >= '\x80' && value <= '\x9f' {
+		if unsafeDisplayRune(value) {
 			return -1
 		}
 		return value

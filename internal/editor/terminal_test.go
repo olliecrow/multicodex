@@ -108,6 +108,7 @@ func TestAllBidiControlsAreRejectedOrRemovedFromEditorDisplay(t *testing.T) {
 		for label, got := range map[string]string{
 			"client": safeClientText(value, 100),
 			"view":   plainDisplayText(value),
+			"paste":  safeTerminalPaste(value),
 		} {
 			if strings.ContainsRune(got, r) {
 				t.Fatalf("%s retained bidi control U+%04X", label, r)

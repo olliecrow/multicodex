@@ -144,6 +144,35 @@ func TestProjectTerminalUsesOriginalDirectoryAndIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestGitWorkspaceSupportsQuotedPaths(t *testing.T) {
+	requireCommands(t, "git")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	home := filepath.Join(privateTestHome(t), "équipe \"notes\"")
+	project := syntheticGitProject(t)
+	service, err := NewHostService(home, mustID(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace, err := service.CreateWorkspace(ctx, CreateWorkspaceRequest{
+		ProjectID: mustID(t), ProjectPath: project, Name: "Quoted paths",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	locked, reason, err := service.gitWorktreeLock(ctx, workspace)
+	if err != nil || !locked || reason != service.worktreeLockReason(workspace) {
+		t.Fatalf("worktree lock = %v, %q, %v", locked, reason, err)
+	}
+	if elsewhere, err := service.branchCheckedOutElsewhere(ctx, workspace); err != nil || elsewhere {
+		t.Fatalf("owned branch incorrectly classified as checked out elsewhere: %v, %v", elsewhere, err)
+	}
+	result, err := service.DeleteWorkspace(ctx, DeleteRequest{ID: workspace.ID})
+	if err != nil || !result.Deleted {
+		t.Fatalf("delete quoted worktree = %+v, %v", result, err)
+	}
+}
+
 func TestHostServiceGitWindowReconnectAndSafeDeletion(t *testing.T) {
 	requireCommands(t, "git", "tmux")
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

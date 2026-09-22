@@ -341,13 +341,13 @@ func availableUsedPercentPtr(v int) *int {
 }
 
 func lookupSelectedExecProfile(cfg *Config, selected usage.SelectedAccount) (string, Profile, bool) {
+	selectedHome := normalizeExecCodexHome(selected.Account.CodexHome)
 	if name := strings.TrimSpace(selected.Account.Label); name != "" {
-		if profile, ok := cfg.Profiles[name]; ok {
+		if profile, ok := cfg.Profiles[name]; ok && (selectedHome == "" || normalizeExecCodexHome(profile.CodexHome) == selectedHome) {
 			return name, profile, true
 		}
 	}
 
-	selectedHome := normalizeExecCodexHome(selected.Account.CodexHome)
 	if selectedHome == "" {
 		return "", Profile{}, false
 	}

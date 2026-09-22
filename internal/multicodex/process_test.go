@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -89,6 +90,8 @@ func TestNeutralCodexEnvStripsProfileState(t *testing.T) {
 }
 
 func TestRunInteractiveCodexWithProfileExecsWhenTerminalAttached(t *testing.T) {
+	t.Setenv("MCE_INSTANCE", "")
+	t.Setenv("MCE_WINDOW", "")
 	oldLookPath := execLookPath
 	oldSyscallExec := syscallExec
 	oldInteractive := isInteractiveTerminalAttached
@@ -133,5 +136,42 @@ func TestRunInteractiveCodexWithProfileExecsWhenTerminalAttached(t *testing.T) {
 	}
 	if !strings.Contains(env, "MULTICODEX_ACTIVE_PROFILE=work") {
 		t.Fatalf("expected profile env in env, got %q", env)
+	}
+}
+
+func TestInteractiveEditorLaunchDisablesDecorationsOnly(t *testing.T) {
+	oldLookPath, oldExec, oldInteractive := execLookPath, syscallExec, isInteractiveTerminalAttached
+	t.Cleanup(func() {
+		execLookPath, syscallExec, isInteractiveTerminalAttached = oldLookPath, oldExec, oldInteractive
+	})
+	execLookPath = func(string) (string, error) { return "/tmp/fake-codex", nil }
+	isInteractiveTerminalAttached = func() bool { return true }
+	for _, test := range []struct {
+		name, instance, window string
+		args, want             []string
+	}{
+		{name: "outside editor", args: []string{"resume"}, want: []string{"codex", "resume"}},
+		{name: "incomplete markers", instance: "editor", args: []string{"resume"}, want: []string{"codex", "resume"}},
+		{name: "editor", instance: "editor", window: "window", args: []string{"resume"}, want: []string{"codex", "-c", "tui.whimsy=false", "resume"}},
+		{name: "explicit override", instance: "editor", window: "window", args: []string{"-c", "tui.whimsy=true", "resume"}, want: []string{"codex", "-c", "tui.whimsy=false", "-c", "tui.whimsy=true", "resume"}},
+		{name: "prompt boundary", instance: "editor", window: "window", args: []string{"--", "-c tui.whimsy=true"}, want: []string{"codex", "-c", "tui.whimsy=false", "--", "-c tui.whimsy=true"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("MCE_INSTANCE", test.instance)
+			t.Setenv("MCE_WINDOW", test.window)
+			original := slices.Clone(test.args)
+			syscallExec = func(_ string, args, _ []string) error {
+				if !slices.Equal(args, test.want) {
+					t.Fatalf("arguments = %q, want %q", args, test.want)
+				}
+				return nil
+			}
+			if err := RunInteractiveCodexWithProfile("/tmp/codex-home", "work", test.args); err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(test.args, original) {
+				t.Fatal("launch mutated caller arguments")
+			}
+		})
 	}
 }

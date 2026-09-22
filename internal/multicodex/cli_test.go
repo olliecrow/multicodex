@@ -107,6 +107,41 @@ func TestCmdCLIManualAccountBypassesRoutingAndStripsSeparator(t *testing.T) {
 	}
 }
 
+func TestCmdCLIInEditorDisablesDecorationsForAutomaticAndManualAccounts(t *testing.T) {
+	for _, manual := range []bool{false, true} {
+		name := "automatic"
+		if manual {
+			name = "manual"
+		}
+		t.Run(name, func(t *testing.T) {
+			app, logPath := newExecTestApp(t)
+			createExecProfiles(t, app, "work")
+			t.Setenv("MCE_INSTANCE", strings.Repeat("a", 24))
+			t.Setenv("MCE_WINDOW", strings.Repeat("b", 24))
+			originalSelector := defaultExecAccountSelector
+			t.Cleanup(func() { defaultExecAccountSelector = originalSelector })
+			defaultExecAccountSelector = func(context.Context, []usage.MonitorAccount, string) (usage.SelectedAccount, error) {
+				return usage.SelectedAccount{Account: usage.MonitorAccount{Label: "work"}}, nil
+			}
+			args := []string{"cli"}
+			if manual {
+				args = append(args, "--account", "work", "--")
+			}
+			args = append(args, "resume")
+			if err := app.Run(args); err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(logPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(data), "args=-c tui.whimsy=false resume\n") {
+				t.Fatalf("missing editor decoration override: %s", data)
+			}
+		})
+	}
+}
+
 func TestCmdCLIAutomaticRoutingCanUseDefaultReserve(t *testing.T) {
 	app, logPath := newExecTestApp(t)
 
