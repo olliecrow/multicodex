@@ -25,6 +25,11 @@ func RunCodexWithProfile(codexHome, profile string, args []string) error {
 }
 
 func RunInteractiveCodexWithProfile(codexHome, profile string, args []string) error {
+	if os.Getenv("MCE_INSTANCE") != "" && os.Getenv("MCE_WINDOW") != "" {
+		// Decorative composer stars change captured rows even while Codex is idle.
+		// Keep progress animations and let later explicit CLI settings override this default.
+		args = append([]string{"-c", "tui.whimsy=false"}, args...)
+	}
 	env := profileCodexEnv(os.Environ(), codexHome, profile)
 	if isInteractiveTerminalAttached() {
 		path, err := execLookPath("codex")

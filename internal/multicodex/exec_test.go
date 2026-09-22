@@ -644,6 +644,35 @@ func TestCmdExecUsesDefaultReserveAccountWhenProfilesAreWeeklyExhausted(t *testi
 	}
 }
 
+func TestCmdExecDistinguishesDefaultProfileFromReserve(t *testing.T) {
+	for _, exhausted := range []bool{false, true} {
+		t.Run(fmt.Sprintf("exhausted=%v", exhausted), func(t *testing.T) {
+			app, logPath, root := newExecSelectionTestApp(t)
+			createExecProfiles(t, app, "default")
+			used := 10
+			if exhausted {
+				used = 100
+			}
+			writeExecSelectionProfileData(t, root, "default", 0, used, time.Hour)
+			writeExecSelectionDefaultData(t, app, 0, 20, 2*time.Hour)
+			if err := app.Run([]string{"exec", "hello"}); err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(logPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantHome := filepath.Join(app.store.paths.ProfilesDir, "default", "codex-home")
+			if exhausted {
+				wantHome = normalizeExecCodexHome(app.store.paths.DefaultCodexHome)
+			}
+			if !strings.Contains(string(data), "codex_home="+wantHome+"\n") {
+				t.Fatalf("selected wrong account: %s", data)
+			}
+		})
+	}
+}
+
 func TestCmdExecUsesDefaultReserveAccountWithoutConfiguredProfiles(t *testing.T) {
 	app, logPath, _ := newExecSelectionTestApp(t)
 	writeExecSelectionDefaultData(t, app, 100, 100, 30*time.Minute)
@@ -1148,6 +1177,8 @@ fi
 
 func newExecTestApp(t *testing.T) (*App, string) {
 	t.Helper()
+	t.Setenv("MCE_INSTANCE", "")
+	t.Setenv("MCE_WINDOW", "")
 
 	root := t.TempDir()
 	t.Setenv("MULTICODEX_HOME", filepath.Join(root, "multi"))
@@ -1176,6 +1207,8 @@ printf 'profile=%s\ncodex_home=%s\nargs=%s\n' "$profile" "${CODEX_HOME:-}" "$*" 
 
 func newExecSelectionTestApp(t *testing.T) (*App, string, string) {
 	t.Helper()
+	t.Setenv("MCE_INSTANCE", "")
+	t.Setenv("MCE_WINDOW", "")
 
 	root := t.TempDir()
 	t.Setenv("MULTICODEX_HOME", filepath.Join(root, "multi"))
