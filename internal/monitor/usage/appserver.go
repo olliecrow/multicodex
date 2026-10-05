@@ -193,7 +193,7 @@ func (s *appServerSession) ensureStarted() error {
 	}
 
 	client := codexappserver.New(codexappserver.Config{
-		GlobalArgs:    []string{"-s", "read-only", "-a", "untrusted"},
+		GlobalArgs:    []string{"-s", "read-only", "-a", "never"},
 		BaseEnv:       os.Environ(),
 		CodexHome:     s.codexHome,
 		ClientName:    clientName,
