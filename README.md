@@ -272,6 +272,8 @@ For validated multicodex profile homes, the monitor asks the Codex app-server fo
 
 Successful `multicodex monitor doctor` source checks report `plan=<plan> weekly=<used>% source=<source>`. When the provider supplies no weekly window, doctor reports `weekly=unavailable` instead of exposing an internal numeric marker.
 
+If an account shows `unavailable`, run `multicodex monitor doctor` before signing in again. An App Server startup failure together with an OAuth HTTP 401 can mean that startup blocked Codex's normal token refresh. Check startup first. Codex 0.159.3 rejects the former `untrusted` approval policy; monitor usage checks use `never` with the read-only sandbox. A successful OAuth fallback can hide this startup failure for accounts whose access tokens are still valid.
+
 The TUI:
 
 - orders account rows by weekly reset time
