@@ -10,13 +10,14 @@ func TestFilesystemIdentityKeysPreserveCase(t *testing.T) {
 	root := t.TempDir()
 	upper := filepath.Join(root, "Case")
 	lower := filepath.Join(root, "case")
-	for _, home := range []string{upper, lower} {
-		if err := os.Mkdir(home, 0o700); err != nil {
-			t.Fatal(err)
-		}
+	if err := os.Mkdir(upper, 0o700); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(root, "CASE")); err == nil {
+	if _, err := os.Stat(lower); err == nil {
 		t.Skip("temporary directory is on a case-insensitive filesystem")
+	}
+	if err := os.Mkdir(lower, 0o700); err != nil {
+		t.Fatal(err)
 	}
 
 	if accountIdentityOrHomeKey(AccountSummary{}, upper) == accountIdentityOrHomeKey(AccountSummary{}, lower) {
