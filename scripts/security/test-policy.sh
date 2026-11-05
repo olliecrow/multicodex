@@ -4,14 +4,16 @@ checks="$(cd "$(dirname "$0")" && pwd)"
 [[ ! -e "$checks/../../.github/dependabot.yml" ]]
 root="$(mktemp -d)"
 trap 'rm -r "$root"' EXIT
-reject() {
-  local status=0
+expect_status() {
+  local want="$1" status=0
+  shift
   "$@" > "$root/output" 2>&1 || status=$?
-  if [[ "$status" != 1 ]]; then
-    echo "expected policy rejection, got status $status: $*" >&2
+  if [[ "$status" != "$want" ]]; then
+    echo "expected status $want, got status $status: $*" >&2
     exit 1
   fi
 }
+reject() { expect_status 1 "$@"; }
 for name in YOUNG userbob; do
   printf '/%s/%s/project\n' "$( [[ "$name" == YOUNG ]] && echo Users || echo home )" "$name" > "$root/input"
   reject bash "$checks/check-sensitive-text.sh" "$root/input"
@@ -163,23 +165,58 @@ printf 'bot=%s\n' "$token" > "$merge/secret.txt"
 git -C "$merge" add secret.txt
 git -C "$merge" -c commit.gpgsign=false commit -qm merge
 workflow="$checks/../../.github/workflows/security-policy.yml"
-line="$(grep -F -- '--log-opts=' "$workflow")"
-[[ "$(grep -c -F -- '--log-opts=' "$workflow")" == 1 ]]
-opts="${line#*--log-opts=\"}"
-opts="${opts%%\"*}"
-case " $opts " in
-  *" --text "*|*" --text") ;;
-  *) echo "ci log-opts do not force text: $opts" >&2; exit 1 ;;
-esac
-case " $opts " in
-  *" -m "*|*" --diff-merges="*) ;;
-  *) echo "ci log-opts do not diff merges: $opts" >&2; exit 1 ;;
-esac
-ci_opts="${opts//\$\{range\}/HEAD}"
+# CI reaches gitleaks only through the wrapper that checks its log.
+if ! grep -qF 'bash scripts/security/gitleaks-range.sh "$range"' "$workflow"; then
+  echo "workflow does not scan with gitleaks-range.sh" >&2
+  exit 1
+fi
+if grep -qE 'gitleaks (git|dir|detect)' "$workflow"; then
+  echo "workflow runs gitleaks without gitleaks-range.sh" >&2
+  exit 1
+fi
+wrapper="$checks/gitleaks-range.sh"
+stub_bin="$root/stub-bin"
+mkdir "$stub_bin"
+printf '#!/usr/bin/env bash\ncat "$STUB_GITLEAKS_LOG"\n' > "$stub_bin/gitleaks"
+chmod 0755 "$stub_bin/gitleaks"
+# stub_scan <status> <log>: the wrapper must exit <status> when gitleaks
+# exits 0 after printing <log> (a printf format).
+stub_scan() {
+  # shellcheck disable=SC2059 # the log is the format
+  printf "$2" > "$root/stub.log"
+  expect_status "$1" stub_wrapper
+}
+stub_wrapper() {
+  PATH="$stub_bin:$PATH" STUB_GITLEAKS_LOG="$root/stub.log" bash "$wrapper" HEAD
+}
 (
   cd "$merge"
+  # The secret is only in the merge diff: plain log options miss it.
   gitleaks git --no-banner --redact --config "$checks/../../.gitleaks.toml" --log-opts="--text --no-textconv --no-ext-diff HEAD"
-  reject gitleaks git --no-banner --redact --config "$checks/../../.gitleaks.toml" --log-opts="$ci_opts"
-  reject gitleaks git --no-banner --redact --config "$checks/../../.gitleaks.toml" --log-opts="--text --no-textconv --no-ext-diff --diff-merges=first-parent HEAD"
+  reject bash "$wrapper" HEAD
+  expect_status 2 bash "$wrapper" 0123456789abcdef0123456789abcdef01234567..HEAD
+  expect_status 2 bash "$wrapper" 'HEAD '
+  expect_status 0 bash "$wrapper" HEAD..HEAD
+  stub_scan 2 'ERR [git] fatal: stub failure\nINF 0 commits scanned.\nINF no leaks found\n'
+  stub_scan 2 'ERR error="stderr is not empty"\nINF 2 commits scanned.\nINF no leaks found\n'
+  stub_scan 2 'INF 0 commits scanned.\nINF no leaks found\n'
+  stub_scan 2 'INF no leaks found\n'
+  stub_scan 0 'INF 4 commits scanned.\nINF no leaks found\n'
+)
+repo="$root/delete"
+git init -q -b main "$repo"
+git -C "$repo" config user.name Test
+git -C "$repo" config user.email test@example.com
+printf 'clean\n' > "$repo/clean.txt"
+git -C "$repo" add clean.txt
+git -C "$repo" -c commit.gpgsign=false commit -qm add
+git -C "$repo" rm -q clean.txt
+git -C "$repo" -c commit.gpgsign=false commit -qm delete
+(
+  cd "$repo"
+  expect_status 0 bash "$wrapper" HEAD
+  # A delete-only range scans 0 commits and is still clean.
+  expect_status 0 bash "$wrapper" HEAD^..HEAD
+  grep -qF '0 commits scanned' "$root/output"
 )
 echo 'Policy regression tests passed'
