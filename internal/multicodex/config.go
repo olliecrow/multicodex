@@ -110,7 +110,7 @@ func (s *Store) Load() (*Config, error) {
 	}
 	b, err := codexstate.ReadMetadataFile(s.paths.ConfigPath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read multicodex config %s: %w", s.paths.ConfigPath, err)
 	}
 	cfg := DefaultConfig()
 	if err := json.Unmarshal(b, cfg); err != nil {
@@ -457,7 +457,7 @@ func profileConfigCredentialStore(configPath string) (string, bool, error) {
 		if errors.Is(err, os.ErrNotExist) {
 			return "", false, nil
 		}
-		return "", false, fmt.Errorf("read profile config: %w", err)
+		return "", false, fmt.Errorf("read profile config %s: %w", configPath, err)
 	}
 	store, found, err := codexstate.CredentialStoreFromTOML(string(b))
 	if err != nil {
@@ -549,7 +549,7 @@ func (s *Store) ensureProfileConfig(codexHome string) error {
 		}
 		content, err := codexstate.ReadConfigFile(configPath)
 		if err != nil {
-			return fmt.Errorf("read profile config: %w", err)
+			return fmt.Errorf("read profile config %s: %w", configPath, err)
 		}
 		if string(content) != generatedProfileConfigContent {
 			return nil

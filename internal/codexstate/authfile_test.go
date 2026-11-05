@@ -2,6 +2,7 @@ package codexstate
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -96,5 +97,25 @@ func TestBoundedConfigReads(t *testing.T) {
 	}
 	if _, err := ReadConfigFile(fifo); err == nil {
 		t.Fatal("FIFO accepted")
+	}
+}
+
+func TestConfigOpenErrorReportsReasonWithoutContents(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores mode 000")
+	}
+	path := filepath.Join(t.TempDir(), "config.json")
+	marker := "contents-must-stay-out-of-the-error"
+	if err := os.WriteFile(path, []byte(marker), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0); err != nil {
+		t.Fatal(err)
+	}
+	for _, read := range []func(string) ([]byte, error){ReadConfigFile, ReadMetadataFile} {
+		_, err := read(path)
+		if err == nil || !errors.Is(err, fs.ErrPermission) || !strings.Contains(err.Error(), "permission denied") || strings.Contains(err.Error(), marker) || strings.Contains(err.Error(), path) {
+			t.Fatalf("error = %v", err)
+		}
 	}
 }

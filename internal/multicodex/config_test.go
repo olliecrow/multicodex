@@ -1244,7 +1244,29 @@ func TestConfigReadsRejectOversizedFiles(t *testing.T) {
 	if check := checkFileStoreConfig("config", path, true); check.Status != "fail" || !strings.Contains(check.Details, "exceeds") {
 		t.Fatalf("doctor: %+v", check)
 	}
-	if _, err := NewStore(Paths{ConfigPath: path}).Load(); err == nil || !strings.Contains(err.Error(), "exceeds") {
+	if _, err := NewStore(Paths{ConfigPath: path}).Load(); err == nil || !strings.Contains(err.Error(), "exceeds") || !strings.Contains(err.Error(), path) {
 		t.Fatalf("metadata read: %v", err)
+	}
+}
+
+func TestConfigOpenErrorIncludesPathAndReason(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores mode 000")
+	}
+	path := filepath.Join(t.TempDir(), "config.json")
+	marker := "contents-must-stay-out-of-the-error"
+	if err := os.WriteFile(path, []byte(marker), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0); err != nil {
+		t.Fatal(err)
+	}
+	_, err := NewStore(Paths{ConfigPath: path}).Load()
+	if err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "permission denied") || strings.Contains(err.Error(), marker) {
+		t.Fatalf("Load error = %v", err)
+	}
+	check := checkFileStoreConfig("config", path, true)
+	if check.Status != "fail" || !strings.Contains(check.Details, path) || !strings.Contains(check.Details, "permission denied") || strings.Contains(check.Details, marker) {
+		t.Fatalf("doctor = %+v", check)
 	}
 }

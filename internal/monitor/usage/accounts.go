@@ -317,7 +317,7 @@ func monitorProfileConfigPathSafe(path, defaultConfigPath string) error {
 func monitorConfigFileUsesFileStore(path string) (bool, error) {
 	data, err := codexstate.ReadConfigFile(path)
 	if err != nil {
-		return false, fmt.Errorf("read profile config: %w", err)
+		return false, fmt.Errorf("read profile config %s: %w", path, err)
 	}
 	store, found, err := codexstate.CredentialStoreFromTOML(string(data))
 	if err != nil {

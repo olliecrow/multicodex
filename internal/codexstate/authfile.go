@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"syscall"
 )
@@ -41,13 +42,7 @@ func readStateFile(path, label string, limit int64, private bool) ([]byte, os.Fi
 	}
 	file, err := os.OpenFile(path, flags, 0)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil, err
-		}
-		if errors.Is(err, syscall.ELOOP) {
-			return nil, nil, errors.New(label + " is a symlink")
-		}
-		return nil, nil, errors.New(label + " could not be opened")
+		return nil, nil, openStateError(label, err)
 	}
 	defer file.Close()
 	info, err := file.Stat()
@@ -75,4 +70,19 @@ func readStateFile(path, label string, limit int64, private bool) ([]byte, os.Fi
 		return nil, nil, fmt.Errorf("%s exceeds %d MiB", label, limit>>20)
 	}
 	return data, info, nil
+}
+
+// openStateError keeps a fixed label and a safe reason. It does not include
+// file contents. Callers add the path when the user needs to find the file.
+func openStateError(label string, err error) error {
+	if errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if errors.Is(err, syscall.ELOOP) {
+		return errors.New(label + " is a symlink")
+	}
+	if errors.Is(err, fs.ErrPermission) {
+		return fmt.Errorf("%s could not be opened: %w", label, fs.ErrPermission)
+	}
+	return errors.New(label + " could not be opened")
 }

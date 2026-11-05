@@ -454,7 +454,7 @@ func checkFileStoreConfig(name, path string, required bool) DoctorCheck {
 			}
 			return DoctorCheck{Name: name, Status: "warn", Details: "config.toml not found"}
 		}
-		return DoctorCheck{Name: name, Status: "fail", Details: err.Error()}
+		return DoctorCheck{Name: name, Status: "fail", Details: fmt.Sprintf("read %s: %s", path, err.Error())}
 	}
 	ok, err := profileConfigUsesFileStore(path)
 	if err != nil {
