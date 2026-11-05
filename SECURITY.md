@@ -3,13 +3,12 @@
 ## Supported versions
 
 This repository is maintained on `main` only. Security fixes, when available, are published on `main`.
-GitHub vulnerability alerts and automated security fixes are enabled as the default low-maintenance dependency baseline.
 
 ## Reporting a vulnerability
 
 Do not open a public GitHub issue for a suspected vulnerability.
 
-Report security concerns privately through GitHub private vulnerability reporting when available, and include:
+Report it privately: open the repository's **Security** tab and select **Report a vulnerability**. Include:
 
 - repository name
 - affected version, commit, or environment
@@ -17,6 +16,4 @@ Report security concerns privately through GitHub private vulnerability reportin
 - impact assessment
 - any suggested fix or mitigation
 
-If private vulnerability reporting is unavailable, open a minimal public issue asking the maintainers to establish a private reporting channel. Do not include vulnerability details in that issue.
-
-Maintainers do not guarantee a response time. They may redirect reports that are not security-sensitive to the public issue tracker.
+Report bugs that are not security-sensitive in the public issue tracker. Maintainers do not guarantee a response time.
