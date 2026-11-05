@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/creack/pty"
 )
 
 func TestProfileCodexEnvSetsProfileAndStripsAccountOverrides(t *testing.T) {
@@ -173,5 +175,34 @@ func TestInteractiveEditorLaunchDisablesDecorationsOnly(t *testing.T) {
 				t.Fatal("launch mutated caller arguments")
 			}
 		})
+	}
+}
+
+func TestFileIsTerminalRejectsNonTerminalCharacterDevices(t *testing.T) {
+	devNull, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer devNull.Close()
+	if fileIsTerminal(devNull) {
+		t.Fatal("/dev/null was treated as a terminal")
+	}
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	defer writer.Close()
+	if fileIsTerminal(reader) || fileIsTerminal(writer) {
+		t.Fatal("pipe was treated as a terminal")
+	}
+	ptmx, tty, err := pty.Open()
+	if err != nil {
+		t.Skipf("pseudo-terminal unavailable: %v", err)
+	}
+	defer ptmx.Close()
+	defer tty.Close()
+	if !fileIsTerminal(tty) {
+		t.Fatal("pseudo-terminal was not treated as a terminal")
 	}
 }
