@@ -20,13 +20,20 @@ known_token_regex='((ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9
 email_regex='("[^"]+"|[A-Za-z0-9._%+-]+)@[A-Za-z0-9-]+([.][A-Za-z0-9-]+)*[.]([A-Za-z]{2,63}|[Xx][Nn]--[A-Za-z0-9-]{2,59})'
 allowed_email_placeholder_regex='("[^"]+"|[A-Za-z0-9._%+-]+)@(example[.](com|org|net)|([A-Za-z0-9-]+[.])*(example|invalid|test)|users[.]noreply[.]github[.]com)'
 
+# search_pattern prints matching lines. "No match" is success; a search tool
+# failure stops the check instead of passing silently.
 search_pattern() {
   local pattern="$1"
   local file_path="$2"
+  local status=0
   if command -v rg >/dev/null 2>&1; then
-    rg --line-number --no-heading --color never -e "$pattern" "$file_path" || true
+    rg --line-number --no-heading --color never -e "$pattern" "$file_path" || status=$?
   else
-    grep -nE "$pattern" "$file_path" || true
+    grep -nE "$pattern" "$file_path" || status=$?
+  fi
+  if [[ "$status" -gt 1 ]]; then
+    echo "sensitive-text search failed in ${context}: ${file_path}" >&2
+    exit 2
   fi
 }
 
@@ -67,8 +74,9 @@ redact_matches() {
 
 failed=0
 for target in "$@"; do
-  if [[ ! -f "$target" ]]; then
-    continue
+  if [[ ! -f "$target" || ! -r "$target" ]]; then
+    echo "cannot read ${context} input: ${target}" >&2
+    exit 2
   fi
 
   path_matches="$(search_pattern "$local_path_regex" "$target")"
