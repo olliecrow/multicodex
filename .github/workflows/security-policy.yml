@@ -196,8 +196,12 @@ jobs:
             echo "identity self-test unexpectedly passed" >&2
             exit 1
           fi
-          if (cd "${repo}" && PRE_COMMIT_FROM_REF="$(printf '0%.0s' {1..39})1" PRE_COMMIT_TO_REF="${good}" bash "${checks}/check-push-range.sh"); then
-            echo "invalid range self-test unexpectedly passed" >&2
+          if ! (cd "${repo}" && PRE_COMMIT_FROM_REF="$(printf '0%.0s' {1..39})1" PRE_COMMIT_TO_REF="${good}" bash "${checks}/check-push-range.sh"); then
+            echo "unknown base rejected a clean commit" >&2
+            exit 1
+          fi
+          if (cd "${repo}" && PRE_COMMIT_FROM_REF="$(printf '0%.0s' {1..39})1" PRE_COMMIT_TO_REF="${bad}" bash "${checks}/check-push-range.sh"); then
+            echo "unknown base accepted a disallowed commit" >&2
             exit 1
           fi
           if bash "${checks}/check-sensitive-text.sh" --context=selftest "${repo}/missing.txt"; then
