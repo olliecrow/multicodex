@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestEmailFromAuthFileTopLevel(t *testing.T) {
@@ -220,4 +221,82 @@ func syntheticJWT(t *testing.T, claims map[string]any) string {
 
 	enc := base64.RawURLEncoding
 	return enc.EncodeToString(headerJSON) + "." + enc.EncodeToString(claimsJSON) + "."
+}
+
+func writeFakeLoginStatusCodex(t *testing.T, script string) string {
+	t.Helper()
+	root := t.TempDir()
+	fakeBin := filepath.Join(root, "bin")
+	if err := os.MkdirAll(fakeBin, 0o700); err != nil {
+		t.Fatalf("mkdir fake bin: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(fakeBin, "codex"), []byte("#!/bin/sh\n"+script), 0o755); err != nil {
+		t.Fatalf("write fake codex: %v", err)
+	}
+	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	home := filepath.Join(root, "codex-home")
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		t.Fatalf("mkdir codex home: %v", err)
+	}
+	return home
+}
+
+func TestCodexLoginStatusReportsOnlyFixedDetails(t *testing.T) {
+	const marker = "SYNTHETIC-PRIVATE-MARKER"
+	tests := []struct {
+		name   string
+		script string
+		state  string
+		detail string
+	}{
+		{"chatgpt", "echo 'Logged in using ChatGPT' >&2\n", "logged-in", "logged in using ChatGPT"},
+		{"api key suffix", "echo 'Logged in using an API key - sk-" + marker + "' >&2\n", "logged-in", "logged in using an API key"},
+		{"warning before confirmation", "echo 'WARNING: " + marker + "' >&2\necho 'Logged in using ChatGPT' >&2\n", "logged-in", "logged in using ChatGPT"},
+		{"unknown method", "echo 'Logged in using " + marker + "'\n", "logged-in", "logged in"},
+		{"secret-like success", "echo '" + marker + " authenticated active logged'\n", "error", "codex login status output is not a recognized login confirmation"},
+		{"empty success", "exit 0\n", "error", "codex login status output is not a recognized login confirmation"},
+		{"logged out", "echo 'Not logged in' >&2\nexit 1\n", "logged-out", "not logged in"},
+		{"failure", "echo '" + marker + "' >&2\nexit 7\n", "error", "codex login status failed with exit code 7"},
+		{"confirmation with failure exit", "echo 'Logged in using ChatGPT'\nexit 3\n", "error", "codex login status failed with exit code 3"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home := writeFakeLoginStatusCodex(t, tt.script)
+			state, account, detail := codexLoginStatus(home)
+			if state != tt.state || detail != tt.detail {
+				t.Fatalf("codexLoginStatus = %q, %q; want %q, %q", state, detail, tt.state, tt.detail)
+			}
+			if account != "-" || strings.Contains(detail, marker) {
+				t.Fatalf("raw status output leaked: account=%q detail=%q", account, detail)
+			}
+		})
+	}
+}
+
+func TestCodexLoginStatusStopsOversizedOutput(t *testing.T) {
+	home := writeFakeLoginStatusCodex(t, "while :; do echo 'Logged in using ChatGPT padding padding padding'; done\n")
+	start := time.Now()
+	state, _, detail := codexLoginStatus(home)
+	if state != "error" || detail != "codex login status output exceeded 64 KiB" {
+		t.Fatalf("oversized status = %q, %q", state, detail)
+	}
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Fatalf("oversized status was not stopped promptly: %s", elapsed)
+	}
+}
+
+func TestCodexLoginStatusSanitizesAuthFileAccount(t *testing.T) {
+	home := writeFakeLoginStatusCodex(t, "echo 'Logged in using ChatGPT'\n")
+	if err := os.WriteFile(filepath.Join(home, "auth.json"), []byte(`{"email":"user@example.com\u001b[2J"}`), 0o600); err != nil {
+		t.Fatalf("write auth: %v", err)
+	}
+	if _, account, _ := codexLoginStatus(home); account != "-" {
+		t.Fatalf("control characters reached account display: %q", account)
+	}
+	if err := os.WriteFile(filepath.Join(home, "auth.json"), []byte(`{"email":"user@example.com"}`), 0o600); err != nil {
+		t.Fatalf("write auth: %v", err)
+	}
+	if _, account, _ := codexLoginStatus(home); account != "user@example.com" {
+		t.Fatalf("plain email account = %q", account)
+	}
 }

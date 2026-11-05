@@ -118,7 +118,7 @@ Multicodex intentionally has no command for changing the shared default Codex ac
 - Re-checks profile filesystem and file-backed auth isolation before a configured-profile run. It never changes or manages default account authentication.
 
 `multicodex status`
-- Shows all profiles and each profile login status.
+- Shows all profiles and each profile login status with fixed details only, never raw `codex login status` output. Successful output that is not a recognized login confirmation is reported as an error.
 - Does not manage or inspect the default Codex account as a multicodex profile.
 - Remains auth-only: it does not validate, reconcile, or claim readiness for configured profile resources.
 

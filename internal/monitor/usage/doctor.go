@@ -3,10 +3,10 @@ package usage
 import (
 	"context"
 	"fmt"
-	"os"
-	"os/exec"
 	"sort"
 	"strings"
+
+	"github.com/olliecrow/multicodex/internal/codexstate"
 )
 
 type DoctorReport struct {
@@ -89,25 +89,11 @@ func (r DoctorReport) Status() string {
 }
 
 func checkCodexBinary(ctx context.Context) DoctorCheck {
-	cmd := exec.CommandContext(ctx, "codex", "--version")
-	cmd.Env = withoutCodexProfileEnv(os.Environ())
-	out, err := cmd.CombinedOutput()
+	version, err := codexstate.CodexVersion(ctx)
 	if err != nil {
-		return DoctorCheck{
-			Name:    "codex binary",
-			OK:      false,
-			Details: fmt.Sprintf("failed to execute codex --version: %v", err),
-		}
+		return DoctorCheck{Name: "codex binary", OK: false, Details: err.Error()}
 	}
-	version := strings.TrimSpace(string(out))
-	if version == "" {
-		version = "version output is empty"
-	}
-	return DoctorCheck{
-		Name:    "codex binary",
-		OK:      true,
-		Details: version,
-	}
+	return DoctorCheck{Name: "codex binary", OK: true, Details: version}
 }
 
 func checkSourceFetch(ctx context.Context, account MonitorAccount, source Source) DoctorCheck {

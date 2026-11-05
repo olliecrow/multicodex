@@ -1,7 +1,6 @@
 package multicodex
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -15,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/olliecrow/multicodex/internal/codexstate"
 )
 
 type profileStatus struct {
@@ -25,7 +26,9 @@ type profileStatus struct {
 	Detail   string
 }
 
-var emailRe = regexp.MustCompile(`[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}`)
+var accountEmailRe = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
+
+const loginStatusOutputLimit = 64 << 10
 
 var codexLoginStatusTimeout = 5 * time.Second
 var profileCheckWorkerLimit = 6
@@ -137,52 +140,72 @@ func parallelWorkers(total int) int {
 }
 
 func codexLoginStatus(codexHome string) (state, account, detail string) {
+	account = accountFromAuthFile(filepath.Join(codexHome, "auth.json"))
+
 	ctx, cancel := context.WithTimeout(context.Background(), codexLoginStatusTimeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "codex", "login", "status")
 	cmd.WaitDelay = 500 * time.Millisecond
 	cmd.Env = profileCodexEnv(os.Environ(), codexHome, "")
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &out
+	out := codexstate.NewCappedOutput(loginStatusOutputLimit, cancel)
+	cmd.Stdout = out
+	cmd.Stderr = out
 
 	err := cmd.Run()
-	all := strings.TrimSpace(out.String())
-	lower := strings.ToLower(all)
-
-	account = emailRe.FindString(all)
-	if account == "" {
-		email, err := emailFromAuthFile(filepath.Join(codexHome, "auth.json"))
-		if err == nil && email != "" {
-			account = email
-		} else {
-			account = "-"
-		}
+	if out.Exceeded() {
+		return "error", account, "codex login status output exceeded 64 KiB"
 	}
-
+	if err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return "error", account, fmt.Sprintf("codex login status timed out after %s", codexLoginStatusTimeout)
+	}
+	text := out.String()
 	if err == nil {
-		if loginStatusTextIndicatesLoggedOut(lower) {
-			return "logged-out", account, firstLineOrDash(all)
+		if confirmation, ok := loginStatusConfirmation(text); ok {
+			return "logged-in", account, confirmation
 		}
-		if strings.Contains(lower, "logged") || strings.Contains(lower, "active") || strings.Contains(lower, "authenticated") {
-			return "logged-in", account, firstLineOrDash(all)
-		}
-		return "ok", account, firstLineOrDash(all)
 	}
-
+	if loginStatusTextIndicatesLoggedOut(strings.ToLower(text)) {
+		return "logged-out", account, "not logged in"
+	}
+	if err == nil {
+		return "error", account, "codex login status output is not a recognized login confirmation"
+	}
 	var ee *exec.ExitError
 	if errors.As(err, &ee) {
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return "error", account, fmt.Sprintf("codex login status timed out after %s", codexLoginStatusTimeout)
-		}
-		if loginStatusTextIndicatesLoggedOut(lower) {
-			return "logged-out", account, "not logged in"
-		}
 		return "error", account, fmt.Sprintf("codex login status failed with exit code %d", ee.ExitCode())
 	}
-
 	return "error", account, "codex login status could not be started"
+}
+
+// loginStatusMethods maps the official `codex login status` confirmation
+// suffixes to fixed details. Raw status text never reaches diagnostics.
+var loginStatusMethods = []struct {
+	method string
+	detail string
+}{
+	{"ChatGPT", "logged in using ChatGPT"},
+	{"an API key", "logged in using an API key"},
+	{"access token", "logged in using an access token"},
+	{"personal access token", "logged in using a personal access token"},
+	{"workload identity", "logged in using workload identity"},
+	{"Amazon Bedrock", "logged in using Amazon Bedrock"},
+}
+
+func loginStatusConfirmation(text string) (string, bool) {
+	for _, line := range strings.Split(text, "\n") {
+		method, ok := strings.CutPrefix(strings.TrimSpace(line), "Logged in using ")
+		if !ok {
+			continue
+		}
+		for _, known := range loginStatusMethods {
+			if strings.HasPrefix(method, known.method) {
+				return known.detail, true
+			}
+		}
+		return "logged in", true
+	}
+	return "", false
 }
 
 func loginStatusTextIndicatesLoggedOut(lower string) bool {
@@ -202,15 +225,6 @@ func loginStatusTextIndicatesLoggedOut(lower string) bool {
 	return false
 }
 
-func firstLineOrDash(s string) string {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return "-"
-	}
-	line, _, _ := strings.Cut(s, "\n")
-	return line
-}
-
 func truncate(s string, n int) string {
 	if n <= 0 {
 		return ""
@@ -222,6 +236,16 @@ func truncate(s string, n int) string {
 		return s[:n]
 	}
 	return s[:n-3] + "..."
+}
+
+// accountFromAuthFile returns the display email from a profile auth file, or
+// "-" when it is missing or does not look like a plain email address.
+func accountFromAuthFile(path string) string {
+	email, err := emailFromAuthFile(path)
+	if err != nil || len(email) > 254 || !accountEmailRe.MatchString(email) {
+		return "-"
+	}
+	return email
 }
 
 func emailFromAuthFile(path string) (string, error) {

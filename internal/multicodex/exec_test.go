@@ -223,6 +223,27 @@ func TestCmdExecFailsClosedWhenDefaultLoginStatusIsUnavailable(t *testing.T) {
 	}
 }
 
+func TestCmdExecFailsClosedWhenDefaultLoginStatusIsUnrecognized(t *testing.T) {
+	app, logPath := newExecTestApp(t)
+	createExecProfiles(t, app, "alpha")
+	t.Setenv("MULTICODEX_FAKE_LOGIN_STATE", "unknown")
+
+	originalSelector := defaultExecAccountSelector
+	defaultExecAccountSelector = selectDefaultExecAccountForTest(t)
+	defer func() { defaultExecAccountSelector = originalSelector }()
+
+	err := app.Run([]string{"exec", "--skip-git-repo-check", "hello"})
+	if err == nil || !strings.Contains(err.Error(), "not a recognized login confirmation") {
+		t.Fatalf("expected unrecognized default login status to fail closed, got %v", err)
+	}
+	if strings.Contains(err.Error(), "SYNTHETIC-PRIVATE-MARKER") {
+		t.Fatalf("default login-status error exposed subprocess output: %v", err)
+	}
+	if _, statErr := os.Stat(logPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("expected codex exec not to run, stat err=%v", statErr)
+	}
+}
+
 func TestCmdExecFailsClosedWhenDefaultLoginStatusTimesOut(t *testing.T) {
 	app, logPath := newExecTestApp(t)
 	createExecProfiles(t, app, "alpha")
@@ -1165,6 +1186,10 @@ const fakeExecLoginStatusScript = `if [[ "${1:-}" == "login" && "${2:-}" == "sta
     error)
       echo "opaque-provider-diagnostic" >&2
       exit 7
+      ;;
+    unknown)
+      echo "SYNTHETIC-PRIVATE-MARKER authenticated"
+      exit 0
       ;;
     timeout)
       sleep 3
