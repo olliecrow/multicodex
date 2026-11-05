@@ -10,8 +10,7 @@ Profile login requires file-backed auth. If the effective Codex config does not 
 
 ## Prerequisites
 
-- Go 1.25 or newer for building from source.
-- Development and CI checks use the patched Go toolchain listed in `go.mod`.
+- For source builds, the Go version in `go.mod`. An older Go downloads it automatically unless `GOTOOLCHAIN=local` is set.
 - Official `codex` CLI installed and available in `PATH`.
 - Git for `multicodex editor` project and worktree checks.
 - tmux 3.2 or newer for `multicodex editor`.
