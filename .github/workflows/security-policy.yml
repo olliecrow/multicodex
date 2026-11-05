@@ -5,6 +5,9 @@ on:
   push:
     branches:
       - main
+  schedule:
+    # Weekly scan so an unchanged main still meets new advisories.
+    - cron: '23 6 * * 1'
 
 permissions:
   contents: read
@@ -46,6 +49,16 @@ jobs:
         run: |
           brew list tmux >/dev/null 2>&1 || brew install tmux
           tmux -V
+
+      - name: Check Go formatting
+        if: runner.os == 'Linux'
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [[ -n "${unformatted}" ]]; then
+            echo "gofmt needed for:" >&2
+            echo "${unformatted}" >&2
+            exit 1
+          fi
 
       - name: Run Go tests
         run: go test ./...
@@ -92,6 +105,7 @@ jobs:
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
 
       - name: Scan the commit range with gitleaks
+        if: github.event_name != 'schedule'
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -167,6 +181,7 @@ jobs:
           fi
 
       - name: Check commit messages for policy violations
+        if: github.event_name != 'schedule'
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -186,6 +201,7 @@ jobs:
           bash scripts/security/check-sensitive-text.sh --context=commit-message "${temp_file}"
 
       - name: Check the patch for policy violations
+        if: github.event_name != 'schedule'
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
