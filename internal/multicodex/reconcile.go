@@ -32,7 +32,7 @@ func (a *App) cmdReconcile(args []string) error {
 		for _, name := range names {
 			fmt.Printf("\n== %s ==\n", name)
 			profile := cfg.Profiles[name]
-			changes, err := a.store.EnsureProfileDir(profile, cfg.ProfileResources)
+			changes, err := a.store.ensureProfileDirLocked(profile, cfg.ProfileResources)
 			if err != nil {
 				failed++
 				fmt.Fprintf(os.Stderr, "reconcile failed for %s: %v\n", name, err)

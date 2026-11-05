@@ -19,6 +19,7 @@
 - Profile-scoped Codex subprocesses must scrub inherited Codex/OpenAI account override environment variables before setting the selected profile `CODEX_HOME`.
 - Profile resource settings may name local directories outside the default Codex home. The user owns the trust decision for those sources; multicodex only creates symlinks and does not execute or copy source contents.
 - Explicit resource reconciliation validates all configured sources before profile mutation. It removes or retargets only symlinks at documented managed positions and preserves regular profile guidance and skill entries.
+- Profile preparation runs under the multicodex config lock, and managed links are retargeted by an atomic rename, so concurrent multicodex processes never see a half-replaced entry. The lock is cooperative and does not serialize other programs.
 - Editor SSH input is restricted to an alias-shaped name and is passed as one argument with batch mode.
   - Agent, X11, local, remote, dynamic, and tunnel forwarding are disabled. Configured local commands do not run.
   - SSH child processes remove inherited `CODEX_*`, `OPENAI_*`, and `MULTICODEX_*` values. Configured environment forwarding cannot transmit client account state.
