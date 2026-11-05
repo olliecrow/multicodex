@@ -36,6 +36,13 @@ func RunCLI(args []string) error {
 		printHelp()
 		return nil
 	}
+	if commandHelpRequest(args) {
+		app, err := newApp()
+		if err != nil {
+			return err
+		}
+		return app.cmdHelp([]string{args[0]})
+	}
 	if err := rejectTopLevelArguments(args); err != nil {
 		return err
 	}
@@ -61,14 +68,6 @@ func RunCLI(args []string) error {
 		}
 		return app.Run(args)
 	}
-	if len(args) == 2 && (args[1] == "-h" || args[1] == "--help") {
-		app, err := newApp()
-		if err != nil {
-			return err
-		}
-		return app.cmdHelp([]string{args[0]})
-	}
-
 	if !commandKnown(args[0]) {
 		return &ExitError{Code: 2, Message: fmt.Sprintf("unknown command: %s\nrun \"multicodex help\" for available commands", args[0])}
 	}
@@ -94,6 +93,9 @@ func (a *App) Run(args []string) error {
 	if len(args) == 0 {
 		printHelp()
 		return nil
+	}
+	if commandHelpRequest(args) {
+		return a.cmdHelp([]string{args[0]})
 	}
 	if err := rejectTopLevelArguments(args); err != nil {
 		return err
@@ -142,6 +144,13 @@ func (a *App) Run(args []string) error {
 	default:
 		return &ExitError{Code: 2, Message: fmt.Sprintf("unknown command: %s\nrun \"multicodex help\" for available commands", args[0])}
 	}
+}
+
+// commandHelpRequest reports `multicodex <command> -h|--help`. It is checked
+// before argument validation so help works for commands that take no
+// arguments. exec keeps its own help delegation.
+func commandHelpRequest(args []string) bool {
+	return len(args) == 2 && (args[1] == "-h" || args[1] == "--help") && args[0] != "exec"
 }
 
 func rejectArguments(args []string, usage string) error {

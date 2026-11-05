@@ -23,6 +23,8 @@
 - `multicodex help [command [subcommand]]`
 - `multicodex version` and `multicodex --version`
 
+`multicodex <command> --help` and `-h` print that command's help, even for commands that take no arguments. `exec` delegates its help to `codex exec`.
+
 Multicodex intentionally has no command for changing the shared default Codex account.
 
 ## Behavior contract

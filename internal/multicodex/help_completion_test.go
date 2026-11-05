@@ -273,3 +273,28 @@ func captureStdout(t *testing.T, fn func() error) (string, error) {
 	_ = r.Close()
 	return string(out), runErr
 }
+
+func TestNoArgumentCommandsAcceptHelpFlags(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("MULTICODEX_HOME", filepath.Join(root, "multi"))
+	t.Setenv("MULTICODEX_DEFAULT_CODEX_HOME", filepath.Join(root, "default-codex"))
+	t.Setenv("PATH", root)
+	for _, command := range []string{"init", "status", "login-all", "version"} {
+		for _, flag := range []string{"-h", "--help"} {
+			out, err := captureStdout(t, func() error { return RunCLI([]string{command, flag}) })
+			if err != nil {
+				t.Fatalf("%s %s: %v", command, flag, err)
+			}
+			if !strings.Contains(out, "multicodex "+command) || !strings.Contains(out, "Usage:") {
+				t.Fatalf("%s %s printed no command help: %q", command, flag, out)
+			}
+		}
+		var exitErr *ExitError
+		if err := RunCLI([]string{command, "extra", "args"}); !errors.As(err, &exitErr) || exitErr.Code != 2 {
+			t.Fatalf("%s with extra args = %v, want usage error", command, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "multi")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("help created multicodex state, stat err=%v", err)
+	}
+}
