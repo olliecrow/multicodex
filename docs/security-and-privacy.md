@@ -66,3 +66,5 @@
   - Search items are deduplicated by nonblank lifecycle ID of at most 256 bytes. Generation fails if an item has an invalid ID, search activity has no lifecycle item, or a turn exceeds 1,024 distinct search IDs.
   - The count contains no query, URL, result, account, path, reasoning, or raw-event data. Assistant text can contain model-written citations or search-derived content.
 - Monitor defaults include the global Codex home through direct read-only usage requests. Normal monitor usage may start profile-scoped read-only Codex app-server sessions only for validated multicodex profile homes. Active `CODEX_HOME`, filesystem discovery, and extra raw app-server checks require explicit monitor flags; `--include-default=false` omits the global home.
+
+- Auth reads are capped at 1 MiB. Configuration and account metadata reads are capped at 16 MiB. Opened descriptors must be regular files; private metadata also rejects symlinks, multiple hard links, and other owners. Shared TOML config symlinks remain supported.

@@ -108,7 +108,7 @@ func (s *Store) Load() (*Config, error) {
 	if err := ensureRegularSingleFile(s.paths.ConfigPath, "multicodex config"); err != nil {
 		return nil, err
 	}
-	b, err := os.ReadFile(s.paths.ConfigPath)
+	b, err := codexstate.ReadMetadataFile(s.paths.ConfigPath)
 	if err != nil {
 		return nil, err
 	}
@@ -452,7 +452,7 @@ func profileConfigCredentialStore(configPath string) (string, bool, error) {
 		}
 		return "", false, err
 	}
-	b, err := os.ReadFile(configPath)
+	b, err := codexstate.ReadConfigFile(configPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return "", false, nil
@@ -547,7 +547,7 @@ func (s *Store) ensureProfileConfig(codexHome string) error {
 		if !info.Mode().IsRegular() {
 			return fmt.Errorf("profile config path is not a regular file: %s", configPath)
 		}
-		content, err := os.ReadFile(configPath)
+		content, err := codexstate.ReadConfigFile(configPath)
 		if err != nil {
 			return fmt.Errorf("read profile config: %w", err)
 		}

@@ -151,7 +151,7 @@ func loadAccountsFromMulticodexConfig() ([]MonitorAccount, string, error) {
 		}
 		return nil, "", fmt.Errorf("read multicodex config %s: %w", configPath, err)
 	}
-	data, err := os.ReadFile(configPath)
+	data, err := codexstate.ReadMetadataFile(configPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, "", nil
@@ -315,7 +315,7 @@ func monitorProfileConfigPathSafe(path, defaultConfigPath string) error {
 }
 
 func monitorConfigFileUsesFileStore(path string) (bool, error) {
-	data, err := os.ReadFile(path)
+	data, err := codexstate.ReadConfigFile(path)
 	if err != nil {
 		return false, fmt.Errorf("read profile config: %w", err)
 	}
@@ -359,7 +359,7 @@ func loadAccountsFromFile() ([]MonitorAccount, string, error) {
 		}
 		return nil, "", fmt.Errorf("read accounts file %s: %w", accountsPath, err)
 	}
-	data, err := os.ReadFile(accountsPath)
+	data, err := codexstate.ReadMetadataFile(accountsPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, "", nil

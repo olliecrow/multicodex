@@ -54,3 +54,47 @@ func expectAuthFileError(t *testing.T, path, want string) {
 		t.Fatalf("ReadAuthFile(%s) error = %v, want %q", filepath.Base(path), err, want)
 	}
 }
+
+func TestBoundedConfigReads(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config")
+	for _, read := range []func(string) ([]byte, error){ReadConfigFile, ReadMetadataFile} {
+		if err := os.WriteFile(path, make([]byte, MaxConfigFileBytes), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if data, err := read(path); err != nil || len(data) != MaxConfigFileBytes {
+			t.Fatalf("limit: length %d, %v", len(data), err)
+		}
+		f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = f.Write([]byte("x"))
+		f.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if data, err := read(path); err == nil || data != nil {
+			t.Fatal("oversized file accepted")
+		}
+	}
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.WriteFile(path, []byte("config"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(path, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadConfigFile(link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadMetadataFile(link); err == nil {
+		t.Fatal("metadata symlink accepted")
+	}
+	fifo := filepath.Join(t.TempDir(), "fifo")
+	if err := syscall.Mkfifo(fifo, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadConfigFile(fifo); err == nil {
+		t.Fatal("FIFO accepted")
+	}
+}

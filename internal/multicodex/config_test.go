@@ -1230,3 +1230,18 @@ func TestStoreSaveLeavesPrivateConfigAndNoTemporaryFiles(t *testing.T) {
 		}
 	}
 }
+
+func TestConfigReadsRejectOversizedFiles(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "config")
+	// Whitespace is valid TOML, so a size error proves the read is bounded.
+	if err := os.WriteFile(path, []byte(strings.Repeat(" ", (16<<20)+1)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := profileConfigCredentialStore(path); err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("TOML read: %v", err)
+	}
+	if _, err := NewStore(Paths{ConfigPath: path}).Load(); err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("metadata read: %v", err)
+	}
+}

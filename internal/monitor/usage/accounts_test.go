@@ -1039,3 +1039,26 @@ func TestMonitorConfigUsesFileStoreRejectsQuotedKeyWithExtraSpaces(t *testing.T)
 		t.Fatal("expected quoted key with extra spaces not to pass")
 	}
 }
+
+func TestMonitorReadsRejectOversizedFiles(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Chmod(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", root)
+	t.Setenv(multicodexHomeEnvVar, root)
+	path := filepath.Join(root, "config.json")
+	t.Setenv(accountsFileEnvVar, path)
+	if err := os.WriteFile(path, []byte(strings.Repeat(" ", (16<<20)+1)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := monitorConfigFileUsesFileStore(path); err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("TOML read: %v", err)
+	}
+	if _, _, err := loadAccountsFromFile(); err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("accounts read: %v", err)
+	}
+	if _, _, err := loadAccountsFromMulticodexConfig(); err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("metadata read: %v", err)
+	}
+}
