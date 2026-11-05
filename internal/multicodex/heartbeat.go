@@ -363,7 +363,11 @@ func acquireHeartbeatLock(path string) (*os.File, bool, error) {
 		return nil, false, fmt.Errorf("inspect heartbeat lock: %w", err)
 	}
 
-	lockFile, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0o600)
+	return openHeartbeatLock(path)
+}
+
+func openHeartbeatLock(path string) (*os.File, bool, error) {
+	lockFile, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0o600)
 	if err != nil {
 		return nil, false, fmt.Errorf("open heartbeat lock: %w", err)
 	}
