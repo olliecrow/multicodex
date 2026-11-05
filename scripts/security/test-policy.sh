@@ -19,13 +19,16 @@ for name in YOUNG userbob; do
   reject bash "$checks/check-sensitive-text.sh" "$root/input"
   reject gitleaks dir --no-banner --redact --config "$checks/../../.gitleaks-paths.toml" "$root/input"
 done
-for prefix in '' 'note: '; do
-  printf '%s/home/%s/project\n' "$prefix" fixture-person > "$root/input"
+# Real home paths, built at runtime, including paths the default gitleaks
+# allowlist would hide and a real path next to a placeholder.
+name=fixture-person
+for line in "/home/${name}/project" "note: /home/${name}" "/Users/${name}/project" \
+  'C:\Users\'"${name}"'\project' 'C:\\Users\\'"${name}"'\\project' "/Users/YOU /Users/${name}/project"; do
+  printf '%s\n' "$line" > "$root/input"
+  reject bash "$checks/check-sensitive-text.sh" "$root/input"
   reject gitleaks dir --no-banner --redact --config "$checks/../../.gitleaks-paths.toml" "$root/input"
 done
-printf '/Users/YOU /Users/%s/project\n' fixture-person > "$root/input"
-reject gitleaks dir --no-banner --redact --config "$checks/../../.gitleaks-paths.toml" "$root/input"
-printf '/Users/YOU /home/user\n' > "$root/input"
+printf '%s\n' '/Users/YOU /home/user C:\Users\USERNAME\project' > "$root/input"
 bash "$checks/check-sensitive-text.sh" "$root/input"
 gitleaks dir --no-banner --redact --config "$checks/../../.gitleaks-paths.toml" "$root/input"
 
