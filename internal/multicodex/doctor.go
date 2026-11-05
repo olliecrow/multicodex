@@ -444,7 +444,7 @@ func checkFileStoreConfig(name, path string, required bool) DoctorCheck {
 		}
 		return DoctorCheck{Name: name, Status: "fail", Details: err.Error()}
 	}
-	if _, err := os.ReadFile(path); err != nil {
+	if _, err := codexstate.ReadConfigFile(path); err != nil {
 		if os.IsNotExist(err) {
 			if required {
 				if linkTarget != "" {

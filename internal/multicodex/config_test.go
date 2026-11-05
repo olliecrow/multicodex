@@ -1241,6 +1241,9 @@ func TestConfigReadsRejectOversizedFiles(t *testing.T) {
 	if _, _, err := profileConfigCredentialStore(path); err == nil || !strings.Contains(err.Error(), "exceeds") {
 		t.Fatalf("TOML read: %v", err)
 	}
+	if check := checkFileStoreConfig("config", path, true); check.Status != "fail" || !strings.Contains(check.Details, "exceeds") {
+		t.Fatalf("doctor: %+v", check)
+	}
 	if _, err := NewStore(Paths{ConfigPath: path}).Load(); err == nil || !strings.Contains(err.Error(), "exceeds") {
 		t.Fatalf("metadata read: %v", err)
 	}
