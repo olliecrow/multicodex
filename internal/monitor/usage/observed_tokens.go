@@ -2,6 +2,7 @@ package usage
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -33,7 +35,15 @@ type observedTokenEstimator struct {
 	cache    map[string]cachedObservedEstimate
 	ttl      time.Duration
 	async    bool
-	inflight map[string]struct{}
+	inflight map[string]*observedRefresh
+	workers  chan struct{}
+	wg       sync.WaitGroup
+	closed   bool
+}
+
+type observedRefresh struct {
+	cancel context.CancelFunc
+	done   chan struct{}
 }
 
 type cachedObservedEstimate struct {
@@ -96,7 +106,8 @@ func newObservedTokenEstimator(ttl time.Duration, async bool) *observedTokenEsti
 		cache:    map[string]cachedObservedEstimate{},
 		ttl:      ttl,
 		async:    async,
-		inflight: map[string]struct{}{},
+		inflight: map[string]*observedRefresh{},
+		workers:  make(chan struct{}, 4),
 	}
 }
 
@@ -126,6 +137,10 @@ func (e *observedTokenEstimator) Estimate(codexHome string, now time.Time) (Obse
 	}
 
 	e.mu.Lock()
+	if e.closed {
+		e.mu.Unlock()
+		return ObservedTokenEstimate{}, errors.New("token estimator is closed")
+	}
 	cached, hasCached := e.cache[home]
 	if hasCached && now.Sub(cached.at) <= e.ttl {
 		e.mu.Unlock()
@@ -135,7 +150,7 @@ func (e *observedTokenEstimator) Estimate(codexHome string, now time.Time) (Obse
 	}
 	if !e.async {
 		e.mu.Unlock()
-		estimate, err := computeObservedTokenEstimate(home, now)
+		estimate, err := computeObservedTokenEstimate(context.Background(), home, now, e.workers)
 		if err != nil {
 			return ObservedTokenEstimate{
 				Status: observedTokensStatusUnavailable,
@@ -148,8 +163,11 @@ func (e *observedTokenEstimator) Estimate(codexHome string, now time.Time) (Obse
 		return estimate, nil
 	}
 	if _, running := e.inflight[home]; !running {
-		e.inflight[home] = struct{}{}
-		go e.refreshAsync(home)
+		ctx, cancel := context.WithCancel(context.Background())
+		job := &observedRefresh{cancel: cancel, done: make(chan struct{})}
+		e.inflight[home] = job
+		e.wg.Add(1)
+		go e.refreshAsync(ctx, home, job)
 	}
 	e.mu.Unlock()
 
@@ -166,27 +184,66 @@ func (e *observedTokenEstimator) Estimate(codexHome string, now time.Time) (Obse
 	}, nil
 }
 
-func (e *observedTokenEstimator) refreshAsync(codexHome string) {
+func (e *observedTokenEstimator) refreshAsync(ctx context.Context, codexHome string, job *observedRefresh) {
+	defer e.wg.Done()
+	defer close(job.done)
+	defer job.cancel()
 	now := time.Now().UTC()
-	estimate, err := computeObservedTokenEstimate(codexHome, now)
+	estimate, err := computeObservedTokenEstimate(ctx, codexHome, now, e.workers)
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	delete(e.inflight, codexHome)
-	if err != nil {
+	if e.inflight[codexHome] != job {
 		return
 	}
-	e.cache[codexHome] = cachedObservedEstimate{at: now, estimate: estimate}
+	delete(e.inflight, codexHome)
+	if err == nil && ctx.Err() == nil && !e.closed {
+		e.cache[codexHome] = cachedObservedEstimate{at: now, estimate: estimate}
+	}
 }
 
-func computeObservedTokenEstimate(codexHome string, now time.Time) (ObservedTokenEstimate, error) {
-	files, warnings, err := discoverRecentUsageFiles(codexHome, now)
+func (e *observedTokenEstimator) Close() error {
+	e.mu.Lock()
+	e.closed = true
+	for _, job := range e.inflight {
+		job.cancel()
+	}
+	clear(e.cache)
+	e.mu.Unlock()
+	e.wg.Wait()
+	return nil
+}
+
+// RetainHomes cancels removed homes and prevents old work from repopulating cache.
+func (e *observedTokenEstimator) RetainHomes(homes map[string]struct{}) {
+	e.mu.Lock()
+	var removed []*observedRefresh
+	for home, job := range e.inflight {
+		if _, keep := homes[home]; !keep {
+			job.cancel()
+			removed = append(removed, job)
+			delete(e.inflight, home)
+		}
+	}
+	for home := range e.cache {
+		if _, keep := homes[home]; !keep {
+			delete(e.cache, home)
+		}
+	}
+	e.mu.Unlock()
+	for _, job := range removed {
+		<-job.done
+	}
+}
+
+func computeObservedTokenEstimate(ctx context.Context, codexHome string, now time.Time, workers chan struct{}) (ObservedTokenEstimate, error) {
+	files, warnings, err := discoverRecentUsageFiles(ctx, codexHome, now)
 	if err != nil {
 		return ObservedTokenEstimate{}, err
 	}
 
 	cutoff1w := now.Add(-7 * 24 * time.Hour)
 
-	totalWeekly, fileWarnings, err := estimateTokensAcrossFiles(files, cutoff1w)
+	totalWeekly, fileWarnings, err := estimateTokensAcrossFiles(ctx, files, cutoff1w, workers)
 	if err != nil {
 		return ObservedTokenEstimate{}, err
 	}
@@ -206,7 +263,7 @@ type fileEstimateResult struct {
 	err          error
 }
 
-func estimateTokensAcrossFiles(files []string, cutoff1w time.Time) (tokenAccumulator, []string, error) {
+func estimateTokensAcrossFiles(ctx context.Context, files []string, cutoff1w time.Time, workers chan struct{}) (tokenAccumulator, []string, error) {
 	if len(files) == 0 {
 		return tokenAccumulator{}, nil, nil
 	}
@@ -228,7 +285,13 @@ func estimateTokensAcrossFiles(files []string, cutoff1w time.Time) (tokenAccumul
 		go func() {
 			defer wg.Done()
 			for file := range jobs {
-				fileWeekly, fileWarnings, err := estimateTokensFromFile(file, cutoff1w)
+				select {
+				case workers <- struct{}{}:
+				case <-ctx.Done():
+					return
+				}
+				fileWeekly, fileWarnings, err := estimateTokensFromFile(ctx, file, cutoff1w)
+				<-workers
 				results <- fileEstimateResult{
 					windowWeekly: fileWeekly,
 					warnings:     fileWarnings,
@@ -239,8 +302,13 @@ func estimateTokensAcrossFiles(files []string, cutoff1w time.Time) (tokenAccumul
 	}
 
 	go func() {
+	sendFiles:
 		for _, file := range files {
-			jobs <- file
+			select {
+			case jobs <- file:
+			case <-ctx.Done():
+				break sendFiles
+			}
 		}
 		close(jobs)
 		wg.Wait()
@@ -261,18 +329,24 @@ func estimateTokensAcrossFiles(files []string, cutoff1w time.Time) (tokenAccumul
 		totalWeekly.add(result.windowWeekly)
 		warnings = append(warnings, result.warnings...)
 	}
+	if ctx.Err() != nil {
+		return tokenAccumulator{}, nil, ctx.Err()
+	}
 	if firstErr != nil {
 		return tokenAccumulator{}, nil, firstErr
 	}
 	return totalWeekly, warnings, nil
 }
 
-func discoverRecentUsageFiles(codexHome string, now time.Time) ([]string, []string, error) {
+func discoverRecentUsageFiles(ctx context.Context, codexHome string, now time.Time) ([]string, []string, error) {
 	var files []string
 	var warnings []string
 	cutoff := now.Add(-8 * 24 * time.Hour)
 
 	for day := 0; day <= 8; day++ {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
 		d := now.AddDate(0, 0, -day)
 		dir := filepath.Join(codexHome, "sessions", d.Format("2006"), d.Format("01"), d.Format("02"))
 		entries, err := os.ReadDir(dir)
@@ -283,6 +357,9 @@ func discoverRecentUsageFiles(codexHome string, now time.Time) ([]string, []stri
 			return nil, nil, fmt.Errorf("read sessions dir %s: %w", dir, err)
 		}
 		for _, entry := range entries {
+			if err := ctx.Err(); err != nil {
+				return nil, nil, err
+			}
 			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".jsonl") {
 				continue
 			}
@@ -303,6 +380,9 @@ func discoverRecentUsageFiles(codexHome string, now time.Time) ([]string, []stri
 		}
 	} else {
 		for _, entry := range entries {
+			if err := ctx.Err(); err != nil {
+				return nil, nil, err
+			}
 			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".jsonl") {
 				continue
 			}
@@ -327,14 +407,21 @@ func discoverRecentUsageFiles(codexHome string, now time.Time) ([]string, []stri
 	return files, warnings, nil
 }
 
-func estimateTokensFromFile(path string, cutoff1w time.Time) (tokenAccumulator, []string, error) {
-	f, err := os.Open(path)
+func estimateTokensFromFile(ctx context.Context, path string, cutoff1w time.Time) (tokenAccumulator, []string, error) {
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOFOLLOW, 0)
 	if err != nil {
 		return tokenAccumulator{}, nil, fmt.Errorf("open usage file %s: %w", path, err)
 	}
 	defer f.Close()
 
-	reader := bufio.NewReaderSize(f, 256*1024)
+	info, err := f.Stat()
+	if err != nil {
+		return tokenAccumulator{}, nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return tokenAccumulator{}, nil, errors.New("usage file is not regular")
+	}
+	reader := bufio.NewReaderSize(contextReader{ctx, f}, 256*1024)
 	longLineBuf := make([]byte, 0, 64*1024)
 
 	var warnings []string
@@ -388,6 +475,18 @@ func estimateTokensFromFile(path string, cutoff1w time.Time) (tokenAccumulator, 
 		warnings = append(warnings, fmt.Sprintf("skipped %d records over %d MiB in %s", oversizedCount, maxJSONLRecordBytes>>20, filepath.Base(path)))
 	}
 	return sum1w, warnings, nil
+}
+
+type contextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r contextReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.reader.Read(p)
 }
 
 // maxJSONLRecordBytes bounds one session-log record held in memory. Larger

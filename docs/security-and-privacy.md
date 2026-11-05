@@ -68,3 +68,5 @@
 - Monitor defaults include the global Codex home through direct read-only usage requests. Normal monitor usage may start profile-scoped read-only Codex app-server sessions only for validated multicodex profile homes. Active `CODEX_HOME`, filesystem discovery, and extra raw app-server checks require explicit monitor flags; `--include-default=false` omits the global home.
 
 - Auth reads are capped at 1 MiB. Configuration and account metadata reads are capped at 16 MiB. Opened descriptors must be regular files; private metadata also rejects symlinks, multiple hard links, and other owners. Shared TOML config symlinks remain supported.
+
+- Monitor token refreshes share four file-reading slots across homes. Removing a home cancels and joins its refresh and drops its cache. Closing the fetcher cancels and joins all background token refreshes.

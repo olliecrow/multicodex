@@ -322,6 +322,9 @@ func attemptContext(parent context.Context, reserveForFallback bool) (context.Co
 
 func (f *Fetcher) Close() error {
 	var firstErr error
+	if observed, ok := f.observed.(interface{ Close() error }); ok {
+		firstErr = observed.Close()
+	}
 	for _, account := range f.accounts {
 		if account.primary != nil {
 			if err := account.primary.Close(); err != nil && firstErr == nil {
@@ -405,6 +408,9 @@ func (f *Fetcher) replaceAccountFetchers(accounts []MonitorAccount) {
 		closeAccountFetcher(existing)
 	}
 	f.accounts = next
+	if observed, ok := f.observed.(interface{ RetainHomes(map[string]struct{}) }); ok {
+		observed.RetainHomes(usedHomes)
+	}
 }
 
 func closeAccountFetcher(fetcher accountFetcher) {

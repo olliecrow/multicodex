@@ -1,6 +1,8 @@
 package usage
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -43,7 +45,7 @@ func TestComputeObservedTokenEstimate(t *testing.T) {
 		t.Fatalf("chtimes archived file: %v", err)
 	}
 
-	estimate, err := computeObservedTokenEstimate(home, now)
+	estimate, err := computeObservedTokenEstimate(context.Background(), home, now, make(chan struct{}, 4))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -60,6 +62,7 @@ func TestComputeObservedTokenEstimate(t *testing.T) {
 
 func TestObservedEstimatorReturnsUnavailableForMissingHome(t *testing.T) {
 	estimator := newObservedTokenEstimator(0, true)
+	t.Cleanup(func() { _ = estimator.Close() })
 	_, err := estimator.Estimate("", time.Now().UTC())
 	if err == nil {
 		t.Fatalf("expected error for missing codex home")
@@ -68,6 +71,7 @@ func TestObservedEstimatorReturnsUnavailableForMissingHome(t *testing.T) {
 
 func TestObservedEstimatorReturnsUnavailableForInvalidHome(t *testing.T) {
 	estimator := newObservedTokenEstimator(0, true)
+	t.Cleanup(func() { _ = estimator.Close() })
 	_, err := estimator.Estimate(filepath.Join(t.TempDir(), "missing"), time.Now().UTC())
 	if err == nil {
 		t.Fatalf("expected error for invalid codex home path")
@@ -78,6 +82,7 @@ func TestObservedEstimatorAsyncWarmupSetsWarmingFlag(t *testing.T) {
 	now := time.Now().UTC()
 	home := t.TempDir()
 	estimator := newObservedTokenEstimator(0, true)
+	t.Cleanup(func() { _ = estimator.Close() })
 
 	estimate, err := estimator.Estimate(home, now)
 	if err != nil {
@@ -104,7 +109,7 @@ func TestEstimateTokensFromFileDoesNotDoubleCountDuplicateTotals(t *testing.T) {
 		t.Fatalf("write usage file: %v", err)
 	}
 
-	sum1w, _, err := estimateTokensFromFile(path, cutoff1w)
+	sum1w, _, err := estimateTokensFromFile(context.Background(), path, cutoff1w)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -131,7 +136,7 @@ func TestEstimateTokensFromFileFallsBackToLastWhenTotalResets(t *testing.T) {
 		t.Fatalf("write usage file: %v", err)
 	}
 
-	sum1w, _, err := estimateTokensFromFile(path, cutoff1w)
+	sum1w, _, err := estimateTokensFromFile(context.Background(), path, cutoff1w)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -186,7 +191,7 @@ func TestEstimateTokensFromFileAccumulatesSplitBreakdown(t *testing.T) {
 		t.Fatalf("write usage file: %v", err)
 	}
 
-	sum1w, _, err := estimateTokensFromFile(path, cutoff1w)
+	sum1w, _, err := estimateTokensFromFile(context.Background(), path, cutoff1w)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -218,7 +223,7 @@ func TestEstimateTokensFromFileHandlesLargeJSONLLine(t *testing.T) {
 		t.Fatalf("write usage file: %v", err)
 	}
 
-	sum1w, warnings, err := estimateTokensFromFile(path, cutoff1w)
+	sum1w, warnings, err := estimateTokensFromFile(context.Background(), path, cutoff1w)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -280,7 +285,7 @@ func TestEstimateTokensFromFileSkipsOversizedRecords(t *testing.T) {
 		t.Fatalf("write usage file: %v", err)
 	}
 
-	sum1w, warnings, err := estimateTokensFromFile(path, cutoff1w)
+	sum1w, warnings, err := estimateTokensFromFile(context.Background(), path, cutoff1w)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -289,5 +294,124 @@ func TestEstimateTokensFromFileSkipsOversizedRecords(t *testing.T) {
 	}
 	if len(warnings) != 1 || !strings.Contains(warnings[0], "skipped 2 records over 16 MiB") {
 		t.Fatalf("expected one oversized-record warning, got %+v", warnings)
+	}
+}
+
+func TestObservedRefreshCloseAndPrune(t *testing.T) {
+	for _, prune := range []bool{false, true} {
+		t.Run(fmt.Sprint(prune), func(t *testing.T) {
+			e := newObservedTokenEstimator(time.Minute, true)
+			t.Cleanup(func() { _ = e.Close() })
+			// Occupy all four shared file slots. Every home must wait on this budget.
+			if cap(e.workers) != 4 {
+				t.Fatal("unexpected worker limit")
+			}
+			for i := 0; i < 4; i++ {
+				e.workers <- struct{}{}
+			}
+			var homes []string
+			var jobs []*observedRefresh
+			for i := 0; i < 2; i++ {
+				home := t.TempDir()
+				dir := filepath.Join(home, "archived_sessions")
+				if err := os.Mkdir(dir, 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(dir, "usage.jsonl"), []byte(tokenCountJSONLine(time.Now(), 20)), 0600); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := e.Estimate(home, time.Now()); err != nil {
+					t.Fatal(err)
+				}
+				e.mu.Lock()
+				jobs = append(jobs, e.inflight[home])
+				e.mu.Unlock()
+				homes = append(homes, home)
+			}
+			for _, job := range jobs {
+				select {
+				case <-job.done:
+					t.Fatal("home bypassed shared worker budget")
+				case <-time.After(20 * time.Millisecond):
+				}
+			}
+			// A removed cached home must also be pruned.
+			e.mu.Lock()
+			e.cache[homes[0]] = cachedObservedEstimate{}
+			e.mu.Unlock()
+			finished := make(chan struct{})
+			go func() {
+				if prune {
+					(&Fetcher{observed: e}).replaceAccountFetchers(nil)
+				} else {
+					_ = (&Fetcher{observed: e}).Close()
+				}
+				close(finished)
+			}()
+			select {
+			case <-finished:
+			case <-time.After(2 * time.Second):
+				t.Fatal("refresh cancellation did not join")
+			}
+			for _, job := range jobs {
+				select {
+				case <-job.done:
+				default:
+					t.Fatal("worker not joined")
+				}
+			}
+			e.mu.Lock()
+			size, running := len(e.cache), len(e.inflight)
+			e.mu.Unlock()
+			if size != 0 || running != 0 {
+				t.Fatalf("retained state: %d cache, %d jobs", size, running)
+			}
+			for i := 0; i < 4; i++ {
+				<-e.workers
+			}
+			if !prune {
+				if _, err := e.Estimate(homes[0], time.Now()); err == nil {
+					t.Fatal("closed estimator restarted")
+				}
+			} else {
+				// The same home can be re-added; canceled work must not overwrite it.
+				if _, err := e.Estimate(homes[0], time.Now()); err != nil {
+					t.Fatal(err)
+				}
+				e.mu.Lock()
+				job := e.inflight[homes[0]]
+				e.mu.Unlock()
+				if job == nil {
+					job = &observedRefresh{done: make(chan struct{})}
+					close(job.done)
+				}
+				select {
+				case <-job.done:
+				case <-time.After(2 * time.Second):
+					t.Fatal("re-added home did not refresh")
+				}
+				e.mu.Lock()
+				_, ok := e.cache[homes[0]]
+				e.mu.Unlock()
+				if !ok {
+					t.Fatal("re-added home has no estimate")
+				}
+			}
+		})
+	}
+}
+
+func TestObservedReadsHonorCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	path := filepath.Join(t.TempDir(), "usage.jsonl")
+	if err := os.WriteFile(path, []byte(tokenCountJSONLine(time.Now(), 20)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := estimateTokensFromFile(ctx, path, time.Now()); !errors.Is(err, context.Canceled) {
+		t.Fatalf("read: %v", err)
+	}
+	if _, _, err := discoverRecentUsageFiles(ctx, t.TempDir(), time.Now()); !errors.Is(err, context.Canceled) {
+		t.Fatalf("discovery: %v", err)
 	}
 }
