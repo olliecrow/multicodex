@@ -1,8 +1,6 @@
 module github.com/olliecrow/multicodex
 
-go 1.25.0
-
-toolchain go1.26.6
+go 1.27.3
 
 require (
 	charm.land/bubbletea/v2 v2.0.9

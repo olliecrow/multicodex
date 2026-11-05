@@ -4,7 +4,7 @@ Thanks for helping improve multicodex.
 
 ## Development
 
-Use the Go version declared in `go.mod`, then run:
+`go.mod` is the single source of the Go version for development, CI, and releases. Use that version, then run:
 
 ```bash
 go test ./...
