@@ -26,6 +26,56 @@ reject gitleaks dir --no-banner --redact --config "$checks/../../.gitleaks-paths
 printf '/Users/YOU /home/user\n' > "$root/input"
 bash "$checks/check-sensitive-text.sh" "$root/input"
 gitleaks dir --no-banner --redact --config "$checks/../../.gitleaks-paths.toml" "$root/input"
+
+# Token families, built at runtime so no token literal is committed. Each one
+# must be rejected alone and in prose, by ripgrep and by the grep fallback,
+# and must not appear in the redacted output.
+fallback_bin="$root/fallback-bin"
+mkdir "$fallback_bin"
+for tool in cat grep sed sort tr; do ln -s "$(command -v "$tool")" "$fallback_bin/$tool"; done
+scan_text() {
+  local mode="$1"
+  shift
+  if [[ "$mode" == rg ]]; then
+    bash "$checks/check-sensitive-text.sh" "$@"
+  else
+    PATH="$fallback_bin" "$BASH" "$checks/check-sensitive-text.sh" "$@"
+  fi
+}
+modes=(grep)
+if command -v rg >/dev/null 2>&1; then
+  modes+=(rg)
+else
+  echo "ripgrep not found; token checks use the grep fallback only"
+fi
+body="$(printf 'Ab3dEf6hIj9kLm2nOp5qRs8tUv1wXy4z%.0s' 1 2 3)"
+jwt_header="$(printf '%s' '{"alg":"HS256","typ":"JWT"}' | base64 | tr '+/' '-_' | tr -d '=\n')"
+jwt_payload="$(printf '%s' '{"sub":"fixture","iat":1700000000}' | base64 | tr '+/' '-_' | tr -d '=\n')"
+tokens=(
+  "sk-ant-oat01-${body}AA"
+  "sk-ant-api03-${body}AA"
+  "sk-proj-${body:0:74}T3BlbkFJ${body:0:74}"
+  "${jwt_header}.${jwt_payload}.${body:0:43}"
+  "github_pat_${body:0:22}_${body:0:59}"
+)
+for prefix in ghp gho ghu ghs ghr; do tokens+=("${prefix}_${body:0:36}"); done
+for mode in "${modes[@]}"; do
+  for token in "${tokens[@]}"; do
+    for line in "$token" "note: use $token here"; do
+      printf '%s\n' "$line" > "$root/input"
+      reject scan_text "$mode" "$root/input"
+      if grep -qF -- "$token" "$root/output"; then
+        echo "token scan output is not redacted (${mode}, ${token:0:8}...)" >&2
+        exit 1
+      fi
+    done
+  done
+  printf 'task-ant-colony-optimisation-notes, disk-project-management-guide, eyes.eyebrows.eyelids\n' > "$root/input"
+  scan_text "$mode" "$root/input"
+done
+printf '%s\n' "${tokens[0]}" > "$root/input"
+reject gitleaks dir --no-banner --redact --config "$checks/../../.gitleaks.toml" "$root/input"
+
 for kind in nul attribute; do
   repo="$root/$kind"
   git init -q -b main "$repo"
