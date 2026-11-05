@@ -226,7 +226,24 @@ func (s *Store) CreateProfile(name string, resources *ProfileResources) (Profile
 	return profile, changes, nil
 }
 
+// EnsureProfileDir prepares a profile home under the config lock, so
+// concurrent multicodex processes never interleave link or config changes.
+// Callers that already hold the lock use ensureProfileDirLocked.
 func (s *Store) EnsureProfileDir(profile Profile, resources *ProfileResources) ([]ResourceChange, error) {
+	// Reject unsafe storage before taking the lock, which secures base dirs.
+	if err := s.ensureProfileStoragePathSafe(profile); err != nil {
+		return nil, err
+	}
+	var changes []ResourceChange
+	err := s.WithConfigLock(func() error {
+		var err error
+		changes, err = s.ensureProfileDirLocked(profile, resources)
+		return err
+	})
+	return changes, err
+}
+
+func (s *Store) ensureProfileDirLocked(profile Profile, resources *ProfileResources) ([]ResourceChange, error) {
 	if profile.CodexHome == "" {
 		return nil, errors.New("profile codex home is empty")
 	}
@@ -537,9 +554,10 @@ func (s *Store) ensureProfileConfig(codexHome string) error {
 		if string(content) != generatedProfileConfigContent {
 			return nil
 		}
-		if err := os.Remove(configPath); err != nil {
+		if err := replaceWithSymlink(defaultConfigPath, configPath); err != nil {
 			return fmt.Errorf("replace generated profile config: %w", err)
 		}
+		return nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("check profile config: %w", err)
 	}

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -547,4 +548,50 @@ func mustReadFile(t *testing.T, path string) []byte {
 		t.Fatal(err)
 	}
 	return data
+}
+
+func TestConcurrentProfilePreparationIsSerialized(t *testing.T) {
+	store, profile := newResourceTestStore(t)
+	first := filepath.Join(t.TempDir(), "first")
+	second := filepath.Join(t.TempDir(), "second")
+	for _, dir := range []string{first, second} {
+		for _, name := range []string{"a", "b", "c", "d"} {
+			if err := os.MkdirAll(filepath.Join(dir, name), 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	inherit := true
+	for round, order := range [][]string{{first, second}, {second, first}} {
+		sources := order
+		policy := &ProfileResources{Skills: &SkillResources{Inherit: &inherit, Sources: &sources}}
+		var wg sync.WaitGroup
+		errs := make(chan error, 8)
+		for range 8 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if _, err := store.EnsureProfileDir(profile, policy); err != nil {
+					errs <- err
+				}
+			}()
+		}
+		wg.Wait()
+		close(errs)
+		for err := range errs {
+			t.Fatalf("round %d concurrent preparation failed: %v", round, err)
+		}
+		for _, name := range []string{"a", "b", "c", "d"} {
+			assertLinkTarget(t, filepath.Join(profile.CodexHome, "skills", name), filepath.Join(order[0], name))
+		}
+	}
+	entries, err := os.ReadDir(filepath.Join(profile.CodexHome, "skills"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.Contains(entry.Name(), ".multicodex-") {
+			t.Fatalf("staged link left behind: %s", entry.Name())
+		}
+	}
 }

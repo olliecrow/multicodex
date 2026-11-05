@@ -2,6 +2,8 @@ package multicodex
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -489,21 +491,17 @@ func reconcileOwnedLinks(root string, names []string, desired map[string]string,
 					continue
 				}
 			}
-			if err := os.Remove(path); err != nil {
-				return nil, fmt.Errorf("remove %s symlink %s: %w", label, path, err)
-			}
-			action := "removed"
-			if wanted {
-				action = "retargeted"
-			}
-			change := ResourceChange{Action: action, Path: path, OldTarget: oldTarget}
-			if wanted {
-				if err := os.Symlink(want, path); err != nil {
-					return nil, fmt.Errorf("link %s %s: %w", label, path, err)
+			if !wanted {
+				if err := os.Remove(path); err != nil {
+					return nil, fmt.Errorf("remove %s symlink %s: %w", label, path, err)
 				}
-				change.NewTarget = want
+				changes = append(changes, ResourceChange{Action: "removed", Path: path, OldTarget: oldTarget})
+				continue
 			}
-			changes = append(changes, change)
+			if err := replaceWithSymlink(want, path); err != nil {
+				return nil, fmt.Errorf("retarget %s symlink %s: %w", label, path, err)
+			}
+			changes = append(changes, ResourceChange{Action: "retargeted", Path: path, OldTarget: oldTarget, NewTarget: want})
 			continue
 		}
 		if !errors.Is(err, os.ErrNotExist) {
@@ -525,4 +523,22 @@ func resolveLinkTarget(linkPath, target string) string {
 		return filepath.Clean(target)
 	}
 	return filepath.Clean(filepath.Join(filepath.Dir(linkPath), target))
+}
+
+// replaceWithSymlink atomically replaces path with a symlink to target by
+// staging the link beside it and renaming it into place.
+func replaceWithSymlink(target, path string) error {
+	suffix := make([]byte, 8)
+	if _, err := rand.Read(suffix); err != nil {
+		return err
+	}
+	staged := filepath.Join(filepath.Dir(path), "."+filepath.Base(path)+".multicodex-"+hex.EncodeToString(suffix))
+	if err := os.Symlink(target, staged); err != nil {
+		return err
+	}
+	if err := os.Rename(staged, path); err != nil {
+		_ = os.Remove(staged)
+		return err
+	}
+	return nil
 }
