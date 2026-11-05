@@ -55,22 +55,14 @@ func RunDoctor(store *Store, cfg *Config, timeout time.Duration) DoctorReport {
 		})
 	} else {
 		codexFound = true
-		detail := path
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
-		defer cancel()
-		cmd := exec.CommandContext(ctx, "codex", "--version")
-		cmd.Env = neutralCodexEnv(os.Environ())
-		out, err := cmd.CombinedOutput()
+		version, err := codexstate.CodexVersion(ctx)
+		cancel()
+		status := "ok"
 		if err != nil {
-			detail = fmt.Sprintf("%s (codex --version failed: %v)", path, err)
-			checks = append(checks, DoctorCheck{Name: "codex binary", Status: "warn", Details: detail})
-		} else {
-			version := strings.TrimSpace(string(out))
-			if version == "" {
-				version = "version output is empty"
-			}
-			checks = append(checks, DoctorCheck{Name: "codex binary", Status: "ok", Details: fmt.Sprintf("%s (%s)", path, version)})
+			status, version = "warn", err.Error()
 		}
+		checks = append(checks, DoctorCheck{Name: "codex binary", Status: status, Details: fmt.Sprintf("%s (%s)", path, version)})
 	}
 
 	checks = append(checks, checkDirExists("default codex home", store.paths.DefaultCodexHome, false))
@@ -149,7 +141,7 @@ func profileDoctorChecks(paths Paths, name string, profile Profile, codexFound b
 	if codexFound && configCheck.Status != "fail" && authCheck.Status != "fail" {
 		state, account, detail := codexLoginStatus(profile.CodexHome)
 		status := "warn"
-		if state == "logged-in" || state == "ok" {
+		if state == "logged-in" {
 			status = "ok"
 		}
 		out = append(out, DoctorCheck{

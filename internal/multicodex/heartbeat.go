@@ -1,7 +1,6 @@
 package multicodex
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -12,6 +11,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/olliecrow/multicodex/internal/codexstate"
 )
 
 var codexHeartbeatTimeout = 60 * time.Second
@@ -19,6 +20,7 @@ var codexHeartbeatTimeout = 60 * time.Second
 const heartbeatPrompt = "hello"
 const heartbeatRetryCount = 1
 const heartbeatBackoff = 20 * time.Second
+const heartbeatOutputLimit = 1 << 20
 
 var errHeartbeatAuthentication = errors.New("Codex startup authentication failed")
 
@@ -217,9 +219,9 @@ func runCodexHeartbeat(codexHome string, settings heartbeatSettings) (string, er
 	cmd.WaitDelay = 500 * time.Millisecond
 	cmd.Env = profileCodexEnv(os.Environ(), codexHome, "")
 
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &out
+	out := codexstate.NewCappedOutput(heartbeatOutputLimit, cancel)
+	cmd.Stdout = out
+	cmd.Stderr = out
 
 	err := cmd.Run()
 	if detail := heartbeatAuthenticationFailure(out.String()); detail != "" {
@@ -227,6 +229,9 @@ func runCodexHeartbeat(codexHome string, settings heartbeatSettings) (string, er
 			return "core request completed but " + detail, errHeartbeatAuthentication
 		}
 		return detail, errHeartbeatAuthentication
+	}
+	if out.Exceeded() {
+		return "codex exec output exceeded 1 MiB", codexstate.ErrOutputLimit
 	}
 	if err == nil {
 		return "heartbeat sent", nil

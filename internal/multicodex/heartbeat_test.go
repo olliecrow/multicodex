@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/olliecrow/multicodex/internal/codexstate"
 )
 
 func TestCmdHeartbeatSuccessWithSkippedProfiles(t *testing.T) {
@@ -646,4 +648,30 @@ func createHeartbeatProfiles(t *testing.T, app *App, names ...string) {
 func shellQuote(s string) string {
 	s = strings.ReplaceAll(s, `'`, `'\''`)
 	return "'" + s + "'"
+}
+
+func TestRunCodexHeartbeatStopsOversizedOutput(t *testing.T) {
+	root := t.TempDir()
+	profileHome := filepath.Join(root, "profile")
+	if err := os.MkdirAll(profileHome, 0o700); err != nil {
+		t.Fatalf("mkdir profile home: %v", err)
+	}
+	fakeBin := filepath.Join(root, "bin")
+	if err := os.MkdirAll(fakeBin, 0o755); err != nil {
+		t.Fatalf("mkdir fake bin: %v", err)
+	}
+	script := "#!/bin/sh\nwhile :; do echo 'SYNTHETIC-PRIVATE-MARKER padding padding padding padding'; done\n"
+	if err := os.WriteFile(filepath.Join(fakeBin, "codex"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake codex: %v", err)
+	}
+	t.Setenv("PATH", fakeBin+":"+os.Getenv("PATH"))
+
+	start := time.Now()
+	detail, err := runCodexHeartbeat(profileHome, heartbeatSettings{Timeout: 10 * time.Second, LockPath: filepath.Join(root, "heartbeat.lock")})
+	if !errors.Is(err, codexstate.ErrOutputLimit) || detail != "codex exec output exceeded 1 MiB" {
+		t.Fatalf("oversized heartbeat = %q, %v", detail, err)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("oversized heartbeat was not stopped promptly: %s", elapsed)
+	}
 }

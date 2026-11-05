@@ -49,7 +49,7 @@
 ## Global auth boundary
 - Multicodex must not change, restore, back up, symlink, lock, or otherwise manage the shared default Codex auth account.
 - The system default Codex account is managed by normal Codex tooling outside multicodex.
-- Automatic `multicodex cli`, `multicodex exec`, and `multicodex generate` routing may use the existing default Codex home as the final protected reserve only when no configured profile has usable weekly usage and the official Codex CLI confirms that the default is logged in. The bounded login-status check supports file and OS keyring credential stores, must not mutate default auth state, and must not expose default auth details or raw subprocess output.
+- Automatic `multicodex cli`, `multicodex exec`, and `multicodex generate` routing may use the existing default Codex home as the final protected reserve only when no configured profile has usable weekly usage and the official Codex CLI confirms that the default is logged in. The bounded login-status check requires a recognized login confirmation, supports file and OS keyring credential stores, must not mutate default auth state, and must not expose default auth details or raw subprocess output.
 - `multicodex generate` uses the selected home's existing managed ChatGPT authentication through Codex App Server and pins Codex's built-in OpenAI provider.
   - It ignores unrelated custom model providers and disables notification hooks.
   - It fails closed if config replaces the built-in provider or endpoint, loads a configuration lockfile, or changes the selected search mode.
