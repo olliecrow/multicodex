@@ -74,7 +74,7 @@ Multicodex intentionally has no command for changing the shared default Codex ac
 - Delegates exact help requests (`--help`, `-h`, or `help`) directly to `codex exec` without requiring profiles.
 - Automatically selects among configured multicodex profiles first.
 - Includes the default Codex home as a built-in reserve account after configured profiles.
-- Can run with no configured profiles when the official Codex CLI confirms that the default account is logged in.
+- Can run with no configured profiles when the official Codex CLI confirms that the default account is logged in. Running without a multicodex config does not create one; only `init` and `add` persist config.
 - Re-checks file-backed auth isolation before launching configured profiles.
 - Parses model selection arguments (`--model`, `--model=`, and `-m`) for routing.
 - If the model contains `spark` case-insensitively, selects Spark weekly usage when available.

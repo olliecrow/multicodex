@@ -91,7 +91,7 @@ func (a *App) selectGenerateAccount(ctx context.Context, options generateCommand
 		return selected, nil
 	}
 
-	cfg, err := a.loadOrInitConfig()
+	cfg, err := a.loadConfigIfExists()
 	if err != nil {
 		return execSelection{}, err
 	}

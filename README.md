@@ -169,7 +169,7 @@ Two terminals can run `multicodex cli --account <name>` with different profiles 
 
 - Help requests such as `multicodex exec --help` delegate directly to `codex exec` and do not require profiles.
 - `multicodex exec --search ...` enables Codex live web search by placing the global Codex flag before the `exec` subcommand. A `--search` token after `--` remains prompt text.
-- Automatic routing can run with no configured profiles when Codex confirms that the default account is logged in.
+- Automatic routing can run with no configured profiles when Codex confirms that the default account is logged in. It does not create a multicodex config; only `init` and `add` do.
 - Configured profiles at 100% weekly usage are not selected.
 - Automatic routing uses configured selection priority first, then prefers the profile whose known weekly reset is soonest.
 - Profiles with an unknown weekly reset follow profiles with a known reset. Exact ties are randomized.
