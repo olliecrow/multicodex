@@ -675,3 +675,40 @@ func TestRunCodexHeartbeatStopsOversizedOutput(t *testing.T) {
 		t.Fatalf("oversized heartbeat was not stopped promptly: %s", elapsed)
 	}
 }
+
+func TestCmdHeartbeatSummaryCountsEachRowOnce(t *testing.T) {
+	app := newHeartbeatTestApp(t, fakeCodexScript{
+		loginStatusByProfile: map[string]fakeStatus{
+			"alpha": {exitCode: 0, output: "Logged in using ChatGPT"},
+			"bravo": {exitCode: 1, output: "Not logged in"},
+		},
+		execByProfile: map[string]fakeStatus{
+			"alpha": {exitCode: 0, output: "ok"},
+		},
+	})
+	createHeartbeatProfiles(t, app, "alpha", "bravo", "charlie")
+	makeStoredProfilePathInvalid(t, app, "charlie")
+
+	out, err := captureStdout(t, func() error { return app.cmdHeartbeat(nil) })
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) || !strings.Contains(exitErr.Message, "1 failure") {
+		t.Fatalf("expected setup failure to be reported, got %v", err)
+	}
+	if !strings.Contains(out, "summary: total=3 logged-in=1 ok=1 fail=1 skipped=1") {
+		t.Fatalf("unexpected summary: %q", out)
+	}
+}
+
+func TestCmdHeartbeatReportsSetupFailureBeforeNoLoggedInProfiles(t *testing.T) {
+	app := newHeartbeatTestApp(t, fakeCodexScript{
+		loginStatusByProfile: map[string]fakeStatus{"alpha": {exitCode: 1, output: "Not logged in"}},
+	})
+	createHeartbeatProfiles(t, app, "alpha", "bravo")
+	makeStoredProfilePathInvalid(t, app, "bravo")
+
+	_, err := captureStdout(t, func() error { return app.cmdHeartbeat(nil) })
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) || !strings.Contains(exitErr.Message, "1 failure") {
+		t.Fatalf("expected setup failure instead of no-logged-in result, got %v", err)
+	}
+}
