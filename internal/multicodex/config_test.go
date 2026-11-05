@@ -1164,3 +1164,69 @@ func TestProfileConfigUsesFileStoreMatchesExactKey(t *testing.T) {
 		})
 	}
 }
+
+func TestStoreWithConfigLockRejectsHardLinkedLockWithoutChmod(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("MULTICODEX_HOME", filepath.Join(root, "multicodex"))
+	t.Setenv("MULTICODEX_DEFAULT_CODEX_HOME", filepath.Join(root, "codex-default"))
+	paths, err := ResolvePaths()
+	if err != nil {
+		t.Fatalf("ResolvePaths: %v", err)
+	}
+	store := NewStore(paths)
+	if err := store.EnsureBaseDirs(); err != nil {
+		t.Fatalf("EnsureBaseDirs: %v", err)
+	}
+	victim := filepath.Join(root, "victim")
+	if err := os.WriteFile(victim, []byte("keep me\n"), 0o644); err != nil {
+		t.Fatalf("write victim: %v", err)
+	}
+	if err := os.Chmod(victim, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(victim, filepath.Join(paths.MulticodexHome, "config.lock")); err != nil {
+		t.Fatalf("hard-link config lock: %v", err)
+	}
+	if err := store.WithConfigLock(func() error { return nil }); err == nil || !strings.Contains(err.Error(), "hard link") {
+		t.Fatalf("expected hard-linked lock rejection, got %v", err)
+	}
+	info, err := os.Stat(victim)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o644 {
+		t.Fatalf("rejected lock changed the linked file mode to %v", info.Mode().Perm())
+	}
+}
+
+func TestStoreSaveLeavesPrivateConfigAndNoTemporaryFiles(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("MULTICODEX_HOME", filepath.Join(root, "multicodex"))
+	t.Setenv("MULTICODEX_DEFAULT_CODEX_HOME", filepath.Join(root, "codex-default"))
+	paths, err := ResolvePaths()
+	if err != nil {
+		t.Fatalf("ResolvePaths: %v", err)
+	}
+	store := NewStore(paths)
+	for range 2 {
+		if err := store.Save(DefaultConfig()); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+	}
+	info, err := os.Stat(paths.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("config mode = %v, want 0600", info.Mode().Perm())
+	}
+	entries, err := os.ReadDir(filepath.Dir(paths.ConfigPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.Contains(entry.Name(), ".tmp.") {
+			t.Fatalf("temporary config left behind: %s", entry.Name())
+		}
+	}
+}

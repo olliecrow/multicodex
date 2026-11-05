@@ -74,14 +74,13 @@ func (s *Store) WithConfigLock(fn func() error) error {
 	if err := ensureRegularSingleFileForWrite(lockPath, "multicodex config lock"); err != nil {
 		return err
 	}
-	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0o600)
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0o600)
 	if err != nil {
 		return fmt.Errorf("open config lock: %w", err)
 	}
 	defer lockFile.Close()
-	if err := lockFile.Chmod(0o600); err != nil {
-		return fmt.Errorf("secure config lock permissions: %w", err)
-	}
+	// Validate the opened descriptor before changing its mode, so a swapped
+	// path cannot redirect chmod to another file.
 	info, err := lockFile.Stat()
 	if err != nil {
 		return fmt.Errorf("inspect config lock: %w", err)
@@ -91,6 +90,12 @@ func (s *Store) WithConfigLock(fn func() error) error {
 	}
 	if fileHasMultipleLinks(info) {
 		return fmt.Errorf("multicodex config lock has multiple hard links: %s", lockPath)
+	}
+	if !fileOwnedByCurrentUser(info) {
+		return fmt.Errorf("multicodex config lock is not owned by the current user: %s", lockPath)
+	}
+	if err := lockFile.Chmod(0o600); err != nil {
+		return fmt.Errorf("secure config lock permissions: %w", err)
 	}
 	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
 		return fmt.Errorf("lock config: %w", err)
@@ -160,6 +165,9 @@ func (s *Store) Save(cfg *Config) error {
 	if _, err := tmp.Write(append(b, '\n')); err != nil {
 		return fmt.Errorf("write temp config: %w", err)
 	}
+	if err := tmp.Sync(); err != nil {
+		return fmt.Errorf("sync temp config: %w", err)
+	}
 	if err := tmp.Close(); err != nil {
 		tmpClosed = true
 		return fmt.Errorf("close temp config: %w", err)
@@ -168,7 +176,19 @@ func (s *Store) Save(cfg *Config) error {
 	if err := os.Rename(tmpPath, s.paths.ConfigPath); err != nil {
 		return fmt.Errorf("replace config: %w", err)
 	}
+	if err := syncDirectory(filepath.Dir(s.paths.ConfigPath)); err != nil {
+		return fmt.Errorf("config was replaced but its directory could not be synced: %w", err)
+	}
 	return nil
+}
+
+func syncDirectory(path string) error {
+	directory, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer directory.Close()
+	return directory.Sync()
 }
 
 func (s *Store) CreateProfile(name string, resources *ProfileResources) (Profile, []ResourceChange, error) {
