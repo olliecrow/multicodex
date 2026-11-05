@@ -29,8 +29,13 @@ func TestHelpCommandGlobal(t *testing.T) {
 	if !strings.Contains(out, "exec [--search] [codex exec args]") {
 		t.Fatalf("expected exec command in help output")
 	}
-	if !strings.Contains(out, "cli [--account <name>]") {
+	if !strings.Contains(out, "cli [--account <name>] [args]") {
 		t.Fatalf("expected cli command in help output")
+	}
+	for _, command := range commandSummaries {
+		if len(command.Name) > 36 {
+			t.Fatalf("help name %q is %d columns and exceeds the 36-column usage field", command.Name, len(command.Name))
+		}
 	}
 	if !strings.Contains(out, "reconcile") {
 		t.Fatalf("expected reconcile command in help output")

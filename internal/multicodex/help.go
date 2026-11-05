@@ -20,7 +20,7 @@ var commandSummaries = []struct {
 	{Name: "add <name>", Summary: "add a named account profile"},
 	{Name: "login <name> [codex login args]", Summary: "login profile using official codex flow"},
 	{Name: "login-all", Summary: "run login for every known profile"},
-	{Name: "cli [--account <name>] [--] [codex args...]", Summary: "run interactive Codex on the best available account"},
+	{Name: "cli [--account <name>] [args]", Summary: "run interactive Codex on the best available account"},
 	{Name: "exec [--search] [codex exec args]", Summary: "run codex exec on the best available account"},
 	{Name: "generate [flags] [prompt]", Summary: "generate text without coding tools"},
 	{Name: "status", Summary: "show all profile auth states"},
