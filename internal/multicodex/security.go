@@ -78,6 +78,11 @@ func fileHasMultipleLinks(info os.FileInfo) bool {
 	return ok && stat.Nlink > 1
 }
 
+func fileOwnedByCurrentUser(info os.FileInfo) bool {
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	return ok && int(stat.Uid) == os.Getuid()
+}
+
 func resolvePathInsideRoot(root, rawPath, label string) (string, error) {
 	root = strings.TrimSpace(root)
 	rawPath = strings.TrimSpace(rawPath)
