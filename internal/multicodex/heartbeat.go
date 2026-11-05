@@ -158,13 +158,19 @@ func (a *App) cmdHeartbeat(args []string) error {
 		fmt.Printf("%-24s %-30s %-8s %-8s %s\n", truncate(row.Profile, 24), truncate(row.Account, 30), row.Status, elapsed, truncate(row.Detail, 80))
 	}
 	fmt.Println()
-	fmt.Printf("summary: total=%d logged-in=%d ok=%d fail=%d skipped=%d\n", len(rows), loggedIn, success, failed, len(rows)-loggedIn)
-
-	if loggedIn == 0 {
-		return &ExitError{Code: 1, Message: "heartbeat completed with no logged-in profiles"}
+	skipped := 0
+	for _, row := range rows {
+		if row.Status == "skipped" {
+			skipped++
+		}
 	}
+	fmt.Printf("summary: total=%d logged-in=%d ok=%d fail=%d skipped=%d\n", len(rows), loggedIn, success, failed, skipped)
+
 	if failed > 0 {
 		return &ExitError{Code: 1, Message: fmt.Sprintf("heartbeat completed with %d failure(s)", failed)}
+	}
+	if loggedIn == 0 {
+		return &ExitError{Code: 1, Message: "heartbeat completed with no logged-in profiles"}
 	}
 	return nil
 }

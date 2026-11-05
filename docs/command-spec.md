@@ -140,7 +140,7 @@ Multicodex intentionally has no command for changing the shared default Codex ac
 - Does not retry sanitized recognized authentication failures.
 - Returns a failure when Codex reports a startup authentication error even if the core request completes successfully.
 - Prints per-profile result rows and a final summary.
-- Returns non-zero when no logged-in profiles are found or any logged-in profile heartbeat fails.
+- Returns non-zero when any profile preparation or logged-in heartbeat fails, reporting failures first, or when no logged-in profiles are found. The summary counts each profile once as ok, fail, or skipped.
 - Leaves the default Codex account untouched.
 - Supports environment overrides for timeout, retries, backoff, and lock path.
 - Rejects lock paths that resolve outside `MULTICODEX_HOME`.

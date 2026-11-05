@@ -231,6 +231,7 @@ Heartbeat:
 - runs profile-scoped `codex exec --skip-git-repo-check --ephemeral --sandbox read-only --color never hello`
 - fails when Codex reports a startup authentication error even if the core request exits successfully
 - redacts raw failure output
+- exits non-zero on any profile failure, reporting failures before a no-logged-in result
 
 Optional environment overrides:
 
