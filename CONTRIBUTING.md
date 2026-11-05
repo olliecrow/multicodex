@@ -21,7 +21,7 @@ Tests and examples must use synthetic account data and portable paths. Never com
 
 ## Pull requests
 
-Explain the user-visible outcome and the checks you ran. CI checks `gofmt`, tests Linux and macOS, enables Go's race detector, runs `go vet`, builds the CLI, scans dependencies, and checks commits and patches for sensitive text. A weekly scheduled run repeats the build, test, and vulnerability checks on `main`. Dependabot proposes Go module and action updates; the Go version in `go.mod` and the pinned Gitleaks archive digest need manual updates.
+Explain the user-visible outcome and the checks you ran. CI checks `gofmt`, tests Linux and macOS, enables Go's race detector, runs `go vet`, builds the CLI, scans dependencies, and checks commits and patches for sensitive text. A weekly scheduled run repeats the build, test, and vulnerability checks on `main`. Dependabot security updates may open a pull request for a vulnerable module. There are no scheduled version updates. Update Go modules, Actions SHAs, the Go version in `go.mod`, and the pinned Gitleaks digest by hand.
 
 ## Releases
 
