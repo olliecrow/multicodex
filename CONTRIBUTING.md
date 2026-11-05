@@ -17,7 +17,7 @@ Format Go changes with `gofmt`. If `pre-commit` is installed, enable the reposit
 
 Keep changes narrow and preserve the contracts in `docs/command-spec.md` and `docs/security-and-privacy.md`. Update `README.md` and the command spec together when commands, flags, output, or routing behavior changes.
 
-Tests and examples must use synthetic account data and portable paths. Never commit credentials, authentication state, private account details, or machine-specific paths. Report security issues through the process in `SECURITY.md`.
+Tests and examples must use synthetic account data and portable paths. Never commit credentials, authentication state, private account details, or machine-specific paths. Commit with your GitHub noreply email; CI and the pre-push hook reject other author or committer emails. Report security issues through the process in `SECURITY.md`.
 
 ## Pull requests
 

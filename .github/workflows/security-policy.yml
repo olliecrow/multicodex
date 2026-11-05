@@ -115,7 +115,7 @@ jobs:
           if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
             range="${PR_BASE_SHA}..${PR_HEAD_SHA}"
           elif [[ "${PUSH_BEFORE_SHA}" == "0000000000000000000000000000000000000000" ]]; then
-            range="${GITHUB_SHA}^!"
+            range="${GITHUB_SHA}"
           else
             range="${PUSH_BEFORE_SHA}..${GITHUB_SHA}"
           fi
@@ -180,7 +180,33 @@ jobs:
             exit 1
           fi
 
-      - name: Check commit messages for policy violations
+      - name: Self-test commit checks
+        run: |
+          set -euo pipefail
+          checks="${PWD}/scripts/security"
+          repo="$(mktemp -d)"
+          git init -q -b main "${repo}"
+          commit() {
+            git -C "${repo}" -c user.name=Test -c user.email="$1" -c commit.gpgsign=false commit -q --allow-empty -m "$2"
+            git -C "${repo}" rev-parse HEAD
+          }
+          good="$(commit 1+test@users.noreply.github.com good)"
+          bad="$(commit "$(printf '%s@%s' private.user gmail.com)" bad)"
+          (cd "${repo}" && bash "${checks}/check-commits.sh" selftest "${good}")
+          if (cd "${repo}" && bash "${checks}/check-commits.sh" selftest "${bad}"); then
+            echo "identity self-test unexpectedly passed" >&2
+            exit 1
+          fi
+          if (cd "${repo}" && PRE_COMMIT_FROM_REF="$(printf '0%.0s' {1..39})1" PRE_COMMIT_TO_REF="${good}" bash "${checks}/check-push-range.sh"); then
+            echo "invalid range self-test unexpectedly passed" >&2
+            exit 1
+          fi
+          if bash "${checks}/check-sensitive-text.sh" --context=selftest "${repo}/missing.txt"; then
+            echo "missing input self-test unexpectedly passed" >&2
+            exit 1
+          fi
+
+      - name: Check outgoing commits for policy violations
         if: github.event_name != 'schedule'
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -189,36 +215,18 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
-            range="${PR_BASE_SHA}..${PR_HEAD_SHA}"
+            revisions="$(git rev-list "${PR_BASE_SHA}..${PR_HEAD_SHA}")"
           elif [[ "${PUSH_BEFORE_SHA}" == "0000000000000000000000000000000000000000" ]]; then
-            range="${GITHUB_SHA}^!"
+            revisions="$(git rev-list "${GITHUB_SHA}")"
           else
-            range="${PUSH_BEFORE_SHA}..${GITHUB_SHA}"
+            revisions="$(git rev-list "${PUSH_BEFORE_SHA}..${GITHUB_SHA}")"
           fi
-
-          temp_file="$(mktemp)"
-          git log --format='%H%n%s%n%b%n' "${range}" > "${temp_file}"
-          bash scripts/security/check-sensitive-text.sh --context=commit-message "${temp_file}"
-
-      - name: Check the patch for policy violations
-        if: github.event_name != 'schedule'
-        env:
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PUSH_BEFORE_SHA: ${{ github.event.before }}
-        run: |
-          set -euo pipefail
-          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
-            range="${PR_BASE_SHA}..${PR_HEAD_SHA}"
-          elif [[ "${PUSH_BEFORE_SHA}" == "0000000000000000000000000000000000000000" ]]; then
-            range="${GITHUB_SHA}^!"
-          else
-            range="${PUSH_BEFORE_SHA}..${GITHUB_SHA}"
+          if [[ -z "${revisions}" ]]; then
+            echo "no new commits to check"
+            exit 0
           fi
-
-          temp_file="$(mktemp)"
-          git show --format= --patch --no-color "${range}" > "${temp_file}"
-          bash scripts/security/check-sensitive-text.sh --context=patch "${temp_file}"
+          # shellcheck disable=SC2086 # one commit id per word
+          bash scripts/security/check-commits.sh ci ${revisions}
 
       - name: Check the pull request title and body for policy violations
         if: github.event_name == 'pull_request'
