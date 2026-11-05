@@ -5,8 +5,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -112,6 +114,57 @@ func TestServerRequestFloodEndsConnection(t *testing.T) {
 	waitDone(t, client)
 	if err := client.Err(); err == nil || !strings.Contains(err.Error(), "faster than they could be denied") {
 		t.Fatalf("flood error = %v", err)
+	}
+}
+
+func TestCloseKillsDescendantsInTheProcessGroup(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "descendant")
+	client := New(Config{
+		Command: []string{"sh", "-c", `sleep 30 & printf '%s\n' "$!" > "$1"; exec sleep 30`, "sh", marker},
+		BaseEnv: []string{"PATH=" + os.Getenv("PATH")},
+	})
+	var pid int
+	t.Cleanup(func() {
+		_ = client.Close()
+		if pid > 1 {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+		}
+	})
+	if err := client.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		data, err := os.ReadFile(marker)
+		if err == nil {
+			parsed, convErr := strconv.Atoi(strings.TrimSpace(string(data)))
+			if convErr == nil && parsed > 1 {
+				pid = parsed
+				break
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("descendant did not record its pid")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	started := time.Now()
+	if err := client.Close(); err != nil {
+		t.Fatalf("Close after %s: %v", time.Since(started), err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("Close took %s", elapsed)
+	}
+	deadline = time.Now().Add(time.Second)
+	for {
+		err := syscall.Kill(pid, 0)
+		if errors.Is(err, syscall.ESRCH) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("descendant %d still present: %v", pid, err)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 

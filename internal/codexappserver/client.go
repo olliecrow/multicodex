@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/olliecrow/multicodex/internal/codexstate"
@@ -56,6 +57,7 @@ type Client struct {
 	config  Config
 	cmd     *exec.Cmd
 	stdin   io.Closer
+	stdout  io.Closer
 	started bool
 
 	pending map[int]chan message
@@ -150,6 +152,8 @@ func (c *Client) Start() error {
 		env = append(env, "MULTICODEX_ACTIVE_PROFILE="+profile)
 	}
 	cmd.Env = env
+	// Descendants stay in this group, so Close can stop them with the child.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -162,11 +166,13 @@ func (c *Client) Start() error {
 	}
 	if err := cmd.Start(); err != nil {
 		_ = stdin.Close()
+		_ = stdout.Close()
 		return fmt.Errorf("start codex app-server: %w", err)
 	}
 
 	c.cmd = cmd
 	c.stdin = stdin
+	c.stdout = stdout
 	c.started = true
 	go c.writeLoop(stdin)
 	go c.readLoop(stdout)
@@ -438,9 +444,9 @@ func (c *Client) terminate(err error) {
 	c.finish()
 }
 
-// fail records the first connection error, stops delivery, closes input to
-// unblock any in-progress write, and kills the process. The read loop then
-// sees the stream end and releases the connection.
+// fail records the first connection error, stops delivery, closes both pipes,
+// and kills the child process group. Closing stdout unblocks the read loop
+// when a descendant still holds the write end.
 func (c *Client) fail(err error) {
 	c.mu.Lock()
 	if c.failErr == nil {
@@ -448,13 +454,18 @@ func (c *Client) fail(err error) {
 	}
 	cmd := c.cmd
 	stdin := c.stdin
+	stdout := c.stdout
+	c.stdout = nil
 	c.mu.Unlock()
 	c.stop()
 	if stdin != nil {
 		_ = stdin.Close()
 	}
-	if cmd != nil {
-		_ = cmd.Process.Kill()
+	if cmd != nil && cmd.Process != nil && cmd.Process.Pid > 1 {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	if stdout != nil {
+		_ = stdout.Close()
 	}
 }
 
