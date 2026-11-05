@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -13,7 +14,13 @@ import (
 // shellAppServer returns a client whose App Server is a synthetic shell script.
 func shellAppServer(t *testing.T, script string) *Client {
 	t.Helper()
+	return startShellAppServer(t, script, nil)
+}
+
+func startShellAppServer(t *testing.T, script string, beforeWrite func()) *Client {
+	t.Helper()
 	client := New(Config{Command: []string{"sh", "-c", script, "sh"}, BaseEnv: []string{"PATH=" + os.Getenv("PATH")}})
+	client.beforeWrite = beforeWrite
 	if err := client.Start(); err != nil {
 		t.Fatalf("start synthetic app-server: %v", err)
 	}
@@ -31,14 +38,21 @@ func waitDone(t *testing.T, client *Client) {
 }
 
 func TestRequestCancelDuringBlockedWriteEndsConnection(t *testing.T) {
-	client := shellAppServer(t, "exec sleep 30")
+	writing := make(chan struct{})
+	var once sync.Once
+	client := startShellAppServer(t, "exec sleep 30", func() { once.Do(func() { close(writing) }) })
 	ctx, cancel := context.WithCancel(context.Background())
 	result := make(chan error, 1)
 	go func() {
 		// Larger than any pipe buffer, so the write blocks while the peer is not reading.
 		result <- client.Request(ctx, "test/large", map[string]string{"data": strings.Repeat("x", 4<<20)}, nil)
 	}()
-	time.Sleep(100 * time.Millisecond)
+	select {
+	case <-writing:
+	case <-time.After(10 * time.Second):
+		t.Fatal("large request never reached the writer")
+	}
+	// The write is in progress and cannot finish: the peer never reads.
 	cancel()
 	select {
 	case err := <-result:
