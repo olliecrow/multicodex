@@ -540,8 +540,8 @@ func TestAdoptedTmuxSessionIsPreservedThroughCleanupAndRelease(t *testing.T) {
 	defer killTestSystemServer(service)
 	session := "existing-session"
 	secondSession := "existing-session-2"
-	runTestCommand(t, "tmux", "-L", service.systemSocket, "new-session", "-d", "-s", session, "-c", project)
-	runTestCommand(t, "tmux", "-L", service.systemSocket, "new-session", "-d", "-s", secondSession, "-c", project)
+	startAdoptableTestSession(t, service, session, project)
+	startAdoptableTestSession(t, service, secondSession, project)
 	pidBefore := commandOutput(t, "tmux", "-L", service.systemSocket, "display-message", "-p", "-t", session, "#{pane_pid}")
 	secondPIDBefore := commandOutput(t, "tmux", "-L", service.systemSocket, "display-message", "-p", "-t", secondSession, "#{pane_pid}")
 	projectID := mustID(t)
@@ -604,7 +604,7 @@ func TestAdoptedTmuxSessionIsPreservedThroughCleanupAndRelease(t *testing.T) {
 	if info, err := os.Stat(project); err != nil || !info.IsDir() {
 		t.Fatalf("release removed preserved project: %v", err)
 	}
-	runTestCommand(t, "tmux", "-L", service.systemSocket, "kill-server")
+	stopSystemTestServer(t, service)
 	if candidates, err := service.ListTmuxSessions(ctx, ListTmuxSessionsRequest{ProjectID: projectID, ProjectPath: project}); err != nil || len(candidates) != 0 {
 		t.Fatalf("inactive default tmux server did not produce an empty list: %+v, %v", candidates, err)
 	}
@@ -621,7 +621,7 @@ func TestCleanupRollsBackCompatiblePartialAdoptionMarkers(t *testing.T) {
 	service.systemSocket = "mce-partial-" + mustID(t)[:12]
 	defer killTestSystemServer(service)
 	session := "partial-adoption"
-	runTestCommand(t, "tmux", "-L", service.systemSocket, "new-session", "-d", "-s", session, "-c", project)
+	startAdoptableTestSession(t, service, session, project)
 	adopted, err := service.AdoptTmuxSession(ctx, AdoptTmuxSessionRequest{
 		ProjectID: mustID(t), ProjectPath: project, WorkspaceName: "Shared checkout", Session: session,
 	})
@@ -669,7 +669,7 @@ func TestCleanupCannotRaceTmuxAdoption(t *testing.T) {
 	service.systemSocket = "mce-serial-" + mustID(t)[:12]
 	defer killTestSystemServer(service)
 	session := "serialized-adoption"
-	runTestCommand(t, "tmux", "-L", service.systemSocket, "new-session", "-d", "-s", session, "-c", project)
+	startAdoptableTestSession(t, service, session, project)
 	started := make(chan struct{})
 	release := make(chan struct{})
 	blocked := false
@@ -741,7 +741,7 @@ func TestReleaseDoesNotTouchAReusedTmuxSessionName(t *testing.T) {
 	service.systemSocket = "mce-reuse-" + mustID(t)[:12]
 	defer killTestSystemServer(service)
 	session := "reused-name"
-	runTestCommand(t, "tmux", "-L", service.systemSocket, "new-session", "-d", "-s", session, "-c", project)
+	startAdoptableTestSession(t, service, session, project)
 	projectID := mustID(t)
 	adopted, err := service.AdoptTmuxSession(ctx, AdoptTmuxSessionRequest{ProjectID: projectID, ProjectPath: project, WorkspaceName: "Shared checkout", Session: session})
 	if err != nil {
@@ -2113,6 +2113,49 @@ func killTestServer(service *HostService) {
 	defer cancel()
 	_, _ = service.tmux(ctx, "kill-server")
 	_ = service.cleanupUnusedTmuxSocket(ctx)
+}
+
+// startAdoptableTestSession starts a session on the synthetic system socket
+// and waits until it is an adoption candidate. A just-spawned pane can briefly
+// report no foreground command or path, which correctly makes it ineligible.
+func startAdoptableTestSession(t *testing.T, service *HostService, session, project string) {
+	t.Helper()
+	runTestCommand(t, "tmux", "-L", service.systemSocket, "new-session", "-d", "-s", session, "-c", project)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		_, eligible, err := service.inspectTmuxCandidate(context.Background(), project, session)
+		if err != nil {
+			t.Fatalf("inspect new tmux session %s: %v", session, err)
+		}
+		if eligible {
+			return
+		}
+		if time.Now().After(deadline) {
+			state := commandOutput(t, "tmux", "-L", service.systemSocket, "display-message", "-p", "-t", session,
+				"#{pane_dead}|#{session_windows}|#{window_panes}|#{session_grouped}|#{session_attached}|#{pane_current_command}|#{pane_current_path}|#{pane_pid}")
+			t.Fatalf("tmux session %s did not become adoptable: %q", session, state)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// stopSystemTestServer kills the synthetic system server and waits until its
+// socket stops accepting connections. tmux exits asynchronously after
+// kill-server, and a still-listening socket is correctly treated as uncertain.
+func stopSystemTestServer(t *testing.T, service *HostService) {
+	t.Helper()
+	runTestCommand(t, "tmux", "-L", service.systemSocket, "kill-server")
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		inactive, err := inactiveTmuxSocket(service.systemTmuxSocketPath())
+		if err == nil && inactive {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("synthetic tmux server %s did not stop: inactive=%v err=%v", service.systemSocket, inactive, err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 func killTestSystemServer(service *HostService) {
