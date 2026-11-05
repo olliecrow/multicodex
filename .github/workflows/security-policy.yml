@@ -114,7 +114,7 @@ jobs:
           set -euo pipefail
           range="$(bash scripts/security/ci-range.sh)"
           for config in .gitleaks.toml .gitleaks-paths.toml; do
-            gitleaks git --redact --config "$config" --log-opts="--text --no-textconv --no-ext-diff ${range}"
+            gitleaks git --redact --config "$config" --log-opts="--text --no-textconv --no-ext-diff -m ${range}"
           done
 
       - name: Test scanner regressions

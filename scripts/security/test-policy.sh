@@ -93,4 +93,43 @@ printf '%s\n' "$reviewed" > "$scan/reviewed-base"
     reject bash "$scan/check-commits.sh" test $(git rev-list "$range")
   done
 )
+
+merge="$root/merge"
+git init -q -b main "$merge"
+git -C "$merge" config user.name Test
+git -C "$merge" config user.email test@example.com
+git -C "$merge" -c commit.gpgsign=false commit -q --allow-empty -m base
+git -C "$merge" checkout -q -b side
+printf 'side\n' > "$merge/side.txt"
+git -C "$merge" add side.txt
+git -C "$merge" -c commit.gpgsign=false commit -qm side
+git -C "$merge" checkout -q main
+printf 'main\n' > "$merge/main.txt"
+git -C "$merge" add main.txt
+git -C "$merge" -c commit.gpgsign=false commit -qm mainline
+git -C "$merge" merge -q --no-commit side >/dev/null 2>&1
+token="$(printf '%s-%s-%s' "xoxb" "123456789012" "1234567890123abc")"
+printf 'bot=%s\n' "$token" > "$merge/secret.txt"
+git -C "$merge" add secret.txt
+git -C "$merge" -c commit.gpgsign=false commit -qm merge
+workflow="$checks/../../.github/workflows/security-policy.yml"
+line="$(grep -F -- '--log-opts=' "$workflow")"
+[[ "$(grep -c -F -- '--log-opts=' "$workflow")" == 1 ]]
+opts="${line#*--log-opts=\"}"
+opts="${opts%%\"*}"
+case " $opts " in
+  *" --text "*|*" --text") ;;
+  *) echo "ci log-opts do not force text: $opts" >&2; exit 1 ;;
+esac
+case " $opts " in
+  *" -m "*|*" --diff-merges="*) ;;
+  *) echo "ci log-opts do not diff merges: $opts" >&2; exit 1 ;;
+esac
+ci_opts="${opts//\$\{range\}/HEAD}"
+(
+  cd "$merge"
+  gitleaks git --no-banner --redact --config "$checks/../../.gitleaks.toml" --log-opts="--text --no-textconv --no-ext-diff HEAD"
+  reject gitleaks git --no-banner --redact --config "$checks/../../.gitleaks.toml" --log-opts="$ci_opts"
+  reject gitleaks git --no-banner --redact --config "$checks/../../.gitleaks.toml" --log-opts="--text --no-textconv --no-ext-diff --diff-merges=first-parent HEAD"
+)
 echo 'Policy regression tests passed'
