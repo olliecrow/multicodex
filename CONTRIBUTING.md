@@ -21,8 +21,8 @@ Tests and examples must use synthetic account data and portable paths. Never com
 
 ## Pull requests
 
-Explain the user-visible outcome and the checks you ran. CI tests Linux and macOS, enables Go's race detector, runs `go vet`, builds the CLI, scans dependencies, and checks commits and patches for sensitive text.
+Explain the user-visible outcome and the checks you ran. CI checks `gofmt`, tests Linux and macOS, enables Go's race detector, runs `go vet`, builds the CLI, scans dependencies, and checks commits and patches for sensitive text. A weekly scheduled run repeats the checks on `main`. Dependabot proposes Go module and action updates; the Go version in `go.mod` and the pinned Gitleaks archive digest need manual updates.
 
 ## Releases
 
-Maintainers create a version tag only after the main branch is green. Tags matching `v*` run the release workflow, which verifies the source and publishes checksummed macOS and Linux archives for AMD64 and ARM64. The tag is injected into CLI output and provider client identification.
+Maintainers create a version tag only after the main branch is green. Tags matching `v*` run the release workflow, which verifies the source, scans the source and built binaries with govulncheck, and publishes checksummed macOS and Linux archives for AMD64 and ARM64. The tag is injected into CLI output and provider client identification.
