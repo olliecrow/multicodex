@@ -44,7 +44,7 @@ func (a *App) cmdHeartbeat(args []string) error {
 		return &ExitError{Code: 2, Message: "usage: multicodex heartbeat"}
 	}
 
-	cfg, err := a.loadOrInitConfig()
+	cfg, err := a.loadConfigIfExists()
 	if err != nil {
 		return err
 	}

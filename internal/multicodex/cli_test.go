@@ -234,7 +234,7 @@ func TestCmdCLIAutomaticDefaultReserveMustBeLoggedIn(t *testing.T) {
 
 func makeStoredProfilePathInvalid(t *testing.T, app *App, name string) {
 	t.Helper()
-	cfg, err := app.loadOrInitConfig()
+	cfg, err := app.loadConfigIfExists()
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}

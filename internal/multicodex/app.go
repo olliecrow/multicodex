@@ -169,24 +169,8 @@ func printVersion() {
 	fmt.Printf("%s %s\n", appName, version())
 }
 
-func (a *App) loadOrInitConfig() (*Config, error) {
-	cfg, err := a.store.Load()
-	if err == nil {
-		return cfg, nil
-	}
-	if errors.Is(err, os.ErrNotExist) {
-		cfg = DefaultConfig()
-		if err := a.store.EnsureBaseDirs(); err != nil {
-			return nil, err
-		}
-		if err := a.store.Save(cfg); err != nil {
-			return nil, err
-		}
-		return cfg, nil
-	}
-	return nil, err
-}
-
+// loadConfigIfExists returns the stored config, or an unsaved default when
+// none exists. Only init and add persist a new config.
 func (a *App) loadConfigIfExists() (*Config, error) {
 	cfg, err := a.store.Load()
 	if err == nil {
@@ -243,7 +227,7 @@ func (a *App) cmdAdd(args []string) error {
 	var profile Profile
 	var resourceChanges []ResourceChange
 	if err := a.store.WithConfigLock(func() error {
-		cfg, err := a.loadOrInitConfig()
+		cfg, err := a.loadConfigIfExists()
 		if err != nil {
 			return err
 		}
@@ -276,7 +260,7 @@ func (a *App) cmdLogin(args []string) error {
 		return &ExitError{Code: 2, Message: "usage: multicodex login <name> [codex login args]"}
 	}
 	name := args[0]
-	cfg, err := a.loadOrInitConfig()
+	cfg, err := a.loadConfigIfExists()
 	if err != nil {
 		return err
 	}
@@ -347,7 +331,7 @@ func ensureProfileCodexExecutionReady(paths Paths, profile Profile) error {
 }
 
 func (a *App) cmdLoginAll() error {
-	cfg, err := a.loadOrInitConfig()
+	cfg, err := a.loadConfigIfExists()
 	if err != nil {
 		return err
 	}

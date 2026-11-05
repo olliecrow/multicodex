@@ -87,7 +87,7 @@ func splitExecGlobalArgs(args []string) ([]string, []string) {
 }
 
 func (a *App) selectAccountForCodexArgs(ctx context.Context, args []string) (execSelection, error) {
-	cfg, err := a.loadOrInitConfig()
+	cfg, err := a.loadConfigIfExists()
 	if err != nil {
 		return execSelection{}, err
 	}

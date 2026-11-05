@@ -171,6 +171,24 @@ func TestCmdExecRunsCodexExecWithDefaultReserveAccount(t *testing.T) {
 	}
 }
 
+func TestCmdExecWithoutConfigDoesNotPersistConfig(t *testing.T) {
+	app, logPath := newExecTestApp(t)
+
+	originalSelector := defaultExecAccountSelector
+	defaultExecAccountSelector = selectDefaultExecAccountForTest(t)
+	defer func() { defaultExecAccountSelector = originalSelector }()
+
+	if err := app.Run([]string{"exec", "--skip-git-repo-check", "hello"}); err != nil {
+		t.Fatalf("default-only exec failed: %v", err)
+	}
+	if _, err := os.Stat(logPath); err != nil {
+		t.Fatalf("expected default reserve to launch codex: %v", err)
+	}
+	if _, err := os.Stat(app.store.paths.ConfigPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("launch without a config persisted one, stat err=%v", err)
+	}
+}
+
 func TestCmdExecFailsClosedWhenDefaultReserveIsLoggedOut(t *testing.T) {
 	app, logPath := newExecTestApp(t)
 	createExecProfiles(t, app, "alpha")

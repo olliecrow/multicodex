@@ -180,7 +180,7 @@ func TestProfileCommandsApplyCustomResourcePolicy(t *testing.T) {
 			if err := os.MkdirAll(filepath.Join(source, "shared"), 0o700); err != nil {
 				t.Fatal(err)
 			}
-			cfg, err := app.loadOrInitConfig()
+			cfg, err := app.loadConfigIfExists()
 			if err != nil {
 				t.Fatal(err)
 			}

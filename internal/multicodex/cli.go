@@ -36,7 +36,7 @@ func (a *App) cmdCLIWithAccount(args []string) error {
 	}
 
 	name := args[0]
-	cfg, err := a.loadOrInitConfig()
+	cfg, err := a.loadConfigIfExists()
 	if err != nil {
 		return err
 	}
