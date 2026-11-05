@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/olliecrow/multicodex/internal/codexstate"
+	"golang.org/x/term"
 )
 
 var execLookPath = exec.LookPath
@@ -59,14 +60,7 @@ func runCommandWithEnv(bin string, args []string, env []string, exitMessage stri
 }
 
 func fileIsTerminal(f *os.File) bool {
-	if f == nil {
-		return false
-	}
-	info, err := f.Stat()
-	if err != nil {
-		return false
-	}
-	return info.Mode()&os.ModeCharDevice != 0
+	return f != nil && term.IsTerminal(int(f.Fd()))
 }
 
 func profileCodexEnv(base []string, codexHome, profile string) []string {
