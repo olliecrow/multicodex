@@ -494,14 +494,14 @@ func checkAuthFile(name, path string) DoctorCheck {
 		return DoctorCheck{Name: name, Status: "fail", Details: "auth.json has multiple hard links; expected profile-local file"}
 	}
 
-	b, err := os.ReadFile(path)
+	b, info, err := codexstate.ReadAuthFile(path)
 	if err != nil {
-		return DoctorCheck{Name: name, Status: "fail", Details: fmt.Sprintf("auth.json read failed: %v", err)}
+		return DoctorCheck{Name: name, Status: "fail", Details: "auth.json read failed: " + err.Error()}
 	}
 
 	var parsed map[string]any
 	if err := json.Unmarshal(b, &parsed); err != nil {
-		return DoctorCheck{Name: name, Status: "fail", Details: fmt.Sprintf("auth.json is invalid JSON: %v", err)}
+		return DoctorCheck{Name: name, Status: "fail", Details: "auth.json is invalid JSON"}
 	}
 
 	tokensRaw, ok := parsed["tokens"]

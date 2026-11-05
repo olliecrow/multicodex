@@ -249,7 +249,7 @@ func accountFromAuthFile(path string) string {
 }
 
 func emailFromAuthFile(path string) (string, error) {
-	b, err := os.ReadFile(path)
+	b, _, err := codexstate.ReadAuthFile(path)
 	if err != nil {
 		return "", err
 	}

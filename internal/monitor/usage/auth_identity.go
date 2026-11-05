@@ -16,7 +16,7 @@ func accountEmailFromAuthFile(path string) (string, error) {
 	if !ok {
 		return "", os.ErrNotExist
 	}
-	data, err := os.ReadFile(path)
+	data, err := readPrivateAuthFile(path)
 	if err != nil {
 		return "", err
 	}
