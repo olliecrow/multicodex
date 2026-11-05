@@ -504,7 +504,7 @@ func accountIdentityOrHomeKey(account AccountSummary, codexHome string) string {
 		return identity
 	}
 	if home := normalizeHome(codexHome); home != "" {
-		return "home:" + strings.ToLower(home)
+		return "home:" + home
 	}
 	if label := strings.TrimSpace(account.Label); label != "" {
 		return "label:" + strings.ToLower(label)

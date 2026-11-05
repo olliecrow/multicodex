@@ -70,5 +70,7 @@ func authIdentityKeyForHome(codexHome string) string {
 	if resolved == "" {
 		return ""
 	}
-	return "auth_file:" + strings.ToLower(resolved)
+	// Filesystem paths keep their case: Linux and case-sensitive APFS treat
+	// "Case" and "case" as different homes.
+	return "auth_file:" + resolved
 }
