@@ -12,7 +12,7 @@ if [[ -z "${to_ref}" || "${to_ref}" == "${zero_ref}" ]]; then
 fi
 
 if [[ -z "${from_ref}" || "${from_ref}" == "${zero_ref}" ]]; then
-  revisions="$(git rev-list "${to_ref}" --not --remotes)"
+  revisions="$(git rev-list "${to_ref}")"
 else
   revisions="$(git rev-list "${from_ref}..${to_ref}")"
 fi

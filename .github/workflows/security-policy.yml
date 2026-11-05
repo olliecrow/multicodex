@@ -112,14 +112,13 @@ jobs:
           PUSH_BEFORE_SHA: ${{ github.event.before }}
         run: |
           set -euo pipefail
-          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
-            range="${PR_BASE_SHA}..${PR_HEAD_SHA}"
-          elif [[ "${PUSH_BEFORE_SHA}" == "0000000000000000000000000000000000000000" ]]; then
-            range="${GITHUB_SHA}"
-          else
-            range="${PUSH_BEFORE_SHA}..${GITHUB_SHA}"
-          fi
-          gitleaks git --redact --verbose --config .gitleaks.toml --log-opts="${range}"
+          range="$(bash scripts/security/ci-range.sh)"
+          for config in .gitleaks.toml .gitleaks-paths.toml; do
+            gitleaks git --redact --config "$config" --log-opts="--text --no-textconv --no-ext-diff ${range}"
+          done
+
+      - name: Test scanner regressions
+        run: bash scripts/security/test-policy.sh
 
       - name: Self-test sensitive text policy patterns
         run: |
@@ -214,13 +213,8 @@ jobs:
           PUSH_BEFORE_SHA: ${{ github.event.before }}
         run: |
           set -euo pipefail
-          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
-            revisions="$(git rev-list "${PR_BASE_SHA}..${PR_HEAD_SHA}")"
-          elif [[ "${PUSH_BEFORE_SHA}" == "0000000000000000000000000000000000000000" ]]; then
-            revisions="$(git rev-list "${GITHUB_SHA}")"
-          else
-            revisions="$(git rev-list "${PUSH_BEFORE_SHA}..${GITHUB_SHA}")"
-          fi
+          range="$(bash scripts/security/ci-range.sh)"
+          revisions="$(git rev-list "$range")"
           if [[ -z "${revisions}" ]]; then
             echo "no new commits to check"
             exit 0

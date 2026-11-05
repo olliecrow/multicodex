@@ -37,7 +37,7 @@ while read -r commit author committer; do
 done <<< "$identities"
 
 git log --no-walk=unsorted --format='%H%n%s%n%b%n' "$@" > "${tmp_dir}/messages.txt"
-git show --format= --patch --no-color "$@" > "${tmp_dir}/patches.diff"
+git show -m --format= --patch --no-color --text --no-textconv --no-ext-diff "$@" > "${tmp_dir}/patches.diff"
 bash "${script_dir}/check-sensitive-text.sh" --context="${context}-commit-message" "${tmp_dir}/messages.txt" || failed=1
 bash "${script_dir}/check-sensitive-text.sh" --context="${context}-patch" "${tmp_dir}/patches.diff" || failed=1
 
