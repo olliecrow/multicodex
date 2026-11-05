@@ -63,6 +63,8 @@ type Client struct {
 
 	writes     chan outbound
 	writerDone chan struct{}
+	// beforeWrite lets tests observe that a write is in progress.
+	beforeWrite func()
 
 	events   chan Event
 	done     chan struct{}
@@ -299,6 +301,9 @@ func (c *Client) writeLoop(stdin io.Writer) {
 	for {
 		select {
 		case item := <-c.writes:
+			if c.beforeWrite != nil {
+				c.beforeWrite()
+			}
 			_, err := stdin.Write(item.payload)
 			if item.result != nil {
 				item.result <- err
