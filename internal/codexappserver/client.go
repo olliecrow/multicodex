@@ -22,6 +22,8 @@ const (
 	// Allow worst-case JSON escaping of the documented 4 MiB generation prompt.
 	maxMessageBytes = 32 * 1024 * 1024
 	shutdownTimeout = 2 * time.Second
+	// writeQueueSize bounds outbound messages waiting for the single writer.
+	writeQueueSize = 8
 )
 
 type ErrorSanitizer func(method string, code int, message string) error
@@ -44,23 +46,36 @@ type Event struct {
 	ServerRequest bool
 }
 
+// Client owns one App Server connection. A single writer goroutine sends
+// every outbound message from a bounded queue. Canceling a request after its
+// message is queued ends the connection, because a partly written message
+// would corrupt the stream; other pending requests then fail with safe errors.
 type Client struct {
-	mu      sync.Mutex
-	writeMu sync.Mutex
+	mu sync.Mutex
 
-	config Config
-	cmd    *exec.Cmd
-	stdin  io.WriteCloser
-	enc    *json.Encoder
+	config  Config
+	cmd     *exec.Cmd
+	stdin   io.Closer
+	started bool
 
 	pending map[int]chan message
 	nextID  int
+
+	writes     chan outbound
+	writerDone chan struct{}
 
 	events   chan Event
 	done     chan struct{}
 	stopping chan struct{}
 	stopOnce sync.Once
+	failErr  error
 	doneErr  error
+}
+
+type outbound struct {
+	payload []byte
+	// result receives the write outcome; nil for fire-and-forget responses.
+	result chan error
 }
 
 type request struct {
@@ -100,10 +115,12 @@ func New(config Config) *Client {
 		config.Command = []string{defaultCommand}
 	}
 	client := &Client{
-		config:   config,
-		pending:  make(map[int]chan message),
-		done:     make(chan struct{}),
-		stopping: make(chan struct{}),
+		config:     config,
+		pending:    make(map[int]chan message),
+		writes:     make(chan outbound, writeQueueSize),
+		writerDone: make(chan struct{}),
+		done:       make(chan struct{}),
+		stopping:   make(chan struct{}),
 	}
 	if config.CaptureEvents {
 		client.events = make(chan Event, defaultNotificationSize)
@@ -148,7 +165,8 @@ func (c *Client) Start() error {
 
 	c.cmd = cmd
 	c.stdin = stdin
-	c.enc = json.NewEncoder(stdin)
+	c.started = true
+	go c.writeLoop(stdin)
 	go c.readLoop(stdout)
 	return nil
 }
@@ -169,12 +187,12 @@ func (c *Client) Initialize(ctx context.Context) error {
 	}, &result); err != nil {
 		return err
 	}
-	return c.Notify("initialized", map[string]any{})
+	return c.Notify(ctx, "initialized", map[string]any{})
 }
 
 func (c *Client) Request(ctx context.Context, method string, params, out any) error {
 	c.mu.Lock()
-	if c.cmd == nil || c.enc == nil {
+	if c.cmd == nil {
 		c.mu.Unlock()
 		return errors.New("app-server is not running")
 	}
@@ -182,16 +200,17 @@ func (c *Client) Request(ctx context.Context, method string, params, out any) er
 	id := c.nextID
 	response := make(chan message, 1)
 	c.pending[id] = response
-	enc := c.enc
 	done := c.done
 	c.mu.Unlock()
 
-	err := c.write(enc, request{
-		JSONRPC: "2.0",
-		ID:      json.RawMessage(fmt.Sprintf("%d", id)),
-		Method:  method,
-		Params:  params,
+	payload, err := encodeMessage(request{
+		ID:     json.RawMessage(fmt.Sprintf("%d", id)),
+		Method: method,
+		Params: params,
 	})
+	if err == nil {
+		err = c.send(ctx, payload)
+	}
 	if err != nil {
 		c.removePending(id)
 		return fmt.Errorf("send app-server request %s: %w", method, err)
@@ -223,18 +242,75 @@ func (c *Client) Request(ctx context.Context, method string, params, out any) er
 	}
 }
 
-func (c *Client) Notify(method string, params any) error {
-	c.mu.Lock()
-	if c.cmd == nil || c.enc == nil {
-		c.mu.Unlock()
-		return errors.New("app-server is not running")
+func (c *Client) Notify(ctx context.Context, method string, params any) error {
+	payload, err := encodeMessage(request{Method: method, Params: params})
+	if err == nil {
+		err = c.send(ctx, payload)
 	}
-	enc := c.enc
-	c.mu.Unlock()
-	if err := c.write(enc, request{JSONRPC: "2.0", Method: method, Params: params}); err != nil {
+	if err != nil {
 		return fmt.Errorf("send app-server notification %s: %w", method, err)
 	}
 	return nil
+}
+
+// send queues one encoded message for the writer and waits for its outcome.
+// Cancellation before queueing writes nothing. Cancellation after queueing
+// ends the connection so no later message follows a partial write.
+func (c *Client) send(ctx context.Context, payload []byte) error {
+	c.mu.Lock()
+	running := c.cmd != nil
+	c.mu.Unlock()
+	if !running {
+		return errors.New("app-server is not running")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	result := make(chan error, 1)
+	select {
+	case c.writes <- outbound{payload: payload, result: result}:
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-c.stopping:
+		return errors.New("app-server connection is closed")
+	}
+	select {
+	case err := <-result:
+		return err
+	case <-ctx.Done():
+		c.fail(errors.New("app-server write canceled"))
+		return ctx.Err()
+	case <-c.stopping:
+		return errors.New("app-server connection is closed")
+	}
+}
+
+func encodeMessage(value request) ([]byte, error) {
+	value.JSONRPC = "2.0"
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	return append(payload, '\n'), nil
+}
+
+func (c *Client) writeLoop(stdin io.Writer) {
+	defer close(c.writerDone)
+	for {
+		select {
+		case item := <-c.writes:
+			_, err := stdin.Write(item.payload)
+			if item.result != nil {
+				item.result <- err
+			}
+			if err != nil {
+				c.fail(errors.New("app-server input closed"))
+				return
+			}
+		case <-c.stopping:
+			return
+		}
+	}
 }
 
 func (c *Client) Events() <-chan Event {
@@ -256,16 +332,14 @@ func (c *Client) Err() error {
 
 func (c *Client) Close() error {
 	c.mu.Lock()
-	cmd := c.cmd
-	done := c.done
+	started := c.started
 	c.mu.Unlock()
-	if cmd == nil {
+	if !started {
 		return nil
 	}
-	c.stop()
-	_ = cmd.Process.Kill()
+	c.fail(errors.New("app-server closed"))
 	select {
-	case <-done:
+	case <-c.done:
 		return nil
 	case <-time.After(shutdownTimeout):
 		return errors.New("timeout waiting for app-server shutdown")
@@ -283,7 +357,10 @@ func (c *Client) readLoop(stdout io.Reader) {
 		if msg.Method != "" {
 			serverRequest := len(msg.ID) != 0
 			if serverRequest {
-				go c.denyServerRequest(msg.ID)
+				if err := c.denyServerRequest(msg.ID); err != nil {
+					c.terminate(err)
+					return
+				}
 			}
 			if !c.emit(Event{Method: msg.Method, Params: msg.Params, ServerRequest: serverRequest}) {
 				c.terminate(errors.New("app-server event delivery stopped"))
@@ -314,28 +391,29 @@ func (c *Client) readLoop(stdout io.Reader) {
 	c.terminate(streamErr)
 }
 
-func (c *Client) denyServerRequest(id json.RawMessage) {
-	c.mu.Lock()
-	if c.enc == nil {
-		c.mu.Unlock()
-		return
-	}
-	enc := c.enc
-	c.mu.Unlock()
-	_ = c.write(enc, request{
-		JSONRPC: "2.0",
-		ID:      id,
+// denyServerRequest queues a fixed denial. A peer that floods requests faster
+// than the writer drains them ends the connection.
+func (c *Client) denyServerRequest(id json.RawMessage) error {
+	payload, err := encodeMessage(request{
+		ID: id,
 		Error: &wireError{
 			Code:    -32000,
 			Message: "client does not permit server requests",
 		},
 	})
-}
-
-func (c *Client) write(enc *json.Encoder, value request) error {
-	c.writeMu.Lock()
-	defer c.writeMu.Unlock()
-	return enc.Encode(value)
+	if err != nil {
+		return errors.New("encode app-server request denial")
+	}
+	timer := time.NewTimer(shutdownTimeout)
+	defer timer.Stop()
+	select {
+	case c.writes <- outbound{payload: payload}:
+		return nil
+	case <-c.stopping:
+		return errors.New("app-server connection is closed")
+	case <-timer.C:
+		return errors.New("app-server sent server requests faster than they could be denied")
+	}
 }
 
 func (c *Client) emit(event Event) bool {
@@ -351,27 +429,42 @@ func (c *Client) emit(event Event) bool {
 }
 
 func (c *Client) terminate(err error) {
-	c.stop()
+	c.fail(err)
+	c.finish()
+}
+
+// fail records the first connection error, stops delivery, closes input to
+// unblock any in-progress write, and kills the process. The read loop then
+// sees the stream end and releases the connection.
+func (c *Client) fail(err error) {
 	c.mu.Lock()
+	if c.failErr == nil {
+		c.failErr = err
+	}
 	cmd := c.cmd
+	stdin := c.stdin
 	c.mu.Unlock()
+	c.stop()
+	if stdin != nil {
+		_ = stdin.Close()
+	}
 	if cmd != nil {
 		_ = cmd.Process.Kill()
 	}
-	c.finish(err)
 }
 
 func (c *Client) stop() {
 	c.stopOnce.Do(func() { close(c.stopping) })
 }
 
-func (c *Client) finish(err error) {
+// finish releases the connection. Only the read loop calls it, so the events
+// channel is closed by its only sender.
+func (c *Client) finish() {
 	c.mu.Lock()
 	if c.cmd == nil {
 		c.mu.Unlock()
 		return
 	}
-	c.doneErr = err
 	for id, response := range c.pending {
 		delete(c.pending, id)
 		close(response)
@@ -379,17 +472,18 @@ func (c *Client) finish(err error) {
 	cmd := c.cmd
 	c.cmd = nil
 	c.stdin = nil
-	c.enc = nil
-	done := c.done
 	c.mu.Unlock()
 
-	if cmd != nil {
-		_ = cmd.Wait()
-	}
+	_ = cmd.Wait()
+	<-c.writerDone
+
+	c.mu.Lock()
+	c.doneErr = c.failErr
+	c.mu.Unlock()
 	if c.events != nil {
 		close(c.events)
 	}
-	close(done)
+	close(c.done)
 }
 
 func (c *Client) removePending(id int) {
