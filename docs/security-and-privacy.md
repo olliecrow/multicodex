@@ -12,6 +12,7 @@
 - Never copy, sync, transmit, transfer, or share Codex auth files or auth details between machines. Each machine must sign in through the official Codex login flow.
 - Keep auth directories permissioned to the local user only.
 - Keep profile `auth.json` files readable only by the local user.
+- Read `auth.json` only through a descriptor opened without following a final symlink, and only when it is a regular, single-link file owned by the local user and no larger than 1 MiB. The monitor also requires mode `0600`.
 - Use atomic writes to prevent partial secret files.
 - Logs and diagnostics omit secret data by default.
 - User-visible diagnostics must never echo raw provider response bodies, app-server error messages, or Codex subprocess failure output. Preserve only safe status codes and allowlisted recovery guidance.

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/olliecrow/multicodex/internal/buildinfo"
+	"github.com/olliecrow/multicodex/internal/codexstate"
 )
 
 const (
@@ -173,7 +174,7 @@ func findAuthJSONPathForHome(codexHome string) (string, error) {
 }
 
 func readAccessToken(path string) (string, error) {
-	data, err := os.ReadFile(path)
+	data, err := readPrivateAuthFile(path)
 	if err != nil {
 		return "", fmt.Errorf("read auth file: %w", err)
 	}
@@ -192,6 +193,19 @@ func readAccessToken(path string) (string, error) {
 func fileExists(path string) bool {
 	ok, err := usableAuthFile(path)
 	return err == nil && ok
+}
+
+// readPrivateAuthFile reads a validated auth file whose opened descriptor is
+// private to the current user.
+func readPrivateAuthFile(path string) ([]byte, error) {
+	data, info, err := codexstate.ReadAuthFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if info.Mode().Perm()&0o077 != 0 {
+		return nil, fmt.Errorf("auth.json permissions are %o, expected 600: %s", info.Mode().Perm(), path)
+	}
+	return data, nil
 }
 
 func usableAuthFile(path string) (bool, error) {
