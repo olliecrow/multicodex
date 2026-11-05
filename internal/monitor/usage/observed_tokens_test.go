@@ -265,3 +265,29 @@ func tokenCountJSONLineDetailed(ts time.Time, total tokenUsageTotal, last tokenU
 		last.CachedOutputTokens,
 	)
 }
+
+func TestEstimateTokensFromFileSkipsOversizedRecords(t *testing.T) {
+	now := time.Date(2026, 2, 26, 20, 0, 0, 0, time.UTC)
+	cutoff1w := now.Add(-7 * 24 * time.Hour)
+
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	oversized := `{"type":"response_item","blob":"` + strings.Repeat("x", maxJSONLRecordBytes) + `"}`
+	content := tokenCountJSONLineWithLast(now.Add(-2*time.Hour), 10, 10) + "\n" +
+		oversized + "\n" +
+		tokenCountJSONLineWithLast(now.Add(-time.Hour), 30, 20) + "\n" +
+		oversized
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write usage file: %v", err)
+	}
+
+	sum1w, warnings, err := estimateTokensFromFile(path, cutoff1w)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if sum1w.Total != 30 {
+		t.Fatalf("expected records around oversized lines to count 30 tokens, got %d", sum1w.Total)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "skipped 2 records over 16 MiB") {
+		t.Fatalf("expected one oversized-record warning, got %+v", warnings)
+	}
+}

@@ -341,10 +341,15 @@ func estimateTokensFromFile(path string, cutoff1w time.Time) (tokenAccumulator, 
 	var prevTotal *tokenUsageTotal
 	var sum1w tokenAccumulator
 	parseErrCount := 0
+	oversizedCount := 0
 
 	for {
 		line, err := readJSONLLine(reader, &longLineBuf)
 		if err != nil {
+			if errors.Is(err, errJSONLRecordTooLarge) {
+				oversizedCount++
+				continue
+			}
 			if errors.Is(err, io.EOF) {
 				break
 			}
@@ -379,13 +384,26 @@ func estimateTokensFromFile(path string, cutoff1w time.Time) (tokenAccumulator, 
 	if parseErrCount > 0 {
 		warnings = append(warnings, fmt.Sprintf("skipped %d unparsable lines in %s", parseErrCount, filepath.Base(path)))
 	}
+	if oversizedCount > 0 {
+		warnings = append(warnings, fmt.Sprintf("skipped %d records over %d MiB in %s", oversizedCount, maxJSONLRecordBytes>>20, filepath.Base(path)))
+	}
 	return sum1w, warnings, nil
 }
+
+// maxJSONLRecordBytes bounds one session-log record held in memory. Larger
+// records are skipped; token_count events are far smaller.
+const maxJSONLRecordBytes = 16 << 20
+
+var errJSONLRecordTooLarge = errors.New("session log record exceeds the size limit")
 
 func readJSONLLine(reader *bufio.Reader, longLineBuf *[]byte) ([]byte, error) {
 	buf := (*longLineBuf)[:0]
 	for {
 		fragment, err := reader.ReadSlice('\n')
+		if len(buf)+len(fragment) > maxJSONLRecordBytes {
+			*longLineBuf = buf[:0]
+			return nil, drainJSONLRecord(reader, err)
+		}
 		switch {
 		case err == nil:
 			if len(buf) == 0 {
@@ -409,6 +427,18 @@ func readJSONLLine(reader *bufio.Reader, longLineBuf *[]byte) ([]byte, error) {
 			return nil, err
 		}
 	}
+}
+
+// drainJSONLRecord discards the rest of an oversized record without
+// retaining it, so the next record can still be read.
+func drainJSONLRecord(reader *bufio.Reader, err error) error {
+	for errors.Is(err, bufio.ErrBufferFull) {
+		_, err = reader.ReadSlice('\n')
+	}
+	if err != nil && !errors.Is(err, io.EOF) {
+		return err
+	}
+	return errJSONLRecordTooLarge
 }
 
 func trimJSONLLine(line []byte) []byte {
