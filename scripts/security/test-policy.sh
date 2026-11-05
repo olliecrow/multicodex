@@ -1,17 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 checks="$(cd "$(dirname "$0")" && pwd)"
+[[ ! -e "$checks/../../.github/dependabot.yml" ]]
 root="$(mktemp -d)"
 trap 'rm -r "$root"' EXIT
 reject() {
-  if "$@" > "$root/output" 2>&1; then
-    echo "unexpected policy acceptance: $*" >&2
+  local status=0
+  "$@" > "$root/output" 2>&1 || status=$?
+  if [[ "$status" != 1 ]]; then
+    echo "expected policy rejection, got status $status: $*" >&2
     exit 1
   fi
 }
 for name in YOUNG userbob; do
   printf '/%s/%s/project\n' "$( [[ "$name" == YOUNG ]] && echo Users || echo home )" "$name" > "$root/input"
   reject bash "$checks/check-sensitive-text.sh" "$root/input"
+  reject gitleaks dir --no-banner --redact --config "$checks/../../.gitleaks-paths.toml" "$root/input"
 done
 for prefix in '' 'note: '; do
   printf '%s/home/%s/project\n' "$prefix" fixture-person > "$root/input"
