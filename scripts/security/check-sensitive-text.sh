@@ -17,7 +17,7 @@ allowed_path_placeholder_regex='(/Users/(YOU|USER|username)|/home/(user|USER|use
 secret_assignment_regex='([Aa][Pp][Ii][_-]?[Kk][Ee][Yy]|[Tt][Oo][Kk][Ee][Nn]|[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Ss][Ee][Cc][Rr][Ee][Tt])[[:space:]]*[:=][[:space:]]*["'"'"']?[A-Za-z0-9_./+=-]{12,}'
 json_secret_regex='["'"'"']([Aa][Cc][Cc][Ee][Ss][Ss]_[Tt][Oo][Kk][Ee][Nn]|[Rr][Ee][Ff][Rr][Ee][Ss][Hh]_[Tt][Oo][Kk][Ee][Nn]|[Ii][Dd]_[Tt][Oo][Kk][Ee][Nn]|[Aa][Pp][Ii][_-]?[Kk][Ee][Yy]|[Oo][Pp][Ee][Nn][Aa][Ii]_[Aa][Pp][Ii]_[Kk][Ee][Yy])["'"'"'][[:space:]]*:[[:space:]]*["'"'"'][A-Za-z0-9_./+=-]{20,}["'"'"']'
 # GitHub, AWS, Anthropic (sk-ant-<kind><nn>-), OpenAI (sk-, sk-proj-), and JWTs.
-known_token_regex='((ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|sk-ant-[a-z]+[0-9]{2}-[A-Za-z0-9_-]{20,}|sk-(proj|svcacct|admin)-[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{20,}|ey[A-Za-z0-9_-]{17,}[.]ey[A-Za-z0-9_-]{17,}[.][A-Za-z0-9_-]*)'
+known_token_regex='(^|[^A-Za-z0-9_-])((ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|sk-ant-[a-z]+[0-9]{2}-[A-Za-z0-9_-]{20,}|sk-(proj|svcacct|admin)-[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{20,}|ey[A-Za-z0-9_-]{17,}[.]ey[A-Za-z0-9_-]{17,}[.][A-Za-z0-9_-]*)'
 email_regex='("[^"]+"|[A-Za-z0-9._%+-]+)@[A-Za-z0-9-]+([.][A-Za-z0-9-]+)*[.]([A-Za-z]{2,63}|[Xx][Nn]--[A-Za-z0-9-]{2,59})'
 allowed_email_placeholder_regex='("[^"]+"|[A-Za-z0-9._%+-]+)@(example[.](com|org|net)|([A-Za-z0-9-]+[.])*(example|invalid|test)|users[.]noreply[.]github[.]com)'
 

@@ -14,6 +14,12 @@ expect_status() {
   fi
 }
 reject() { expect_status 1 "$@"; }
+assert_redacted() {
+  if grep -qF -- "$1" "$root/output"; then
+    echo 'scanner output contains the fixture value' >&2
+    exit 1
+  fi
+}
 for name in YOUNG userbob; do
   printf '/%s/%s/project\n' "$( [[ "$name" == YOUNG ]] && echo Users || echo home )" "$name" > "$root/input"
   reject bash "$checks/check-sensitive-text.sh" "$root/input"
@@ -59,6 +65,10 @@ jwt_payload="$(printf '%s' '{"sub":"fixture","iat":1700000000}' | base64 | tr '+
 tokens=(
   "sk-ant-oat01-${body}AA"
   "sk-ant-api03-${body}AA"
+  "sk-${body}"
+  "sk-svcacct-${body}"
+  "sk-admin-${body}"
+  "AKIA$(printf 'A1B2%.0s' 1 2 3 4)"
   "sk-proj-${body:0:74}T3BlbkFJ${body:0:74}"
   "${jwt_header}.${jwt_payload}.${body:0:43}"
   "github_pat_${body:0:22}_${body:0:59}"
@@ -66,7 +76,7 @@ tokens=(
 for prefix in ghp gho ghu ghs ghr; do tokens+=("${prefix}_${body:0:36}"); done
 for mode in "${modes[@]}"; do
   for token in "${tokens[@]}"; do
-    for line in "$token" "note: use $token here"; do
+    for line in "$token" "note: use $token here" "token=$token" "\"$token\""; do
       printf '%s\n' "$line" > "$root/input"
       reject scan_text "$mode" "$root/input"
       if grep -qF -- "$token" "$root/output"; then
@@ -77,9 +87,31 @@ for mode in "${modes[@]}"; do
   done
   printf 'task-ant-colony-optimisation-notes, disk-project-management-guide, eyes.eyebrows.eyelids\n' > "$root/input"
   scan_text "$mode" "$root/input"
+  # Ordinary words and identifiers must not expose a token-shaped suffix.
+  for line in "ask-$(printf 'a1b2%.0s' {1..10})" "task-$(printf 'a1b2%.0s' {1..10})" \
+    "task-ant-oat01-${body}" "disk-proj-${body}" "risk-assessmentreport2024final"; do
+    printf '%s\n' "$line" > "$root/input"
+    expect_status 0 scan_text "$mode" "$root/input"
+    assert_redacted "$line"
+  done
+  for token in "${tokens[@]}"; do
+    for prefix in x _ -; do
+      printf '%s%s\n' "$prefix" "$token" > "$root/input"
+      expect_status 0 scan_text "$mode" "$root/input"
+      assert_redacted "$token"
+    done
+  done
 done
 printf '%s\n' "${tokens[0]}" > "$root/input"
 reject gitleaks dir --no-banner --redact --config "$checks/../../.gitleaks.toml" "$root/input"
+assert_redacted "${tokens[0]}"
+for line in "task-ant-oat01-${body}" "note: sk-ant-api03-${body}"; do
+  printf '%s\n' "$line" > "$root/input"
+  status=0
+  [[ "$line" == task-* ]] || status=1
+  expect_status "$status" gitleaks dir --no-banner --redact --config "$checks/../../.gitleaks.toml" "$root/input"
+  assert_redacted "$body"
+done
 
 for kind in nul attribute; do
   repo="$root/$kind"
