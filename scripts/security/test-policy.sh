@@ -130,56 +130,14 @@ for kind in nul attribute; do
     printf 'clean\n' > clean
     git add clean
     git -c commit.gpgsign=false commit -qm clean
-    for base in '' 0000000000000000000000000000000000000000; do
-      reject env PRE_COMMIT_FROM_REF="$base" PRE_COMMIT_TO_REF=HEAD bash "$checks/check-push-range.sh"
-    done
+    # An empty, zero, or unknown push base scans all history.
     for base in '' 0000000000000000000000000000000000000000 0123456789abcdef0123456789abcdef01234567; do
+      reject env PRE_COMMIT_FROM_REF="$base" PRE_COMMIT_TO_REF=HEAD bash "$checks/check-push-range.sh"
       range="$(GITHUB_EVENT_NAME=push PUSH_BEFORE_SHA="$base" GITHUB_SHA=HEAD bash "$checks/ci-range.sh")"
       [[ "$(git rev-list --count "$range")" == 2 ]]
     done
   )
 done
-
-recorded="$(tr -d '[:space:]' < "$checks/reviewed-base")"
-[[ "$recorded" =~ ^[0-9a-f]{40}$ ]]
-git -C "$checks/../.." merge-base --is-ancestor "$recorded" HEAD
-
-repo="$root/baseline"
-git init -q -b main "$repo"
-git -C "$repo" config user.name Test
-git -C "$repo" config user.email test@example.com
-printf '%s=%s\n' token abc123456789XYZ > "$repo/secret.txt"
-git -C "$repo" add secret.txt
-git -C "$repo" -c commit.gpgsign=false commit -qm 'old fixture'
-printf 'clean\n' > "$repo/clean.txt"
-git -C "$repo" add clean.txt
-git -C "$repo" -c commit.gpgsign=false commit -qm reviewed
-reviewed="$(git -C "$repo" rev-parse HEAD)"
-printf 'after\n' > "$repo/after.txt"
-git -C "$repo" add after.txt
-git -C "$repo" -c commit.gpgsign=false commit -qm 'after review'
-scan="$root/scan"
-mkdir "$scan"
-cp "$checks/ci-range.sh" "$checks/check-push-range.sh" "$checks/check-commits.sh" "$checks/check-sensitive-text.sh" "$checks/reviewed-range.sh" "$scan/"
-printf '%s\n' "$reviewed" > "$scan/reviewed-base"
-(
-  cd "$repo"
-  for base in '' 0000000000000000000000000000000000000000 0123456789abcdef0123456789abcdef01234567; do
-    env PRE_COMMIT_FROM_REF="$base" PRE_COMMIT_TO_REF=HEAD bash "$scan/check-push-range.sh"
-    range="$(GITHUB_EVENT_NAME=push PUSH_BEFORE_SHA="$base" GITHUB_SHA=HEAD bash "$scan/ci-range.sh")"
-    [[ "$range" == "$reviewed..HEAD" ]]
-    [[ "$(git rev-list --count "$range")" == 1 ]]
-  done
-  printf '%s=%s\n' token abc123456789XYZ > later.txt
-  git add later.txt
-  git -c commit.gpgsign=false commit -qm 'later fixture'
-  for base in '' 0000000000000000000000000000000000000000 0123456789abcdef0123456789abcdef01234567; do
-    reject env PRE_COMMIT_FROM_REF="$base" PRE_COMMIT_TO_REF=HEAD bash "$scan/check-push-range.sh"
-    range="$(GITHUB_EVENT_NAME=push PUSH_BEFORE_SHA="$base" GITHUB_SHA=HEAD bash "$scan/ci-range.sh")"
-    # shellcheck disable=SC2046 # one commit id per word
-    reject bash "$scan/check-commits.sh" test $(git rev-list "$range")
-  done
-)
 
 merge="$root/merge"
 git init -q -b main "$merge"

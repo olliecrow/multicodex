@@ -5,18 +5,15 @@ set -euo pipefail
 zero_ref="0000000000000000000000000000000000000000"
 from_ref="${PRE_COMMIT_FROM_REF:-}"
 to_ref="${PRE_COMMIT_TO_REF:-}"
-SECURITY_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=reviewed-range.sh
-source "${SECURITY_SCRIPT_DIR}/reviewed-range.sh"
 
 if [[ -z "${to_ref}" || "${to_ref}" == "${zero_ref}" ]]; then
   # Deleting a remote ref sends no commits.
   exit 0
 fi
 
+# An empty, zero, or unknown push base scans all history.
 if [[ -z "${from_ref}" || "${from_ref}" == "${zero_ref}" ]] || ! git cat-file -e "${from_ref}^{commit}" 2>/dev/null; then
-  range="$(reviewed_fallback_range "${to_ref}")"
-  revisions="$(git rev-list "$range")"
+  revisions="$(git rev-list "${to_ref}")"
 else
   revisions="$(git rev-list "${from_ref}..${to_ref}")"
 fi
