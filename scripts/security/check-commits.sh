@@ -40,7 +40,12 @@ while read -r commit author committer; do
 done <<< "$identities"
 
 git log --no-walk=unsorted --format='%H%n%s%n%b%n' "$@" > "${tmp_dir}/messages.txt"
-git show -m --format= --patch --no-color --text --no-textconv --no-ext-diff "$@" > "${tmp_dir}/patches.diff"
+patch_files=()
+for commit in "$@"; do
+  patch_file="${tmp_dir}/${commit}.diff"
+  git show -m --format= --patch --no-color --text --no-textconv --no-ext-diff "$commit" > "$patch_file"
+  patch_files+=("$patch_file")
+done
 bash "${script_dir}/check-sensitive-text.sh" --context="${context}-commit-message" "${tmp_dir}/messages.txt" || failed=1
 # Default gitleaks rules catch secret types the text policy does not.
 for commit in "$@"; do
@@ -65,7 +70,7 @@ for commit in "$@"; do
       ;;
   esac
 done
-bash "${script_dir}/check-sensitive-text.sh" --context="${context}-patch" "${tmp_dir}/patches.diff" || failed=1
+bash "${script_dir}/check-sensitive-text.sh" --context="${context}-patch" "${patch_files[@]}" || failed=1
 
 if [[ "$failed" -ne 0 ]]; then
   echo "Use the GitHub noreply address for commit identities." >&2

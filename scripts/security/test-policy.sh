@@ -253,4 +253,24 @@ printf '#!/usr/bin/env bash\nexit 3\n' > "$fail_bin/gitleaks"
   cd "$cleanrepo"
   expect_status 2 env PATH="${fail_bin}:${PATH}" bash "$checks/check-commits.sh" test "$(git rev-parse HEAD)"
 )
+
+# A patch finding must name the commit, not only a combined temp file.
+patchrepo="$root/patch-name"
+git init -q -b main "$patchrepo"
+git -C "$patchrepo" config user.name Test
+git -C "$patchrepo" config user.email test@example.com
+printf '%s=%s\n' token abc123456789XYZ > "$patchrepo/secret.txt"
+git -C "$patchrepo" add secret.txt
+git -C "$patchrepo" -c commit.gpgsign=false commit -qm 'add fixture'
+patch_sha="$(git -C "$patchrepo" rev-parse HEAD)"
+(
+  cd "$patchrepo"
+  reject bash "$checks/check-commits.sh" test "$patch_sha"
+)
+grep -qF "${patch_sha}.diff" "$root/output"
+if grep -qF 'patches.diff' "$root/output"; then
+  echo "patch finding still uses a combined temp name" >&2
+  exit 1
+fi
+assert_redacted "abc123456789XYZ"
 echo 'Policy regression tests passed'
