@@ -229,6 +229,11 @@ stub_wrapper() {
   # The secret is only in the merge diff: plain log options miss it.
   gitleaks git --no-banner --redact --config "$checks/../../.gitleaks.toml" --log-opts="--text --no-textconv --no-ext-diff HEAD"
   reject bash "$wrapper" HEAD
+  # Leak diagnostics identify the rule and source without exposing its value.
+  grep -qE '^RuleID:[[:space:]]+slack-bot-token$' "$root/output"
+  grep -qE '^File:[[:space:]]+secret[.]txt$' "$root/output"
+  grep -qE "^Commit:[[:space:]]+$(git rev-parse HEAD)$" "$root/output"
+  assert_redacted "$token"
   expect_status 2 bash "$wrapper" 0123456789abcdef0123456789abcdef01234567..HEAD
   expect_status 2 bash "$wrapper" 'HEAD '
   expect_status 0 bash "$wrapper" HEAD..HEAD

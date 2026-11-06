@@ -30,7 +30,7 @@ esc="$(printf '\033')"
 result=0
 for config in .gitleaks.toml .gitleaks-paths.toml; do
   status=0
-  gitleaks git --no-banner --no-color --redact --config "${root}/${config}" \
+  gitleaks git --no-banner --no-color --verbose --redact --config "${root}/${config}" \
     --log-opts="${log_opts[*]} ${range}" . > "${tmp_dir}/raw.log" 2>&1 || status=$?
   sed "s/${esc}\[[0-9;]*m//g" "${tmp_dir}/raw.log" > "${tmp_dir}/gitleaks.log"
   cat "${tmp_dir}/gitleaks.log"
