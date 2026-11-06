@@ -42,6 +42,7 @@
 - Legacy `.multicodex/` state paths remain sensitive and should stay ignored.
 - Tests must use synthetic fixtures only.
 - Committed email addresses must use reserved example domains or GitHub noreply addresses. Real addresses are blocked in staged files, commit messages, pushed patches, and pull request metadata.
+- Pushed commit messages are scanned with gitleaks. A scan error fails the check, and findings are redacted.
 - Example files must never include real credentials.
 - CI should run secret scanning before merge.
 - Run `multicodex doctor` before release to verify leak guards.

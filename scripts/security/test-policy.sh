@@ -217,4 +217,40 @@ git -C "$repo" -c commit.gpgsign=false commit -qm delete
   expect_status 0 bash "$wrapper" HEAD^..HEAD
   grep -qF '0 commits scanned' "$root/output"
 )
+
+# A secret type that only gitleaks knows (Slack) must not pass in a commit message.
+msgrepo="$root/message-secret"
+git init -q -b main "$msgrepo"
+git -C "$msgrepo" config user.name Test
+git -C "$msgrepo" config user.email test@example.com
+printf 'clean\n' > "$msgrepo/clean.txt"
+git -C "$msgrepo" add clean.txt
+slack="$(printf '%s-%s-%s' "xoxb" "123456789012" "1234567890123abc")"
+git -C "$msgrepo" -c commit.gpgsign=false commit -qm "$slack"
+(
+  cd "$msgrepo"
+  reject bash "$checks/check-commits.sh" test "$(git rev-parse HEAD)"
+)
+grep -qF "$(git -C "$msgrepo" rev-parse HEAD)" "$root/output"
+grep -qE '^RuleID:[[:space:]]+slack-bot-token$' "$root/output"
+assert_redacted "$slack"
+# Errors fail closed: an FTL line is not a clean scan, even when the exit code is 1.
+fail_bin="$root/fail-bin"
+mkdir "$fail_bin"
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "FTL config failed"\nexit 1\n' > "$fail_bin/gitleaks"
+chmod 0755 "$fail_bin/gitleaks"
+cleanrepo="$root/message-error"
+git init -q -b main "$cleanrepo"
+git -C "$cleanrepo" config user.name Test
+git -C "$cleanrepo" config user.email test@example.com
+git -C "$cleanrepo" -c commit.gpgsign=false commit -q --allow-empty -m 'clean message'
+(
+  cd "$cleanrepo"
+  expect_status 2 env PATH="${fail_bin}:${PATH}" bash "$checks/check-commits.sh" test "$(git rev-parse HEAD)"
+)
+printf '#!/usr/bin/env bash\nexit 3\n' > "$fail_bin/gitleaks"
+(
+  cd "$cleanrepo"
+  expect_status 2 env PATH="${fail_bin}:${PATH}" bash "$checks/check-commits.sh" test "$(git rev-parse HEAD)"
+)
 echo 'Policy regression tests passed'
